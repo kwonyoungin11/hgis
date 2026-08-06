@@ -8,24 +8,24 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-06 17:40:28 +09:00 |
+| Updated (local) | 2026-08-06 17:40:43 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `44ca5f2` |
-| HEAD full | `44ca5f2fff590828507a8abc4931132b2c535f0e` |
-| HEAD date | 2026-08-06 17:40:27 +0900 |
+| HEAD short | `2e1d8c8` |
+| HEAD full | `2e1d8c83b61f98b7c93dc7d62678fe90b2d8dce2` |
+| HEAD date | 2026-08-06 17:40:29 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
 | HEAD subject | Simplify commit ledger hooks and clarify how to read progress |
 | Total commits | 42 |
 | Upstream | `origin/main` |
-| Sync | ahead 1 of origin/main (push pending) |
+| Sync | up to date with origin/main |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
 | Working tree dirty | **yes** (10 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Simplify commit ledger hooks and clarify how to read progress (`44ca5f2` @ 2026-08-06 17:40:27 +0900)
-- **Remote sync at write time:** ahead 1 of origin/main (push pending)
+- **Recorded tip when this file was written:** Simplify commit ledger hooks and clarify how to read progress (`2e1d8c8` @ 2026-08-06 17:40:29 +0900)
+- **Remote sync at write time:** up to date with origin/main
 - **Uncommitted local changes at write time:** yes (10 paths)
 
 ### Read this correctly
@@ -51,7 +51,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
-| `44ca5f2` | 2026-08-06T17:40:27+09:00 | Simplify commit ledger hooks and clarify how to read progress |
+| `2e1d8c8` | 2026-08-06T17:40:27+09:00 | Simplify commit ledger hooks and clarify how to read progress |
 | `ff2adeb` | 2026-08-06T17:39:43+09:00 | Sync COMMIT_STATUS after push |
 | `d9b7c2e` | 2026-08-06T17:39:30+09:00 | Refresh COMMIT_STATUS snapshot to current HEAD |
 | `7a48524` | 2026-08-06T17:39:15+09:00 | Amend commit status after commit so HEAD hash is accurate |
