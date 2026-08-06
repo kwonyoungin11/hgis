@@ -24,6 +24,9 @@
 #include <qgscategorizedsymbolrenderer.h>
 #include <qgssymbol.h>
 #include <qgsrenderer.h>
+#include <qgsrectangle.h>
+#include <qgslayertree.h>
+#include <qgslayertreelayer.h>
 
 QString LayerOps::reprojectVectorLayer(QgsVectorLayer* layer, const QString& targetCrsAuthId,
                                        const QString& outPath, QgsProject* project, QString* errorOut) {
@@ -116,28 +119,142 @@ bool LayerOps::applyFeaturePolyStyle(QgsVectorLayer* featurePoly) {
   return true;
 }
 
-bool LayerOps::addOsmBasemap(QgsProject* project, QgsMapCanvas* canvas, QString* errorOut) {
+static bool addXyzBasemap(QgsProject* project, QgsMapCanvas* canvas, const QString& url,
+                          const QString& name, QString* errorOut) {
   if (!project) {
     if (errorOut) *errorOut = QStringLiteral("No project");
     return false;
   }
-  // XYZ provider URI
-  const QString url = QStringLiteral(
-      "type=xyz&url=https://tile.openstreetmap.org/%7Bz%7D/%7Bx%7D/%7By%7D.png&zmax=19&zmin=0&crs=EPSG3857");
-  auto* rl = new QgsRasterLayer(url, QStringLiteral("OSM 諛곌꼍"), QStringLiteral("wms"));
+  auto* rl = new QgsRasterLayer(url, name, QStringLiteral("wms"));
   if (!rl->isValid()) {
-    // try xyz provider name variants
     delete rl;
-    rl = new QgsRasterLayer(url, QStringLiteral("OSM 諛곌꼍"), QStringLiteral("xyz"));
+    rl = new QgsRasterLayer(url, name, QStringLiteral("xyz"));
   }
   if (!rl->isValid()) {
-    if (errorOut) *errorOut = QStringLiteral("OSM basemap failed (network/provider). Use local basemap file instead.");
+    if (errorOut) *errorOut = QStringLiteral("Basemap failed: %1").arg(name);
     delete rl;
     return false;
   }
-  project->addMapLayer(rl, true);
+  project->addMapLayer(rl, false);
+  QgsLayerTree* root = project->layerTreeRoot();
+  root->addChildNode(new QgsLayerTreeLayer(rl));
   if (canvas) canvas->refresh();
   return true;
+}
+
+bool LayerOps::addOsmBasemap(QgsProject* project, QgsMapCanvas* canvas, QString* errorOut) {
+  const QString url = QStringLiteral(
+      "type=xyz&url=https://tile.openstreetmap.org/%7Bz%7D/%7Bx%7D/%7By%7D.png&zmax=19&zmin=0&crs=EPSG3857");
+  return addXyzBasemap(project, canvas, url, QStringLiteral("OSM"), errorOut);
+}
+
+bool LayerOps::addKoreaBasemap(QgsProject* project, QgsMapCanvas* canvas, KoreaBasemap kind,
+                               QString* errorOut) {
+  QString url;
+  QString name;
+  switch (kind) {
+  case KoreaBasemap::VWorldBase:
+    name = QStringLiteral("VWorld 배경");
+    url = QStringLiteral(
+        "type=xyz&url=https://xdworld.vworld.kr/2d/Base/service/%7Bz%7D/%7Bx%7D/%7By%7D.png&zmax=18&zmin=5&crs=EPSG3857");
+    break;
+  case KoreaBasemap::VWorldSatellite:
+    name = QStringLiteral("VWorld 위성");
+    url = QStringLiteral(
+        "type=xyz&url=https://xdworld.vworld.kr/2d/Satellite/service/%7Bz%7D/%7Bx%7D/%7By%7D.jpeg&zmax=18&zmin=5&crs=EPSG3857");
+    break;
+  case KoreaBasemap::VWorldHybrid:
+    name = QStringLiteral("VWorld 하이브리드");
+    url = QStringLiteral(
+        "type=xyz&url=https://xdworld.vworld.kr/2d/Hybrid/service/%7Bz%7D/%7Bx%7D/%7By%7D.png&zmax=18&zmin=5&crs=EPSG3857");
+    break;
+  case KoreaBasemap::GoogleRoad:
+    name = QStringLiteral("Google 도로");
+    url = QStringLiteral(
+        "type=xyz&url=https://mt1.google.com/vt/lyrs%3Dm%26x%3D%7Bx%7D%26y%3D%7By%7D%26z%3D%7Bz%7D&zmax=20&zmin=0&crs=EPSG3857");
+    break;
+  case KoreaBasemap::GoogleSatellite:
+    name = QStringLiteral("Google 위성");
+    url = QStringLiteral(
+        "type=xyz&url=https://mt1.google.com/vt/lyrs%3Ds%26x%3D%7Bx%7D%26y%3D%7By%7D%26z%3D%7Bz%7D&zmax=20&zmin=0&crs=EPSG3857");
+    break;
+  case KoreaBasemap::Osm:
+  default:
+    return addOsmBasemap(project, canvas, errorOut);
+  }
+  if (!addXyzBasemap(project, canvas, url, name, errorOut)) {
+    if (kind != KoreaBasemap::Osm)
+      return addOsmBasemap(project, canvas, errorOut);
+    return false;
+  }
+  return true;
+}
+
+bool LayerOps::setWorkCrs(QgsProject* project, QgsMapCanvas* canvas, const QString& epsgAuthId,
+                          QString* errorOut) {
+  const QgsCoordinateReferenceSystem crs(epsgAuthId);
+  if (!crs.isValid()) {
+    if (errorOut) *errorOut = QStringLiteral("Invalid CRS %1").arg(epsgAuthId);
+    return false;
+  }
+  if (project) project->setCrs(crs);
+  if (canvas) {
+    canvas->setDestinationCrs(crs);
+    zoomToKorea(canvas, epsgAuthId);
+    canvas->refresh();
+  }
+  return true;
+}
+
+QgsRectangle LayerOps::koreaExtentForCrs(const QString& epsgAuthId) {
+  const QgsCoordinateReferenceSystem wgs(QStringLiteral("EPSG:4326"));
+  const QgsCoordinateReferenceSystem dest(epsgAuthId);
+  const QgsRectangle krWgs(124.5, 33.0, 132.0, 39.5);
+  if (!dest.isValid()) return krWgs;
+  try {
+    const QgsCoordinateTransform xf(wgs, dest, QgsCoordinateTransformContext());
+    return xf.transformBoundingBox(krWgs);
+  } catch (...) {
+    return QgsRectangle();
+  }
+}
+
+void LayerOps::zoomToKorea(QgsMapCanvas* canvas, const QString& epsgAuthId) {
+  if (!canvas) return;
+  const QgsRectangle ext = koreaExtentForCrs(epsgAuthId);
+  if (!ext.isEmpty() && ext.isFinite()) {
+    canvas->setExtent(ext);
+    canvas->refresh();
+  }
+}
+
+QString LayerOps::convertToShp5179(QgsVectorLayer* layer, const QString& outShpPath,
+                                   QgsProject* project, QString* errorOut) {
+  if (!layer || !layer->isValid()) {
+    if (errorOut) *errorOut = QStringLiteral("Invalid layer");
+    return {};
+  }
+  QString path = outShpPath;
+  if (!path.endsWith(QLatin1String(".shp"), Qt::CaseInsensitive))
+    path += QStringLiteral(".shp");
+  return reprojectVectorLayer(layer, QStringLiteral("EPSG:5179"), path, project, errorOut);
+}
+
+QString LayerOps::convertFileToShp5179(const QString& inPath, const QString& outShpPath,
+                                       QgsProject* project, QString* errorOut) {
+  if (!QFile::exists(inPath)) {
+    if (errorOut) *errorOut = QStringLiteral("Input not found");
+    return {};
+  }
+  auto* vl = new QgsVectorLayer(inPath, QFileInfo(inPath).completeBaseName(), QStringLiteral("ogr"));
+  if (!vl->isValid()) {
+    if (errorOut) *errorOut = QStringLiteral("Cannot open: %1").arg(inPath);
+    delete vl;
+    return {};
+  }
+  const QString out = convertToShp5179(vl, outShpPath, project, errorOut);
+  delete vl;
+  return out;
 }
 
 QString LayerOps::georeferenceImageSimple(const QString& imagePath, QgsVectorLayer* controlPoints,
@@ -198,8 +315,6 @@ QString LayerOps::georeferenceImageSimple(const QString& imagePath, QgsVectorLay
                         && gcps.size() >= 2;
 
   if (allPixel && gcps.size() >= 3) {
-    // Least squares affine: map = A * [px, py, 1]
-    // Solve 6 params with 3+ GCPs (normal equations, 3x3 blocks for X and Y)
     double sxx = 0, sxy = 0, sx = 0, syy = 0, sy = 0, sn = 0;
     double sxX = 0, syX = 0, sX = 0, sxY = 0, syY = 0, sY = 0;
     for (const Gcp& g : gcps) {
@@ -209,7 +324,6 @@ QString LayerOps::georeferenceImageSimple(const QString& imagePath, QgsVectorLay
       sxX += x * g.map.x(); syX += y * g.map.x(); sX += g.map.x();
       sxY += x * g.map.y(); syY += y * g.map.y(); sY += g.map.y();
     }
-    // Solve M * [a,b,c] = [sxX, syX, sX] where M = [[sxx,sxy,sx],[sxy,syy,sy],[sx,sy,sn]]
     auto solve3 = [](double a11, double a12, double a13, double a21, double a22, double a23,
                      double a31, double a32, double a33, double b1, double b2, double b3,
                      double& x1, double& x2, double& x3) -> bool {
@@ -226,11 +340,8 @@ QString LayerOps::georeferenceImageSimple(const QString& imagePath, QgsVectorLay
       if (errorOut) *errorOut = QStringLiteral("Affine LS solve failed");
       return {};
     }
-    // world file uses pixel-center convention roughly; GDAL worldfile is:
-    // A D B E C F with x' = A*x + B*y + C, y' = D*x + E*y + F (pixel centers)
     rotA = a; rotB = b; rotD = d; rotE = e; ulx = c; uly = fpar;
   } else {
-    // Fallback: map-only GCPs — place image north-up using GCP0 as SW corner, GCP1 as SE
     const QgsPointXY g0 = gcps[0].map;
     const QgsPointXY g1 = gcps[1].map;
     const double dx = g1.x() - g0.x();
@@ -244,7 +355,6 @@ QString LayerOps::georeferenceImageSimple(const QString& imagePath, QgsVectorLay
     rotB = 0.0;
     rotD = 0.0;
     rotE = (std::abs(dy) < 1e-6) ? -std::abs(rotA) : (dy / h);
-    // if 3rd point exists, adjust vertical scale from GCP0->GCP2
     if (gcps.size() >= 3) {
       const double dy2 = gcps[2].map.y() - g0.y();
       if (std::abs(dy2) > 1e-6) rotE = dy2 / h;
