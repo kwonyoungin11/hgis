@@ -21,6 +21,12 @@ if (-not (Test-Path $testExe)) { Log "FAIL tests missing"; exit 1 }
 $p = Start-Process -FilePath $testExe -WorkingDirectory $root -Wait -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $ev "t-out.txt") -RedirectStandardError (Join-Path $ev "t-err.txt")
 if ($p.ExitCode -ne 0) { Log "FAIL unit $($p.ExitCode)"; exit $p.ExitCode }
 Log "OK unit tests"
+$wf = Join-Path $root "build\Release\ka_workflow_tests.exe"
+if (Test-Path $wf) {
+  $pw = Start-Process -FilePath $wf -WorkingDirectory $root -Wait -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $ev "wf-out.txt") -RedirectStandardError (Join-Path $ev "wf-err.txt")
+  if ($pw.ExitCode -ne 0) { Log "FAIL workflow $($pw.ExitCode)"; exit $pw.ExitCode }
+  Log "OK workflow tests"
+} else { Log "SKIP workflow tests missing" }
 $app = Join-Path $root "build\Release\ka-hgis.exe"
 $p2 = Start-Process -FilePath $app -ArgumentList "--smoke-quit" -WorkingDirectory (Split-Path $app) -Wait -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $ev "a-out.txt") -RedirectStandardError (Join-Path $ev "a-err.txt")
 if ($p2.ExitCode -ne 0) { Log "FAIL smoke $($p2.ExitCode)"; exit $p2.ExitCode }
@@ -30,3 +36,4 @@ if ($j.rules.Count -lt 12) { Log "FAIL rules count"; exit 1 }
 Log "OK rule_count=$($j.rules.Count)"
 Log "E2E PASS"
 exit 0
+
