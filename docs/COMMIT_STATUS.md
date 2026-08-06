@@ -8,24 +8,24 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-06 17:56:55 +09:00 |
+| Updated (local) | 2026-08-06 17:57:06 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `fdf9a32` |
-| HEAD full | `fdf9a32a39f5c363320698560d551b5d70bf28b1` |
-| HEAD date | 2026-08-06 17:56:03 +0900 |
+| HEAD short | `cc4d983` |
+| HEAD full | `cc4d983a33de4a653a9215a9f7f4c9ed3e2d2c25` |
+| HEAD date | 2026-08-06 17:56:54 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Stabilize digitizing and ship field-ready UX for ka-hgis. |
-| Total commits | 45 |
+| HEAD subject | Sync COMMIT_STATUS ledger after digitizing UX commit. |
+| Total commits | 46 |
 | Upstream | `origin/main` |
-| Sync | ahead 1 of origin/main (push pending) |
+| Sync | up to date with origin/main |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
 | Working tree dirty | **yes** (1 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Stabilize digitizing and ship field-ready UX for ka-hgis. (`fdf9a32` @ 2026-08-06 17:56:03 +0900)
-- **Remote sync at write time:** ahead 1 of origin/main (push pending)
+- **Recorded tip when this file was written:** Sync COMMIT_STATUS ledger after digitizing UX commit. (`cc4d983` @ 2026-08-06 17:56:54 +0900)
+- **Remote sync at write time:** up to date with origin/main
 - **Uncommitted local changes at write time:** yes (1 paths)
 
 ### Read this correctly
@@ -46,11 +46,13 @@
 - `7a48524` commit progress ledger ??Amend commit status after commit so HEAD hash is accurate
 - `d9b7c2e` commit progress ledger ??Refresh COMMIT_STATUS snapshot to current HEAD
 - `ff2adeb` commit progress ledger ??Sync COMMIT_STATUS after push
+- `cc4d983` commit progress ledger ??Sync COMMIT_STATUS ledger after digitizing UX commit.
 
 ## Recent commits (newest first, max 30)
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `cc4d983` | 2026-08-06T17:56:54+09:00 | Sync COMMIT_STATUS ledger after digitizing UX commit. |
 | `fdf9a32` | 2026-08-06T17:56:03+09:00 | Stabilize digitizing and ship field-ready UX for ka-hgis. |
 | `cf24f11` | 2026-08-06T17:40:59+09:00 | Make post-commit only refresh ledger without amend |
 | `555bb36` | 2026-08-06T17:40:44+09:00 | Stop post-commit amend; keep ledger refresh dirty until next commit |
@@ -80,7 +82,6 @@
 | `a9e84f4` | 2026-08-06T16:30:24+09:00 | Ignore portable dist output directory |
 | `aff389c` | 2026-08-06T16:20:11+09:00 | Refresh e2e smoke script and demo GCP sample |
 | `9097a63` | 2026-08-06T16:20:11+09:00 | Update job cards and document architecture data flow |
-| `941f6f2` | 2026-08-06T16:20:11+09:00 | Wire layout and state services into CMake and MainWindow |
 
 ## Staged in this commit
 
