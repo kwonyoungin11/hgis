@@ -1,0 +1,19 @@
+﻿version: 1
+default_crs: EPSG:5179
+working_format: gpkg
+layers:
+  - id: survey_area
+    geometry: Polygon
+    name_ko: 조사구역
+  - id: feature_poly
+    geometry: Polygon
+    name_ko: 유구_면
+  - id: feature_line
+    geometry: LineString
+    name_ko: 유구_선
+  - id: section_line
+    geometry: LineString
+    name_ko: 단면선
+  - id: control_points
+    geometry: Point
+    name_ko: 기준점
