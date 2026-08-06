@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-06 17:38:45 +09:00 |
+| Updated (local) | 2026-08-06 17:39:16 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `bfa9f90` |
-| HEAD full | `bfa9f90bd9c8a4f148618f4908b7ad72826c9c03` |
-| HEAD date | 2026-08-06 17:20:54 +0900 |
+| HEAD short | `5228369` |
+| HEAD full | `5228369183fab133cf6f20f0c6763752f519876e` |
+| HEAD date | 2026-08-06 17:39:15 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Polish MainWindow with icons, toolbar, and layer delete |
-| Total commits | 37 |
+| HEAD subject | Amend commit status after commit so HEAD hash is accurate |
+| Total commits | 39 |
 | Upstream | `origin/main` |
-| Sync | up to date with origin/main |
+| Sync | ahead 1 of origin/main (push pending) |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (17 paths) |
+| Working tree dirty | **yes** (10 paths) |
 
 ## How far we are
 
-- **Last committed work:** Polish MainWindow with icons, toolbar, and layer delete (`bfa9f90` @ 2026-08-06 17:20:54 +0900)
-- **Remote sync:** up to date with origin/main
-- **Uncommitted local changes:** yes (17 paths)
+- **Last committed work:** Amend commit status after commit so HEAD hash is accurate (`5228369` @ 2026-08-06 17:39:15 +0900)
+- **Remote sync:** ahead 1 of origin/main (push pending)
+- **Uncommitted local changes:** yes (10 paths)
 
 If dirty = yes, another computer will **not** see those changes until you commit and push.
 
@@ -37,11 +37,15 @@ If dirty = yes, another computer will **not** see those changes until you commit
 - `22fedf9` version 0.3.0 ??Add workflow tests and bump version to 0.3.0
 - `38df550` portable exe in repo ??Track portable dist package with exe for other PCs
 - `6ecd673` UI icons ??Add drawn KaIcons set for menus and toolbars
+- `c4156c2` commit progress ledger ??Add always-on git commit progress ledger in docs/COMMIT_STATUS.md
+- `5228369` commit progress ledger ??Amend commit status after commit so HEAD hash is accurate
 
 ## Recent commits (newest first, max 30)
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `5228369` | 2026-08-06T17:39:15+09:00 | Amend commit status after commit so HEAD hash is accurate |
+| `c4156c2` | 2026-08-06T17:38:44+09:00 | Add always-on git commit progress ledger in docs/COMMIT_STATUS.md |
 | `bfa9f90` | 2026-08-06T17:20:54+09:00 | Polish MainWindow with icons, toolbar, and layer delete |
 | `6ecd673` | 2026-08-06T17:20:54+09:00 | Add drawn KaIcons set for menus and toolbars |
 | `f621d5e` | 2026-08-06T17:20:54+09:00 | Ignore local survey GPKG and QGZ project files |
@@ -70,20 +74,7 @@ If dirty = yes, another computer will **not** see those changes until you commit
 | `3de7681` | 2026-08-06T16:20:10+09:00 | Add LayoutService for default print layouts and PDF export |
 | `d63e82e` | 2026-08-06T16:20:10+09:00 | Add ProjectStateBuilder for live checklist project state |
 | `b98c2f6` | 2026-08-06T15:30:00+09:00 | Add GitHub Actions CI with sanity and optional self-hosted build |
-| `720e2dc` | 2026-08-06T15:29:59+09:00 | Add ADR, UX, research, and job-card documentation |
-| `c3a734d` | 2026-08-06T15:29:59+09:00 | Add Windows dev-env, run, and e2e smoke scripts |
 
-## Staged in this commit
-
-```
-A	.githooks/post-merge
-A	.githooks/pre-commit
-M	README.md
-A	docs/COMMIT_STATUS.md
-A	scripts/commit.ps1
-A	scripts/install-git-hooks.ps1
-A	scripts/update-commit-status.ps1
-```
 ## Other PC checklist
 
 ```powershell

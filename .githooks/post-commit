@@ -1,0 +1,48 @@
+#!/bin/sh
+# After commit, rewrite COMMIT_STATUS with the new HEAD.
+# If this commit is not yet pushed, amend it so the ledger matches reality.
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+cd "$ROOT" || exit 0
+
+# Avoid recursion
+if [ "$KA_HGIS_SKIP_STATUS_HOOK" = "1" ]; then
+  exit 0
+fi
+
+run_update() {
+  if command -v powershell.exe >/dev/null 2>&1; then
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts/update-commit-status.ps1"
+  elif command -v pwsh >/dev/null 2>&1; then
+    pwsh -NoProfile -ExecutionPolicy Bypass -File "scripts/update-commit-status.ps1"
+  else
+    return 1
+  fi
+}
+
+run_update || exit 0
+
+if [ ! -f docs/COMMIT_STATUS.md ]; then
+  exit 0
+fi
+
+git add docs/COMMIT_STATUS.md 2>/dev/null || exit 0
+
+# Nothing new staged?
+if git diff --cached --quiet -- docs/COMMIT_STATUS.md; then
+  exit 0
+fi
+
+# Only auto-amend when local commit is not on remote yet
+ahead=0
+if git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+  ahead="$(git rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)"
+else
+  ahead=1
+fi
+
+if [ "$ahead" -ge 1 ]; then
+  export KA_HGIS_SKIP_STATUS_HOOK=1
+  git commit --amend --no-edit --no-verify >/dev/null 2>&1 || true
+fi
+
+exit 0
