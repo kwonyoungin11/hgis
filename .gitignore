@@ -75,3 +75,8 @@ __pycache__/
 .venv/
 venv/
 
+
+# Local survey / QGIS project files (do not commit field data)
+*.gpkg
+*.qgz
+!samples/**/*.gpkg
