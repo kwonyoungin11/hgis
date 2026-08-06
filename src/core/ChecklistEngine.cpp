@@ -25,42 +25,38 @@ bool ChecklistEngine::loadRules(const QString& jsonPath) {
 }
 
 bool ChecklistEngine::evalOne(const Rule& r, const QJsonObject& state) {
-  // projectState keys set by app: survey_area_count, control_points_count,
-  // has_datum, has_ellipsoid, has_projection, project_crs_set, feature_poly_count, has_kind_period
-  if (r.checkType.startsWith(QLatin1String("layer_nonempty:survey_area")))
+  const QString ct = r.checkType;
+  if (ct.startsWith(QLatin1String("layer_nonempty:survey_area")))
     return state.value(QStringLiteral("survey_area_count")).toInt() > 0;
-  if (r.checkType.startsWith(QLatin1String("count_min:control_points:2")))
+  if (ct.startsWith(QLatin1String("count_min:control_points:2")))
     return state.value(QStringLiteral("control_points_count")).toInt() >= 2;
-  if (r.checkType.startsWith(QLatin1String("field_nonempty:control_points:datum")))
+  if (ct.startsWith(QLatin1String("field_nonempty:control_points:datum")))
     return state.value(QStringLiteral("has_datum")).toBool();
-  if (r.checkType.startsWith(QLatin1String("field_nonempty:control_points:ellipsoid")))
+  if (ct.startsWith(QLatin1String("field_nonempty:control_points:ellipsoid")))
     return state.value(QStringLiteral("has_ellipsoid")).toBool();
-  if (r.checkType.startsWith(QLatin1String("field_nonempty:control_points:projection")))
+  if (ct.startsWith(QLatin1String("field_nonempty:control_points:projection")))
     return state.value(QStringLiteral("has_projection")).toBool();
-  if (r.checkType.startsWith(QLatin1String("project_crs_set")))
-    return state.value(QStringLiteral("project_crs_set")).toBool();
-  if (r.checkType.startsWith(QLatin1String("geometry_type:survey_area")))
-    return state.value(QStringLiteral("survey_area_count")).toInt() > 0;
-  if (r.checkType.startsWith(QLatin1String("field_any:feature_poly")))
-    return state.value(QStringLiteral("has_kind_period")).toBool()
-        || state.value(QStringLiteral("feature_poly_count")).toInt() == 0;
-  // layouts / soft / extent: warn-level default pass until wired
-  if (r.severity == QLatin1String("warn"))
-    return state.value(r.id).toBool(true);
-  if (r.checkType.startsWith(QLatin1String("layout_exists")))
-    return state.value(r.checkType).toBool(false);
-  if (r.checkType.startsWith(QLatin1String("export_ready")))
-    return state.value(QStringLiteral("survey_area_count")).toInt() > 0;
-  if (r.checkType.startsWith(QLatin1String("forbid_abstract_marker")))
-    return !state.value(QStringLiteral("has_abstract_marker")).toBool();
-  if (r.checkType.startsWith(QLatin1String("geometry_type:feature")))
-    return true;
-  if (r.checkType.startsWith(QLatin1String("extent_within")))
-    return true;
-  if (r.checkType.startsWith(QLatin1String("field_nonempty:control_points:origin")))
+  if (ct.startsWith(QLatin1String("field_nonempty:control_points:origin")))
     return state.value(QStringLiteral("has_origin")).toBool(true);
-  if (r.checkType.startsWith(QLatin1String("field_nonempty:control_points:accuracy")))
+  if (ct.startsWith(QLatin1String("field_nonempty:control_points:accuracy")))
     return state.value(QStringLiteral("has_accuracy")).toBool(true);
+  if (ct.startsWith(QLatin1String("project_crs_set")))
+    return state.value(QStringLiteral("project_crs_set")).toBool();
+  if (ct.startsWith(QLatin1String("geometry_type:survey_area")))
+    return state.value(QStringLiteral("survey_area_count")).toInt() == 0
+        || state.value(QStringLiteral("survey_is_polygon")).toBool();
+  if (ct.startsWith(QLatin1String("forbid_abstract_marker")))
+    return !state.value(QStringLiteral("has_abstract_marker")).toBool();
+  if (ct.startsWith(QLatin1String("field_any:feature_poly")))
+    return state.value(QStringLiteral("has_kind_period")).toBool();
+  if (ct.startsWith(QLatin1String("geometry_type:feature")))
+    return state.value(QStringLiteral("geometries_valid")).toBool(true);
+  if (ct.startsWith(QLatin1String("extent_within")))
+    return state.value(QStringLiteral("features_within_survey")).toBool(true);
+  if (ct.startsWith(QLatin1String("layout_exists")))
+    return state.value(ct).toBool(false);
+  if (ct.startsWith(QLatin1String("export_ready")))
+    return state.value(QStringLiteral("survey_area_count")).toInt() > 0;
   return state.value(r.id).toBool(false);
 }
 
