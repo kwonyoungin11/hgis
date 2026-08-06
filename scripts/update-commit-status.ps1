@@ -136,11 +136,16 @@ $content = @"
 
 ## How far we are
 
-- **Last committed work:** $headSubject (``$headShort`` @ $headDate)
-- **Remote sync:** $sync
-- **Uncommitted local changes:** $dirty ($dirtyCount paths)
+- **Recorded tip when this file was written:** $headSubject (``$headShort`` @ $headDate)
+- **Remote sync at write time:** $sync
+- **Uncommitted local changes at write time:** $dirty ($dirtyCount paths)
 
-If dirty = yes, another computer will **not** see those changes until you commit and push.
+### Read this correctly
+
+1. After ``git pull``, run ``git log -1 --oneline`` for the absolute tip (this file may lag by one commit if it was refreshed in ``post-commit`` and not yet re-committed).
+2. The **Recent commits** table is the durable history of what landed.
+3. If dirty = yes on a dev machine, another computer will **not** see those paths until commit + push.
+4. Always-on update: ``.\scripts\install-git-hooks.ps1`` once per clone.
 
 ## Milestone markers
 

@@ -8,27 +8,32 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-06 17:39:43 +09:00 |
+| Updated (local) | 2026-08-06 17:40:28 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `d9b7c2e` |
-| HEAD full | `d9b7c2e5aad5427bc6c94a7a4f6ddbed7a932aea` |
-| HEAD date | 2026-08-06 17:39:32 +0900 |
+| HEAD short | `44ca5f2` |
+| HEAD full | `44ca5f2fff590828507a8abc4931132b2c535f0e` |
+| HEAD date | 2026-08-06 17:40:27 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Refresh COMMIT_STATUS snapshot to current HEAD |
-| Total commits | 40 |
+| HEAD subject | Simplify commit ledger hooks and clarify how to read progress |
+| Total commits | 42 |
 | Upstream | `origin/main` |
-| Sync | up to date with origin/main |
+| Sync | ahead 1 of origin/main (push pending) |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
 | Working tree dirty | **yes** (10 paths) |
 
 ## How far we are
 
-- **Last committed work:** Refresh COMMIT_STATUS snapshot to current HEAD (`d9b7c2e` @ 2026-08-06 17:39:32 +0900)
-- **Remote sync:** up to date with origin/main
-- **Uncommitted local changes:** yes (10 paths)
+- **Recorded tip when this file was written:** Simplify commit ledger hooks and clarify how to read progress (`44ca5f2` @ 2026-08-06 17:40:27 +0900)
+- **Remote sync at write time:** ahead 1 of origin/main (push pending)
+- **Uncommitted local changes at write time:** yes (10 paths)
 
-If dirty = yes, another computer will **not** see those changes until you commit and push.
+### Read this correctly
+
+1. After `git pull`, run `git log -1 --oneline` for the absolute tip (this file may lag by one commit if it was refreshed in `post-commit` and not yet re-committed).
+2. The **Recent commits** table is the durable history of what landed.
+3. If dirty = yes on a dev machine, another computer will **not** see those paths until commit + push.
+4. Always-on update: `.\scripts\install-git-hooks.ps1` once per clone.
 
 ## Milestone markers
 
@@ -40,11 +45,14 @@ If dirty = yes, another computer will **not** see those changes until you commit
 - `c4156c2` commit progress ledger ??Add always-on git commit progress ledger in docs/COMMIT_STATUS.md
 - `7a48524` commit progress ledger ??Amend commit status after commit so HEAD hash is accurate
 - `d9b7c2e` commit progress ledger ??Refresh COMMIT_STATUS snapshot to current HEAD
+- `ff2adeb` commit progress ledger ??Sync COMMIT_STATUS after push
 
 ## Recent commits (newest first, max 30)
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `44ca5f2` | 2026-08-06T17:40:27+09:00 | Simplify commit ledger hooks and clarify how to read progress |
+| `ff2adeb` | 2026-08-06T17:39:43+09:00 | Sync COMMIT_STATUS after push |
 | `d9b7c2e` | 2026-08-06T17:39:30+09:00 | Refresh COMMIT_STATUS snapshot to current HEAD |
 | `7a48524` | 2026-08-06T17:39:15+09:00 | Amend commit status after commit so HEAD hash is accurate |
 | `c4156c2` | 2026-08-06T17:38:44+09:00 | Add always-on git commit progress ledger in docs/COMMIT_STATUS.md |
@@ -73,8 +81,6 @@ If dirty = yes, another computer will **not** see those changes until you commit
 | `6e2cfed` | 2026-08-06T16:20:11+09:00 | Add GCP accuracy and fix-type fields to survey factory |
 | `848ac2a` | 2026-08-06T16:20:10+09:00 | Tighten checklist rules and expand unit coverage |
 | `687dd60` | 2026-08-06T16:20:10+09:00 | Export real SHP packages with layout PDF and SHA256 manifest |
-| `3de7681` | 2026-08-06T16:20:10+09:00 | Add LayoutService for default print layouts and PDF export |
-| `d63e82e` | 2026-08-06T16:20:10+09:00 | Add ProjectStateBuilder for live checklist project state |
 
 ## Other PC checklist
 
