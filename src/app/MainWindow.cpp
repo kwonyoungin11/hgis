@@ -630,8 +630,17 @@ void MainWindow::openProject() {
 #if KA_HGIS_HAS_QGIS
   const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("열기"), QString(), QStringLiteral("QGIS (*.qgz *.qgs)"));
   if (path.isEmpty()) return;
-  QgsProject::instance()->read(path);
-  m_canvas->refresh();
+  if (!QgsProject::instance()->read(path)) {
+    QMessageBox::warning(this, QStringLiteral("오류"), QStringLiteral("프로젝트를 열 수 없습니다."));
+    return;
+  }
+  if (auto* cp = layerByName(QStringLiteral("control_points")))
+    LayerOps::ensureControlPointQualityFields(cp);
+  if (auto* fp = layerByName(QStringLiteral("feature_poly")))
+    LayerOps::applyFeaturePolyStyle(fp);
+  LayoutService::ensureDefaultLayouts(QgsProject::instance());
+  if (m_canvas) m_canvas->refresh();
+  statusBar()->showMessage(QStringLiteral("프로젝트 열림 + 마이그레이션/레이아웃 적용"), 5000);
 #else
   QMessageBox::information(this, QStringLiteral("스텁"), QStringLiteral("프로젝트 열기 시뮬레이션"));
 #endif
