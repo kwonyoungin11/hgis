@@ -60,3 +60,7 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# Packaged portable output
+dist/
+
