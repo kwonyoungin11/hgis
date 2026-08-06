@@ -41,7 +41,7 @@ setup.log.full
 symbology-style.db
 *.db-journal
 
-# Runtime / packages
+# Runtime / packages (build tree binaries stay ignored)
 *.exe
 *.dll
 *.pdb
@@ -55,12 +55,23 @@ symbology-style.db
 *.ipdb
 *.iobj
 
+# Track portable package under dist/ (including ka-hgis.exe for other PCs)
+# Still requires OSGeo4W on the target machine — DLLs are not vendored.
+!dist/
+!dist/**/
+!dist/**/*.exe
+!dist/**/*.bat
+!dist/**/*.ps1
+!dist/**/*.txt
+!dist/**/*.json
+!dist/**/*.yaml
+!dist/**/*.md
+dist/**/*.pdb
+dist/**/*.ilk
+
 # Python / misc
 __pycache__/
 *.pyc
 .venv/
 venv/
-
-# Packaged portable output
-dist/
 
