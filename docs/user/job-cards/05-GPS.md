@@ -1,7 +1,4 @@
-﻿# 잡 카드 05 — GPS 기준점
-
-1. 단계 5
-2. 기준점 최소 2개
-3. 측지계·타원체·투영 입력
-4. CSV 가져오기 가능
-
+﻿# 잡 카드 05 — GPS
+1. 기준점 추가: datum/ellipsoid/projection + accuracy_m/PDOP/fix_type
+2. 최소 2점
+3. CSV v2: id,x,y,datum,ellipsoid,projection,accuracy_m,pdop,fix_type
