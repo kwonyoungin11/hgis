@@ -66,3 +66,13 @@ cd dist\ka-hgis-portable
 
 ## 라이선스
 GNU GPLv2 or later (QGIS 링크 파생물)
+
+## 커밋 진행 상태 (항상 확인)
+
+현재 브랜치/HEAD/원격 동기화/최근 커밋 목록:
+
+- 파일: `docs/COMMIT_STATUS.md`
+- 수동 갱신: `.\scripts\update-commit-status.ps1`
+- 훅 설치(한 번): `.\scripts\install-git-hooks.ps1`  → 이후 **매 커밋마다 자동 갱신**
+- 헬퍼 커밋: `.\scripts\commit.ps1 -Message "..." -Path path1,path2 -Push`
+
