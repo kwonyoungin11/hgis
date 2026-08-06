@@ -76,6 +76,8 @@ int LayerOps::ensureControlPointQualityFields(QgsVectorLayer* controlPoints) {
   ensure(QStringLiteral("accuracy_m"), QMetaType::Type::Double);
   ensure(QStringLiteral("pdop"), QMetaType::Type::Double);
   ensure(QStringLiteral("fix_type"), QMetaType::Type::QString);
+  ensure(QStringLiteral("pixel_x"), QMetaType::Type::Double);
+  ensure(QStringLiteral("pixel_y"), QMetaType::Type::Double);
   if (added > 0) {
     controlPoints->updateFields();
     if (controlPoints->isEditable()) controlPoints->commitChanges();

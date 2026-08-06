@@ -81,6 +81,8 @@ QString SurveyProjectFactory::createNewSurvey(const QString& directory,
       fields.append(QgsField(QStringLiteral("accuracy_m"), QMetaType::Type::Double));
       fields.append(QgsField(QStringLiteral("pdop"), QMetaType::Type::Double));
       fields.append(QgsField(QStringLiteral("fix_type"), QMetaType::Type::QString));
+      fields.append(QgsField(QStringLiteral("pixel_x"), QMetaType::Type::Double));
+      fields.append(QgsField(QStringLiteral("pixel_y"), QMetaType::Type::Double));
     }
     mem.dataProvider()->addAttributes(fields.toList());
     mem.updateFields();
