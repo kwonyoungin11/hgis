@@ -4,6 +4,7 @@
 #include "core/ExportService.h"
 #include "core/ProjectStateBuilder.h"
 #include "core/LayoutService.h"
+#include "core/LayerOps.h"
 
 #include <QAction>
 #include <QDockWidget>
@@ -86,6 +87,24 @@ void MainWindow::buildMenus() {
   aRep->setObjectName(QStringLiteral("actionCrsReproject"));
   auto* tools = menuBar()->addMenu(QStringLiteral("도구"));
   tools->addAction(QStringLiteral("스캔 평면도 맞추기…"), this, &MainWindow::georefAssistant);
+  tools->addAction(QStringLiteral("OSM 배경 추가"), this, [this]() {
+#if KA_HGIS_HAS_QGIS
+    QString err;
+    if (!LayerOps::addOsmBasemap(QgsProject::instance(), m_canvas, &err))
+      QMessageBox::warning(this, QStringLiteral("배경"), err);
+    else statusBar()->showMessage(QStringLiteral("OSM 배경 추가됨"), 4000);
+#endif
+  });
+  tools->addAction(QStringLiteral("유구 스타일(종류)"), this, [this]() {
+#if KA_HGIS_HAS_QGIS
+    if (auto* fp = layerByName(QStringLiteral("feature_poly"))) {
+      if (LayerOps::applyFeaturePolyStyle(fp)) {
+        if (m_canvas) m_canvas->refresh();
+        statusBar()->showMessage(QStringLiteral("유구 범주 스타일 적용"), 4000);
+      }
+    }
+#endif
+  });
   tools->addAction(QStringLiteral("도면 검수"), this, &MainWindow::runChecklist);
   tools->addAction(QStringLiteral("PDF 내보내기…"), this, &MainWindow::exportPdf);
   tools->addAction(QStringLiteral("제출 패키지(SHP)…"), this, &MainWindow::exportShpPackage);
@@ -240,6 +259,11 @@ void MainWindow::loadSurveyLayers(const QString& gpkgOrStub) {
     auto* vl = new QgsVectorLayer(QStringLiteral("%1|layername=%2").arg(gpkgOrStub, n), n, QStringLiteral("ogr"));
     if (vl->isValid()) QgsProject::instance()->addMapLayer(vl); else delete vl;
   }
+  if (auto* cp = layerByName(QStringLiteral("control_points")))
+    LayerOps::ensureControlPointQualityFields(cp);
+  if (auto* fp = layerByName(QStringLiteral("feature_poly")))
+    LayerOps::applyFeaturePolyStyle(fp);
+  LayoutService::ensureDefaultLayouts(QgsProject::instance());
   if (m_canvas) m_canvas->refresh();
 #else
   Q_UNUSED(gpkgOrStub);
@@ -517,22 +541,68 @@ void MainWindow::exportShpPackage() {
 void MainWindow::crsDefineOnly() {
   QMessageBox::warning(this, QStringLiteral("위험"),
     QStringLiteral("「이름만 지정」은 좌표값을 바꾸지 않습니다.\n실제 이동이 필요하면 「좌표 변환」을 쓰세요."));
-  statusBar()->showMessage(QStringLiteral("CRS 이름만 지정 (변환 없음)"), 5000);
+#if KA_HGIS_HAS_QGIS
+  QgsMapLayer* cur = m_layerTree ? m_layerTree->currentLayer() : nullptr;
+  auto* l = qobject_cast<QgsVectorLayer*>(cur);
+  if (!l) {
+    statusBar()->showMessage(QStringLiteral("CRS 이름만 지정 — 벡터 레이어를 선택하세요"), 5000);
+    return;
+  }
+  const QString auth = QInputDialog::getText(this, QStringLiteral("CRS 이름만 지정"),
+      QStringLiteral("EPSG 코드 (예: EPSG:5179)"), QLineEdit::Normal, QStringLiteral("EPSG:5179"));
+  if (auth.isEmpty()) return;
+  const QgsCoordinateReferenceSystem crs(auth);
+  if (!crs.isValid()) {
+    QMessageBox::warning(this, QStringLiteral("CRS"), QStringLiteral("잘못된 CRS"));
+    return;
+  }
+  l->setCrs(crs);
+  statusBar()->showMessage(QStringLiteral("CRS 라벨만 변경: %1 (좌표 미변환)").arg(auth), 6000);
+#endif
 }
 void MainWindow::crsReproject() {
-  QMessageBox::information(this, QStringLiteral("좌표 변환"),
-    QStringLiteral("대상 CRS로 재투영 export를 수행합니다.\n(QGIS 빌드 시 Processing/재투영 연결)"));
-  statusBar()->showMessage(QStringLiteral("CRS 재투영 경로"), 5000);
+#if KA_HGIS_HAS_QGIS
+  QgsMapLayer* cur = m_layerTree ? m_layerTree->currentLayer() : nullptr;
+  auto* vl = qobject_cast<QgsVectorLayer*>(cur);
+  if (!vl) {
+    QMessageBox::information(this, QStringLiteral("좌표 변환"), QStringLiteral("레이어 트리에서 벡터 레이어를 선택하세요."));
+    return;
+  }
+  const QString auth = QInputDialog::getText(this, QStringLiteral("좌표 변환(재투영)"),
+      QStringLiteral("대상 CRS"), QLineEdit::Normal, QStringLiteral("EPSG:4326"));
+  if (auth.isEmpty()) return;
+  const QString out = QFileDialog::getSaveFileName(this, QStringLiteral("재투영 저장"),
+      vl->name() + QStringLiteral("_reproj.gpkg"), QStringLiteral("GPKG (*.gpkg);;SHP (*.shp)"));
+  if (out.isEmpty()) return;
+  QString err;
+  if (LayerOps::reprojectVectorLayer(vl, auth, out, QgsProject::instance(), &err).isEmpty())
+    QMessageBox::warning(this, QStringLiteral("재투영 실패"), err);
+  else {
+    if (m_canvas) m_canvas->refresh();
+    statusBar()->showMessage(QStringLiteral("재투영 완료: %1").arg(out), 6000);
+  }
+#else
+  QMessageBox::warning(this, QStringLiteral("CRS"), QStringLiteral("QGIS 빌드 필요"));
+#endif
 }
 void MainWindow::georefAssistant() {
-  const QString img = QFileDialog::getOpenFileName(this, QStringLiteral("스캔 평면도"), QString(), QStringLiteral("Images (*.png *.jpg *.tif *.tiff)"));
+  const QString img = QFileDialog::getOpenFileName(this, QStringLiteral("스캔 평면도"), QString(),
+      QStringLiteral("Images (*.png *.jpg *.jpeg *.tif *.tiff)"));
   if (img.isEmpty()) return;
-  if (m_stubGcp < 2) {
+#if KA_HGIS_HAS_QGIS
+  auto* cp = layerByName(QStringLiteral("control_points"));
+  const int n = cp ? int(cp->featureCount()) : m_stubGcp;
+  if (n < 2) {
     QMessageBox::warning(this, QStringLiteral("GCP"), QStringLiteral("기준점(GCP)이 2개 미만입니다. 먼저 등록하세요."));
     return;
   }
-  QMessageBox::information(this, QStringLiteral("지오레퍼런스"),
-    QStringLiteral("이미지: %1\nGCP %2점 기준으로 맞춥니다.\n(QGIS 빌드 시 Georeferencer/GDAL 연동)").arg(img).arg(m_stubGcp));
+  QString err;
+  const QString wf = LayerOps::georeferenceImageSimple(img, cp, QgsProject::instance(), m_canvas, &err);
+  if (wf.isEmpty()) QMessageBox::warning(this, QStringLiteral("지오레퍼런스"), err);
+  else statusBar()->showMessage(QStringLiteral("월드파일 작성: %1 (간단 아핀 — 정밀작업은 추가 GCP 권장)").arg(wf), 8000);
+#else
+  Q_UNUSED(img);
+#endif
 }
 
 void MainWindow::openVectorLayer() {
@@ -568,10 +638,11 @@ void MainWindow::openProject() {
 }
 void MainWindow::showAbout() {
   QMessageBox::about(this, QStringLiteral("정보"),
-    QStringLiteral("고고학 전용 HGIS (ka-hgis) 0.1.0\n"
-                   "C++/Qt standalone + QGIS libraries\n"
+    QStringLiteral("고고학 전용 HGIS (ka-hgis) 0.3.0\n"
+                   "C++/Qt6 + QGIS 4.x libraries\n"
                    "License: GNU GPLv2 or later\n"
                    "기본 CRS: EPSG:5179\n"
+                   "디지타이즈·검수·Layout PDF·SHP·GNSS·지오레퍼·재투영\n"
                    "소스: 본 저장소 제공"));
 }
 
