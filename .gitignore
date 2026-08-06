@@ -80,3 +80,7 @@ venv/
 *.gpkg
 *.qgz
 !samples/**/*.gpkg
+
+config/secrets.ini
+**/secrets.ini
+

@@ -8,7 +8,7 @@ option(KA_HGIS_BUILD_TESTS "Build tests" ON)
 set(OSGEO4W_ROOT "D:/OSGeo4W" CACHE PATH "OSGeo4W root")
 set(QGIS_PREFIX_PATH "${OSGEO4W_ROOT}/apps/qgis-dev" CACHE PATH "QGIS prefix")
 list(PREPEND CMAKE_PREFIX_PATH "${OSGEO4W_ROOT}/apps/Qt6" "${OSGEO4W_ROOT}/apps/Qt6/lib/cmake")
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Xml PrintSupport Test)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Xml PrintSupport Network Svg Test)
 
 set(KA_INCLUDES
   ${CMAKE_SOURCE_DIR}/src
@@ -29,16 +29,18 @@ add_library(ka_core STATIC
   src/core/ProjectStateBuilder.cpp
   src/core/LayoutService.cpp
   src/core/LayerOps.cpp
+  src/core/LocationSearch.cpp
   src/core/ChecklistEngine.h
   src/core/SurveyProjectFactory.h
   src/core/ExportService.h
   src/core/ProjectStateBuilder.h
   src/core/LayoutService.h
   src/core/LayerOps.h
+  src/core/LocationSearch.h
 )
 target_include_directories(ka_core PUBLIC ${KA_INCLUDES})
 target_link_directories(ka_core PUBLIC ${KA_LIBDIRS})
-target_link_libraries(ka_core PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml Qt6::PrintSupport qgis_core qgis_gui)
+target_link_libraries(ka_core PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml Qt6::PrintSupport Qt6::Network Qt6::Svg qgis_core qgis_gui)
 target_compile_definitions(ka_core PUBLIC KA_HGIS_HAS_QGIS=1 "CORE_EXPORT=__declspec(dllimport)" "GUI_EXPORT=__declspec(dllimport)")
 
 add_executable(ka-hgis
@@ -46,13 +48,15 @@ add_executable(ka-hgis
   src/app/MainWindow.cpp
   src/app/KaApplication.cpp
   src/app/KaIcons.cpp
+  src/app/KaCaptureMapTool.cpp
   src/app/MainWindow.h
   src/app/KaApplication.h
   src/app/KaIcons.h
+  src/app/KaCaptureMapTool.h
 )
 target_include_directories(ka-hgis PRIVATE ${KA_INCLUDES})
 target_link_directories(ka-hgis PRIVATE ${KA_LIBDIRS})
-target_link_libraries(ka-hgis PRIVATE ka_core Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml Qt6::PrintSupport qgis_core qgis_gui)
+target_link_libraries(ka-hgis PRIVATE ka_core Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml Qt6::PrintSupport Qt6::Network Qt6::Svg qgis_core qgis_gui)
 target_compile_definitions(ka-hgis PRIVATE KA_HGIS_HAS_QGIS=1 "CORE_EXPORT=__declspec(dllimport)" "GUI_EXPORT=__declspec(dllimport)")
 
 add_custom_command(TARGET ka-hgis POST_BUILD

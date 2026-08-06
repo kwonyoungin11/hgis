@@ -305,6 +305,81 @@ QIcon drawHelp() {
   return fromPixmap(pm);
 }
 
+QIcon drawSearch() {
+  auto pm = base();
+  QPainter p(&pm);
+  roundBg(p, QRectF(4, 4, 56, 56), QColor(14, 116, 144));
+  p.setRenderHint(QPainter::Antialiasing, true);
+  p.setPen(QPen(Qt::white, 4));
+  p.setBrush(Qt::NoBrush);
+  p.drawEllipse(QPointF(28, 28), 12, 12);
+  p.drawLine(QPointF(37, 37), QPointF(48, 48));
+  return fromPixmap(pm);
+}
+
+QIcon drawToolPolygon() {
+  auto pm = base();
+  QPainter p(&pm);
+  p.setRenderHint(QPainter::Antialiasing, true);
+  roundBg(p, QRectF(4, 4, 56, 56), QColor(249, 115, 22));
+  p.setPen(QPen(Qt::white, 3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+  p.setBrush(QColor(255, 255, 255, 80));
+  QPolygonF poly;
+  poly << QPointF(16, 42) << QPointF(20, 18) << QPointF(40, 14) << QPointF(48, 36) << QPointF(30, 48);
+  p.drawPolygon(poly);
+  p.setBrush(Qt::white);
+  p.setPen(Qt::NoPen);
+  for (const QPointF& pt : poly) p.drawEllipse(pt, 3.2, 3.2);
+  p.setPen(QPen(QColor(15, 23, 42), 2.5, Qt::SolidLine, Qt::RoundCap));
+  p.drawLine(QPointF(38, 40), QPointF(50, 50));
+  p.setBrush(QColor(15, 23, 42));
+  QPolygonF tip;
+  tip << QPointF(50, 50) << QPointF(44, 50) << QPointF(50, 44);
+  p.drawPolygon(tip);
+  return fromPixmap(pm);
+}
+
+QIcon drawToolLine() {
+  auto pm = base();
+  QPainter p(&pm);
+  p.setRenderHint(QPainter::Antialiasing, true);
+  roundBg(p, QRectF(4, 4, 56, 56), QColor(219, 39, 119));
+  p.setPen(QPen(Qt::white, 4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+  p.drawLine(14, 44, 26, 18);
+  p.drawLine(26, 18, 46, 34);
+  p.setBrush(Qt::white);
+  p.setPen(Qt::NoPen);
+  p.drawEllipse(QPointF(14, 44), 4, 4);
+  p.drawEllipse(QPointF(26, 18), 4, 4);
+  p.drawEllipse(QPointF(46, 34), 4, 4);
+  p.setPen(QPen(QColor(15, 23, 42), 2.5, Qt::SolidLine, Qt::RoundCap));
+  p.drawLine(QPointF(36, 42), QPointF(50, 52));
+  p.setBrush(QColor(15, 23, 42));
+  QPolygonF tip;
+  tip << QPointF(50, 52) << QPointF(44, 52) << QPointF(50, 46);
+  p.drawPolygon(tip);
+  return fromPixmap(pm);
+}
+
+QIcon drawToolArea() {
+  auto pm = base();
+  QPainter p(&pm);
+  p.setRenderHint(QPainter::Antialiasing, true);
+  roundBg(p, QRectF(4, 4, 56, 56), QColor(8, 145, 178));
+  p.setPen(QPen(Qt::white, 3));
+  p.setBrush(QColor(165, 243, 252, 120));
+  p.drawRoundedRect(QRectF(14, 16, 28, 28), 3, 3);
+  p.setBrush(Qt::white);
+  p.setPen(Qt::NoPen);
+  p.drawEllipse(QPointF(14, 16), 3, 3);
+  p.drawEllipse(QPointF(42, 16), 3, 3);
+  p.drawEllipse(QPointF(42, 44), 3, 3);
+  p.drawEllipse(QPointF(14, 44), 3, 3);
+  p.setPen(QPen(QColor(15, 23, 42), 2.5));
+  p.drawLine(QPointF(34, 40), QPointF(50, 50));
+  return fromPixmap(pm);
+}
+
 QIcon drawStep(int n, const QColor& bg) {
   auto pm = base();
   QPainter p(&pm);
@@ -351,6 +426,10 @@ QIcon icon(const QString& id) {
   else if (id == QLatin1String("saveedit")) ic = drawSaveEdit();
   else if (id == QLatin1String("stop")) ic = drawStop();
   else if (id == QLatin1String("help")) ic = drawHelp();
+  else if (id == QLatin1String("search")) ic = drawSearch();
+  else if (id == QLatin1String("draw_poly")) ic = drawToolPolygon();
+  else if (id == QLatin1String("draw_line")) ic = drawToolLine();
+  else if (id == QLatin1String("draw_area")) ic = drawToolArea();
   else if (id == QLatin1String("import")) ic = drawFolderOpen();
   else ic = styleIcon(QStyle::SP_FileIcon);
 

@@ -6,6 +6,7 @@
 #include <QStringConverter>
 #include <cmath>
 #include <algorithm>
+#include <QPainter>
 
 #include <qgsproject.h>
 #include <qgsvectorlayer.h>
@@ -27,6 +28,10 @@
 #include <qgsrectangle.h>
 #include <qgslayertree.h>
 #include <qgslayertreelayer.h>
+#include <qgsbilinearrasterresampler.h>
+#include <qgsrasterresamplefilter.h>
+#include <qgsrasterdataprovider.h>
+#include <qgsnetworkaccessmanager.h>
 
 QString LayerOps::reprojectVectorLayer(QgsVectorLayer* layer, const QString& targetCrsAuthId,
                                        const QString& outPath, QgsProject* project, QString* errorOut) {
@@ -119,12 +124,28 @@ bool LayerOps::applyFeaturePolyStyle(QgsVectorLayer* featurePoly) {
   return true;
 }
 
+static void tuneBasemapLayer(QgsRasterLayer* rl) {
+  if (!rl || !rl->isValid()) return;
+  rl->setBlendMode(QPainter::CompositionMode_SourceOver);
+  if (QgsRasterResampleFilter* rf = rl->resampleFilter()) {
+    rf->setZoomedInResampler(new QgsBilinearRasterResampler());
+    rf->setZoomedOutResampler(new QgsBilinearRasterResampler());
+  }
+}
+
 static bool addXyzBasemap(QgsProject* project, QgsMapCanvas* canvas, const QString& url,
                           const QString& name, QString* errorOut) {
   if (!project) {
     if (errorOut) *errorOut = QStringLiteral("No project");
     return false;
   }
+  const auto existing = project->mapLayersByName(name);
+  for (QgsMapLayer* old : existing) {
+    if (old) project->removeMapLayer(old->id());
+  }
+
+  QgsNetworkAccessManager::instance()->setCacheDisabled(false);
+
   auto* rl = new QgsRasterLayer(url, name, QStringLiteral("wms"));
   if (!rl->isValid()) {
     delete rl;
@@ -135,10 +156,14 @@ static bool addXyzBasemap(QgsProject* project, QgsMapCanvas* canvas, const QStri
     delete rl;
     return false;
   }
+  tuneBasemapLayer(rl);
   project->addMapLayer(rl, false);
   QgsLayerTree* root = project->layerTreeRoot();
-  root->addChildNode(new QgsLayerTreeLayer(rl));
-  if (canvas) canvas->refresh();
+  root->insertChildNode(root->children().size(), new QgsLayerTreeLayer(rl));
+  if (canvas) {
+    canvas->setCachingEnabled(true);
+    canvas->refreshAllLayers();
+  }
   return true;
 }
 
@@ -201,7 +226,6 @@ bool LayerOps::setWorkCrs(QgsProject* project, QgsMapCanvas* canvas, const QStri
   if (canvas) {
     canvas->setDestinationCrs(crs);
     zoomToKorea(canvas, epsgAuthId);
-    canvas->refresh();
   }
   return true;
 }
@@ -224,7 +248,7 @@ void LayerOps::zoomToKorea(QgsMapCanvas* canvas, const QString& epsgAuthId) {
   const QgsRectangle ext = koreaExtentForCrs(epsgAuthId);
   if (!ext.isEmpty() && ext.isFinite()) {
     canvas->setExtent(ext);
-    canvas->refresh();
+    canvas->refreshAllLayers();
   }
 }
 
