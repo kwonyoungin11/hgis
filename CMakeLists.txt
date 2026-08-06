@@ -28,11 +28,13 @@ add_library(ka_core STATIC
   src/core/ExportService.cpp
   src/core/ProjectStateBuilder.cpp
   src/core/LayoutService.cpp
+  src/core/LayerOps.cpp
   src/core/ChecklistEngine.h
   src/core/SurveyProjectFactory.h
   src/core/ExportService.h
   src/core/ProjectStateBuilder.h
   src/core/LayoutService.h
+  src/core/LayerOps.h
 )
 target_include_directories(ka_core PUBLIC ${KA_INCLUDES})
 target_link_directories(ka_core PUBLIC ${KA_LIBDIRS})
@@ -60,10 +62,20 @@ add_custom_command(TARGET ka-hgis POST_BUILD
 
 if(KA_HGIS_BUILD_TESTS)
   enable_testing()
+  set(KA_TEST_DEFS KA_HGIS_HAS_QGIS=1 "CORE_EXPORT=__declspec(dllimport)" "GUI_EXPORT=__declspec(dllimport)")
+  set(KA_TEST_LIBS ka_core Qt6::Test Qt6::Core Qt6::Xml Qt6::Gui Qt6::Widgets Qt6::PrintSupport qgis_core qgis_gui)
+
   add_executable(ka_hgis_tests tests/test_checklist.cpp)
-  target_link_libraries(ka_hgis_tests PRIVATE ka_core Qt6::Test Qt6::Core Qt6::Xml Qt6::Gui Qt6::Widgets Qt6::PrintSupport qgis_core qgis_gui)
+  target_link_libraries(ka_hgis_tests PRIVATE ${KA_TEST_LIBS})
   target_include_directories(ka_hgis_tests PRIVATE ${KA_INCLUDES})
   target_link_directories(ka_hgis_tests PRIVATE ${KA_LIBDIRS})
-  target_compile_definitions(ka_hgis_tests PRIVATE KA_HGIS_HAS_QGIS=1 "CORE_EXPORT=__declspec(dllimport)" "GUI_EXPORT=__declspec(dllimport)")
+  target_compile_definitions(ka_hgis_tests PRIVATE ${KA_TEST_DEFS})
   add_test(NAME checklist_engine COMMAND ka_hgis_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+  add_executable(ka_workflow_tests tests/test_workflow.cpp)
+  target_link_libraries(ka_workflow_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_workflow_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_workflow_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_workflow_tests PRIVATE ${KA_TEST_DEFS})
+  add_test(NAME workflow_engine COMMAND ka_workflow_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 endif()
