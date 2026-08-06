@@ -37,6 +37,13 @@ private slots:
   void exportShpPackage();
   void crsDefineOnly();
   void crsReproject();
+  void setWorkCrs5186();
+  void setWorkCrs5187();
+  void convertSelectedTo5179();
+  void convertShpFileTo5179();
+  void addBasemapVworld();
+  void addBasemapVworldSat();
+  void addBasemapGoogle();
   void georefAssistant();
   void showAbout();
 
@@ -45,6 +52,8 @@ private:
   void buildMenus();
   void setStepTools(int step);
   void loadSurveyLayers(const QString& gpkgOrStub);
+  void applyStartupMap();
+  void setWorkCrs(const QString& authId);
   QJsonObject buildProjectState() const;
   QString rulesPath() const;
 #if KA_HGIS_HAS_QGIS
@@ -58,6 +67,7 @@ private:
   QToolBar* m_stepTools = nullptr;
   ChecklistEngine* m_checklist = nullptr;
   QString m_surveyPath;
+  QString m_workCrs = QStringLiteral("EPSG:5186");
   int m_stubSurveyArea = 0;
   int m_stubFeatures = 0;
   int m_stubGcp = 0;

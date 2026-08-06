@@ -58,8 +58,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   m_checklist->loadRules(rulesPath());
   buildMenus();
   buildUi();
+  applyStartupMap();
   setStepTools(0);
-  statusBar()->showMessage(QStringLiteral("CRS 기본 EPSG:5179 | 규칙 %1개").arg(m_checklist->ruleCount()));
+  statusBar()->showMessage(
+      QStringLiteral("작업 CRS %1 | 업로드 %2 | 규칙 %3개")
+          .arg(m_workCrs, QString::fromUtf8(SurveyProjectFactory::uploadCrsAuthId()))
+          .arg(m_checklist->ruleCount()),
+      10000);
 }
 
 MainWindow::~MainWindow() = default;
@@ -81,20 +86,32 @@ void MainWindow::buildMenus() {
   file->addAction(QStringLiteral("프로젝트 열기…"), this, &MainWindow::openProject);
   file->addAction(QStringLiteral("프로젝트 저장…"), this, &MainWindow::saveProject);
   auto* crs = menuBar()->addMenu(QStringLiteral("좌표계"));
+  crs->addAction(QStringLiteral("작업 CRS → 5186 중부"), this, &MainWindow::setWorkCrs5186);
+  crs->addAction(QStringLiteral("작업 CRS → 5187 동부"), this, &MainWindow::setWorkCrs5187);
+  crs->addSeparator();
+  crs->addAction(QStringLiteral("선택 레이어 → 5179 SHP (업로드용)"), this, &MainWindow::convertSelectedTo5179);
+  crs->addAction(QStringLiteral("SHP 파일 → 5179 SHP (업로드용)…"), this, &MainWindow::convertShpFileTo5179);
+  crs->addSeparator();
   auto* aDef = crs->addAction(QStringLiteral("이름만 지정(위험)"), this, &MainWindow::crsDefineOnly);
   aDef->setObjectName(QStringLiteral("actionCrsDefineOnly"));
-  auto* aRep = crs->addAction(QStringLiteral("좌표 변환(재투영)"), this, &MainWindow::crsReproject);
+  auto* aRep = crs->addAction(QStringLiteral("임의 좌표 변환(재투영)"), this, &MainWindow::crsReproject);
   aRep->setObjectName(QStringLiteral("actionCrsReproject"));
-  auto* tools = menuBar()->addMenu(QStringLiteral("도구"));
-  tools->addAction(QStringLiteral("스캔 평면도 맞추기…"), this, &MainWindow::georefAssistant);
-  tools->addAction(QStringLiteral("OSM 배경 추가"), this, [this]() {
+
+  auto* bg = menuBar()->addMenu(QStringLiteral("배경지도"));
+  bg->addAction(QStringLiteral("VWorld 배경"), this, &MainWindow::addBasemapVworld);
+  bg->addAction(QStringLiteral("VWorld 위성"), this, &MainWindow::addBasemapVworldSat);
+  bg->addAction(QStringLiteral("Google 위성"), this, &MainWindow::addBasemapGoogle);
+  bg->addAction(QStringLiteral("OSM"), this, [this]() {
 #if KA_HGIS_HAS_QGIS
     QString err;
     if (!LayerOps::addOsmBasemap(QgsProject::instance(), m_canvas, &err))
       QMessageBox::warning(this, QStringLiteral("배경"), err);
-    else statusBar()->showMessage(QStringLiteral("OSM 배경 추가됨"), 4000);
+    else if (m_canvas) LayerOps::zoomToKorea(m_canvas, m_workCrs);
 #endif
   });
+
+  auto* tools = menuBar()->addMenu(QStringLiteral("도구"));
+  tools->addAction(QStringLiteral("스캔 평면도 맞추기…"), this, &MainWindow::georefAssistant);
   tools->addAction(QStringLiteral("유구 스타일(종류)"), this, [this]() {
 #if KA_HGIS_HAS_QGIS
     if (auto* fp = layerByName(QStringLiteral("feature_poly"))) {
@@ -141,7 +158,7 @@ void MainWindow::buildUi() {
   m_canvas = new QgsMapCanvas(central);
   m_canvas->setCanvasColor(Qt::white);
   m_canvas->enableAntiAliasing(true);
-  const QgsCoordinateReferenceSystem crs(QStringLiteral("EPSG:5179"));
+  const QgsCoordinateReferenceSystem crs(m_workCrs);
   m_canvas->setDestinationCrs(crs);
   QgsProject::instance()->setCrs(crs);
   m_canvas->setMapTool(new QgsMapToolPan(m_canvas));
@@ -187,13 +204,13 @@ void MainWindow::onStepChanged(int row) { setStepTools(row); }
 void MainWindow::setStepTools(int step) {
   m_stepTools->clear();
   const QString helps[] = {
-    QStringLiteral("조사명과 폴더를 정해 GPKG를 만듭니다. CRS=EPSG:5179"),
-    QStringLiteral("지적·지형 등 배경 레이어를 불러오세요."),
-    QStringLiteral("조사구역은 반드시 폴리곤입니다. 점/원 심볼 금지."),
-    QStringLiteral("유구 면/선 작성 후 종류·시대를 입력하세요."),
+    QStringLiteral("조사 생성. 작업 CRS=5186(중부) 또는 5187(동부). 문화재 업로드는 5179."),
+    QStringLiteral("수치지형도·지적(5186/5187) 불러오기. 배경은 VWorld(자동). 다른 CRS도 중첩 표시됩니다."),
+    QStringLiteral("조사구역 폴리곤을 작업 CRS로 그립니다. 점/원 심볼 금지."),
+    QStringLiteral("유구 면/선 작성(작업 CRS). 종류·시대 필수. 완료 후 5179 SHP로 변환 업로드."),
     QStringLiteral("GPS 기준점 최소 2개 + 측지 메타 필수."),
     QStringLiteral("법령 체크리스트 error=0 이 목표입니다."),
-    QStringLiteral("PDF·SHP 제출 패키지. error 남으면 차단됩니다.")
+    QStringLiteral("메뉴 좌표계→5179 SHP 변환 후 인트라넷 업로드. PDF·제출패키지.")
   };
   if (step >= 0 && step < 7) m_help->setText(helps[step]);
 
@@ -202,7 +219,10 @@ void MainWindow::setStepTools(int step) {
   };
   switch (step) {
   case 0: add(QStringLiteral("새 조사 만들기"), &MainWindow::newSurvey); break;
-  case 1: add(QStringLiteral("배경 불러오기"), &MainWindow::openVectorLayer); break;
+  case 1:
+    add(QStringLiteral("지형·지적 불러오기"), &MainWindow::openVectorLayer);
+    add(QStringLiteral("VWorld 배경"), &MainWindow::addBasemapVworld);
+    break;
   case 2:
     add(QStringLiteral("그리기 시작"), &MainWindow::startEditSurveyArea);
     add(QStringLiteral("저장"), &MainWindow::saveEdits);
@@ -230,10 +250,21 @@ void MainWindow::setStepTools(int step) {
 void MainWindow::newSurvey() {
   const QString name = QInputDialog::getText(this, QStringLiteral("새 조사"), QStringLiteral("조사명"));
   if (name.trimmed().isEmpty()) return;
+  const QStringList crsChoices = {
+      QStringLiteral("EPSG:5186 (중부원점 — 작업용)"),
+      QStringLiteral("EPSG:5187 (동부원점 — 작업용)")
+  };
+  bool ok = false;
+  const QString crsPick = QInputDialog::getItem(this, QStringLiteral("작업 좌표계"),
+      QStringLiteral("수치지형도·지적·작도 CRS\n(문화재 인트라넷 업/다운로드는 5179로 변환)"),
+      crsChoices, m_workCrs.contains(QLatin1String("5187")) ? 1 : 0, false, &ok);
+  if (!ok) return;
+  m_workCrs = crsPick.contains(QLatin1String("5187")) ? QStringLiteral("EPSG:5187")
+                                                      : QStringLiteral("EPSG:5186");
   const QString dir = QFileDialog::getExistingDirectory(this, QStringLiteral("저장 폴더"));
   if (dir.isEmpty()) return;
   QString err;
-  const QString path = SurveyProjectFactory::createNewSurvey(dir, name, &err);
+  const QString path = SurveyProjectFactory::createNewSurvey(dir, name, &err, m_workCrs);
   if (path.isEmpty()) {
     QMessageBox::warning(this, QStringLiteral("실패"), err);
     return;
@@ -243,17 +274,123 @@ void MainWindow::newSurvey() {
   loadSurveyLayers(path);
 #if KA_HGIS_HAS_QGIS
   LayoutService::ensureDefaultLayouts(QgsProject::instance());
+  applyStartupMap();
 #endif
-  setWindowTitle(QStringLiteral("고고학 전용 HGIS — %1").arg(name));
-  statusBar()->showMessage(QStringLiteral("조사 생성: %1 %2").arg(path, err), 8000);
+  setWindowTitle(QStringLiteral("고고학 전용 HGIS — %1 (%2)").arg(name, m_workCrs));
+  statusBar()->showMessage(QStringLiteral("조사 생성 %1 | 작업 %2 | 업로드시 5179 변환")
+                               .arg(path, m_workCrs),
+                           10000);
   m_steps->setCurrentRow(1);
+}
+
+void MainWindow::applyStartupMap() {
+#if KA_HGIS_HAS_QGIS
+  LayerOps::setWorkCrs(QgsProject::instance(), m_canvas, m_workCrs, nullptr);
+  QString err;
+  if (!LayerOps::addKoreaBasemap(QgsProject::instance(), m_canvas, LayerOps::KoreaBasemap::VWorldBase, &err)) {
+    statusBar()->showMessage(QStringLiteral("VWorld 실패, OSM 시도: %1").arg(err), 8000);
+  } else {
+    LayerOps::zoomToKorea(m_canvas, m_workCrs);
+  }
+#endif
+}
+
+void MainWindow::setWorkCrs(const QString& authId) {
+  m_workCrs = authId;
+#if KA_HGIS_HAS_QGIS
+  QString err;
+  if (!LayerOps::setWorkCrs(QgsProject::instance(), m_canvas, authId, &err)) {
+    QMessageBox::warning(this, QStringLiteral("CRS"), err);
+    return;
+  }
+  statusBar()->showMessage(QStringLiteral("작업 CRS = %1 (타일·지형 중첩 OTF)").arg(authId), 8000);
+#endif
+}
+void MainWindow::setWorkCrs5186() { setWorkCrs(QStringLiteral("EPSG:5186")); }
+void MainWindow::setWorkCrs5187() { setWorkCrs(QStringLiteral("EPSG:5187")); }
+
+void MainWindow::convertSelectedTo5179() {
+#if KA_HGIS_HAS_QGIS
+  QgsMapLayer* cur = m_layerTree ? m_layerTree->currentLayer() : nullptr;
+  auto* vl = qobject_cast<QgsVectorLayer*>(cur);
+  if (!vl) {
+    QMessageBox::information(this, QStringLiteral("5179 변환"),
+                             QStringLiteral("레이어 트리에서 변환할 벡터(폴리곤 등)를 선택하세요.\n"
+                                            "5186/5187로 그린 도형 → 문화재 업로드용 EPSG:5179 SHP"));
+    return;
+  }
+  const QString out = QFileDialog::getSaveFileName(
+      this, QStringLiteral("업로드용 5179 SHP 저장"),
+      vl->name() + QStringLiteral("_5179.shp"), QStringLiteral("SHP (*.shp)"));
+  if (out.isEmpty()) return;
+  QString err;
+  if (LayerOps::convertToShp5179(vl, out, QgsProject::instance(), &err).isEmpty())
+    QMessageBox::warning(this, QStringLiteral("변환 실패"), err);
+  else {
+    if (m_canvas) m_canvas->refresh();
+    statusBar()->showMessage(QStringLiteral("5179 SHP 생성(업로드용): %1").arg(out), 10000);
+    QMessageBox::information(this, QStringLiteral("완료"),
+                             QStringLiteral("EPSG:5179 SHP 저장됨.\n인트라넷 업로드에 이 파일을 사용하세요.\n%1").arg(out));
+  }
+#else
+  QMessageBox::warning(this, QStringLiteral("CRS"), QStringLiteral("QGIS 빌드 필요"));
+#endif
+}
+
+void MainWindow::convertShpFileTo5179() {
+#if KA_HGIS_HAS_QGIS
+  const QString in = QFileDialog::getOpenFileName(
+      this, QStringLiteral("5186/5187 SHP 선택"), QString(),
+      QStringLiteral("Vector (*.shp *.gpkg *.geojson)"));
+  if (in.isEmpty()) return;
+  const QString out = QFileDialog::getSaveFileName(
+      this, QStringLiteral("5179 SHP 저장"),
+      QFileInfo(in).completeBaseName() + QStringLiteral("_5179.shp"),
+      QStringLiteral("SHP (*.shp)"));
+  if (out.isEmpty()) return;
+  QString err;
+  if (LayerOps::convertFileToShp5179(in, out, QgsProject::instance(), &err).isEmpty())
+    QMessageBox::warning(this, QStringLiteral("변환 실패"), err);
+  else
+    QMessageBox::information(this, QStringLiteral("완료"),
+                             QStringLiteral("업로드용 EPSG:5179 SHP:\n%1").arg(out));
+#endif
+}
+
+void MainWindow::addBasemapVworld() {
+#if KA_HGIS_HAS_QGIS
+  QString err;
+  if (!LayerOps::addKoreaBasemap(QgsProject::instance(), m_canvas, LayerOps::KoreaBasemap::VWorldBase, &err))
+    QMessageBox::warning(this, QStringLiteral("배경"), err);
+  else {
+    LayerOps::zoomToKorea(m_canvas, m_workCrs);
+    statusBar()->showMessage(QStringLiteral("VWorld 배경 (%1)").arg(m_workCrs), 5000);
+  }
+#endif
+}
+void MainWindow::addBasemapVworldSat() {
+#if KA_HGIS_HAS_QGIS
+  QString err;
+  if (!LayerOps::addKoreaBasemap(QgsProject::instance(), m_canvas, LayerOps::KoreaBasemap::VWorldSatellite, &err))
+    QMessageBox::warning(this, QStringLiteral("배경"), err);
+  else LayerOps::zoomToKorea(m_canvas, m_workCrs);
+#endif
+}
+void MainWindow::addBasemapGoogle() {
+#if KA_HGIS_HAS_QGIS
+  QString err;
+  if (!LayerOps::addKoreaBasemap(QgsProject::instance(), m_canvas, LayerOps::KoreaBasemap::GoogleSatellite, &err))
+    QMessageBox::warning(this, QStringLiteral("배경"), err);
+  else LayerOps::zoomToKorea(m_canvas, m_workCrs);
+#endif
 }
 
 void MainWindow::loadSurveyLayers(const QString& gpkgOrStub) {
 #if KA_HGIS_HAS_QGIS
   if (gpkgOrStub.endsWith(QLatin1String(".stub"))) return;
-  QgsProject::instance()->clear();
-  QgsProject::instance()->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5179")));
+  QgsProject::instance()->removeAllMapLayers();
+  QgsProject::instance()->setCrs(QgsCoordinateReferenceSystem(m_workCrs));
+  if (m_canvas) m_canvas->setDestinationCrs(QgsCoordinateReferenceSystem(m_workCrs));
   const char* names[] = {"survey_area","feature_poly","feature_line","section_line","control_points"};
   for (const char* n : names) {
     auto* vl = new QgsVectorLayer(QStringLiteral("%1|layername=%2").arg(gpkgOrStub, n), n, QStringLiteral("ogr"));
