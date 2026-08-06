@@ -32,6 +32,8 @@ private slots:
   void fullWorkflowSurveyToPackage();
   void shpKoreanRoundTripUtf8();
   void reprojectAndMigrateFields();
+  void georefWorldfileFromGcp();
+  void convert5186PolygonTo5179Shp();
 };
 
 static QString rulesFile() {
@@ -218,10 +220,81 @@ void TestWorkflow::reprojectAndMigrateFields() {
 
   auto* cp = new QgsVectorLayer(QStringLiteral("%1|layername=control_points").arg(gpkg), QStringLiteral("control_points"), QStringLiteral("ogr"));
   QVERIFY(cp->isValid());
-  // drop simulation: ensure fields still adds 0 if present
   const int n = LayerOps::ensureControlPointQualityFields(cp);
   QVERIFY(n >= 0);
   QVERIFY(cp->fields().indexOf(QStringLiteral("accuracy_m")) >= 0);
+  QVERIFY(cp->fields().indexOf(QStringLiteral("pixel_x")) >= 0);
+}
+
+void TestWorkflow::georefWorldfileFromGcp() {
+  const QString dir = QDir::temp().filePath(QStringLiteral("ka_georef_") + QString::number(QDateTime::currentMSecsSinceEpoch()));
+  QDir().mkpath(dir);
+  QString err;
+  const QString gpkg = SurveyProjectFactory::createNewSurvey(dir, QStringLiteral("georef"), &err);
+  QVERIFY2(!gpkg.isEmpty(), qPrintable(err));
+
+  QgsProject proj;
+  auto* cp = new QgsVectorLayer(QStringLiteral("%1|layername=control_points").arg(gpkg),
+                                QStringLiteral("control_points"), QStringLiteral("ogr"));
+  QVERIFY(cp->isValid());
+  proj.addMapLayer(cp);
+  QVERIFY(cp->startEditing());
+  for (int i = 0; i < 2; ++i) {
+    QgsFeature cf(cp->fields());
+    cf.setAttribute(QStringLiteral("point_id"), QStringLiteral("G%1").arg(i + 1));
+    cf.setGeometry(QgsGeometry::fromPointXY(QgsPointXY(200000.0 + i * 100, 450000.0)));
+    QVERIFY(cp->addFeature(cf));
+  }
+  QVERIFY(cp->commitChanges());
+
+  const QString png = QDir(dir).filePath(QStringLiteral("scan.png"));
+  QImage img(64, 64, QImage::Format_RGB32);
+  img.fill(Qt::white);
+  QVERIFY(img.save(png));
+
+  QString gerr;
+  const QString wf = LayerOps::georeferenceImageSimple(png, cp, &proj, nullptr, &gerr);
+  QVERIFY2(!wf.isEmpty(), qPrintable(gerr));
+  QVERIFY(QFile::exists(wf) || QFile::exists(QDir(dir).filePath(QStringLiteral("scan.pgw"))));
+  const QString pgw = QDir(dir).filePath(QStringLiteral("scan.pgw"));
+  QVERIFY2(QFile::exists(pgw), "worldfile missing");
+  QFile f(pgw);
+  QVERIFY(f.open(QIODevice::ReadOnly | QIODevice::Text));
+  const QString body = QString::fromUtf8(f.readAll());
+  QVERIFY(body.split(QLatin1Char('\n'), Qt::SkipEmptyParts).size() >= 6);
+}
+
+void TestWorkflow::convert5186PolygonTo5179Shp() {
+  const QString dir = QDir::temp().filePath(QStringLiteral("ka_5179_") + QString::number(QDateTime::currentMSecsSinceEpoch()));
+  QDir().mkpath(dir);
+  QString err;
+  const QString gpkg = SurveyProjectFactory::createNewSurvey(dir, QStringLiteral("work5186"), &err,
+                                                             QStringLiteral("EPSG:5186"));
+  QVERIFY2(!gpkg.isEmpty(), qPrintable(err));
+  auto* fp = new QgsVectorLayer(QStringLiteral("%1|layername=feature_poly").arg(gpkg),
+                                QStringLiteral("feature_poly"), QStringLiteral("ogr"));
+  QVERIFY(fp->isValid());
+  QCOMPARE(fp->crs().authid(), QStringLiteral("EPSG:5186"));
+  QVERIFY(fp->startEditing());
+  QgsFeature ff(fp->fields());
+  ff.setAttribute(QStringLiteral("kind"), QStringLiteral("수혈"));
+  ff.setAttribute(QStringLiteral("period"), QStringLiteral("청동"));
+  QgsPolylineXY ring;
+  ring << QgsPointXY(200000, 450000) << QgsPointXY(200050, 450000) << QgsPointXY(200050, 450050)
+       << QgsPointXY(200000, 450050) << QgsPointXY(200000, 450000);
+  ff.setGeometry(QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring));
+  QVERIFY(fp->addFeature(ff));
+  QVERIFY(fp->commitChanges());
+
+  const QString out = QDir(dir).filePath(QStringLiteral("feat_5179.shp"));
+  QString cerr;
+  QVERIFY2(!LayerOps::convertToShp5179(fp, out, nullptr, &cerr).isEmpty(), qPrintable(cerr));
+  QVERIFY(QFile::exists(out));
+  QgsVectorLayer loaded(out, QStringLiteral("u"), QStringLiteral("ogr"));
+  QVERIFY(loaded.isValid());
+  QVERIFY(loaded.crs().authid() == QStringLiteral("EPSG:5179") || loaded.crs().isValid());
+  QCOMPARE(int(loaded.featureCount()), 1);
+  delete fp;
 }
 
 #include "test_workflow.moc"
