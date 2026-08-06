@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-06 17:56:03 +09:00 |
+| Updated (local) | 2026-08-06 17:56:55 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `cf24f11` |
-| HEAD full | `cf24f11135c845dc778047de19b29629686c146b` |
-| HEAD date | 2026-08-06 17:40:59 +0900 |
+| HEAD short | `fdf9a32` |
+| HEAD full | `fdf9a32a39f5c363320698560d551b5d70bf28b1` |
+| HEAD date | 2026-08-06 17:56:03 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Make post-commit only refresh ledger without amend |
-| Total commits | 44 |
+| HEAD subject | Stabilize digitizing and ship field-ready UX for ka-hgis. |
+| Total commits | 45 |
 | Upstream | `origin/main` |
-| Sync | up to date with origin/main |
+| Sync | ahead 1 of origin/main (push pending) |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (13 paths) |
+| Working tree dirty | **yes** (1 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Make post-commit only refresh ledger without amend (`cf24f11` @ 2026-08-06 17:40:59 +0900)
-- **Remote sync at write time:** up to date with origin/main
-- **Uncommitted local changes at write time:** yes (13 paths)
+- **Recorded tip when this file was written:** Stabilize digitizing and ship field-ready UX for ka-hgis. (`fdf9a32` @ 2026-08-06 17:56:03 +0900)
+- **Remote sync at write time:** ahead 1 of origin/main (push pending)
+- **Uncommitted local changes at write time:** yes (1 paths)
 
 ### Read this correctly
 
@@ -51,6 +51,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `fdf9a32` | 2026-08-06T17:56:03+09:00 | Stabilize digitizing and ship field-ready UX for ka-hgis. |
 | `cf24f11` | 2026-08-06T17:40:59+09:00 | Make post-commit only refresh ledger without amend |
 | `555bb36` | 2026-08-06T17:40:44+09:00 | Stop post-commit amend; keep ledger refresh dirty until next commit |
 | `2e1d8c8` | 2026-08-06T17:40:27+09:00 | Simplify commit ledger hooks and clarify how to read progress |
@@ -80,24 +81,11 @@
 | `aff389c` | 2026-08-06T16:20:11+09:00 | Refresh e2e smoke script and demo GCP sample |
 | `9097a63` | 2026-08-06T16:20:11+09:00 | Update job cards and document architecture data flow |
 | `941f6f2` | 2026-08-06T16:20:11+09:00 | Wire layout and state services into CMake and MainWindow |
-| `6e2cfed` | 2026-08-06T16:20:11+09:00 | Add GCP accuracy and fix-type fields to survey factory |
 
 ## Staged in this commit
 
 ```
-M	.gitignore
-M	CMakeLists.txt
 M	docs/COMMIT_STATUS.md
-A	src/app/KaCaptureMapTool.cpp
-A	src/app/KaCaptureMapTool.h
-M	src/app/KaIcons.cpp
-M	src/app/MainWindow.cpp
-M	src/app/MainWindow.h
-M	src/core/LayerOps.cpp
-M	src/core/LayoutService.cpp
-M	src/core/LayoutService.h
-A	src/core/LocationSearch.cpp
-A	src/core/LocationSearch.h
 ```
 ## Other PC checklist
 
