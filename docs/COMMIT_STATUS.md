@@ -8,15 +8,15 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-06 17:39:16 +09:00 |
+| Updated (local) | 2026-08-06 17:39:31 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `5228369` |
-| HEAD full | `5228369183fab133cf6f20f0c6763752f519876e` |
-| HEAD date | 2026-08-06 17:39:15 +0900 |
+| HEAD short | `640df4b` |
+| HEAD full | `640df4b97abfaa36f13f3af39653322044f3e4fb` |
+| HEAD date | 2026-08-06 17:39:30 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Amend commit status after commit so HEAD hash is accurate |
-| Total commits | 39 |
+| HEAD subject | Refresh COMMIT_STATUS snapshot to current HEAD |
+| Total commits | 40 |
 | Upstream | `origin/main` |
 | Sync | ahead 1 of origin/main (push pending) |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
@@ -24,7 +24,7 @@
 
 ## How far we are
 
-- **Last committed work:** Amend commit status after commit so HEAD hash is accurate (`5228369` @ 2026-08-06 17:39:15 +0900)
+- **Last committed work:** Refresh COMMIT_STATUS snapshot to current HEAD (`640df4b` @ 2026-08-06 17:39:30 +0900)
 - **Remote sync:** ahead 1 of origin/main (push pending)
 - **Uncommitted local changes:** yes (10 paths)
 
@@ -38,13 +38,15 @@ If dirty = yes, another computer will **not** see those changes until you commit
 - `38df550` portable exe in repo ??Track portable dist package with exe for other PCs
 - `6ecd673` UI icons ??Add drawn KaIcons set for menus and toolbars
 - `c4156c2` commit progress ledger ??Add always-on git commit progress ledger in docs/COMMIT_STATUS.md
-- `5228369` commit progress ledger ??Amend commit status after commit so HEAD hash is accurate
+- `7a48524` commit progress ledger ??Amend commit status after commit so HEAD hash is accurate
+- `640df4b` commit progress ledger ??Refresh COMMIT_STATUS snapshot to current HEAD
 
 ## Recent commits (newest first, max 30)
 
 | Hash | Date | Subject |
 |------|------|---------|
-| `5228369` | 2026-08-06T17:39:15+09:00 | Amend commit status after commit so HEAD hash is accurate |
+| `640df4b` | 2026-08-06T17:39:30+09:00 | Refresh COMMIT_STATUS snapshot to current HEAD |
+| `7a48524` | 2026-08-06T17:39:15+09:00 | Amend commit status after commit so HEAD hash is accurate |
 | `c4156c2` | 2026-08-06T17:38:44+09:00 | Add always-on git commit progress ledger in docs/COMMIT_STATUS.md |
 | `bfa9f90` | 2026-08-06T17:20:54+09:00 | Polish MainWindow with icons, toolbar, and layer delete |
 | `6ecd673` | 2026-08-06T17:20:54+09:00 | Add drawn KaIcons set for menus and toolbars |
@@ -73,7 +75,6 @@ If dirty = yes, another computer will **not** see those changes until you commit
 | `687dd60` | 2026-08-06T16:20:10+09:00 | Export real SHP packages with layout PDF and SHA256 manifest |
 | `3de7681` | 2026-08-06T16:20:10+09:00 | Add LayoutService for default print layouts and PDF export |
 | `d63e82e` | 2026-08-06T16:20:10+09:00 | Add ProjectStateBuilder for live checklist project state |
-| `b98c2f6` | 2026-08-06T15:30:00+09:00 | Add GitHub Actions CI with sanity and optional self-hosted build |
 
 ## Other PC checklist
 
