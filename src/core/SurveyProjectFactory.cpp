@@ -17,7 +17,8 @@
 
 QString SurveyProjectFactory::createNewSurvey(const QString& directory,
                                               const QString& surveyName,
-                                              QString* errorOut) {
+                                              QString* errorOut,
+                                              const QString& workCrsAuthId) {
   QDir dir(directory);
   if (!dir.exists() && !QDir().mkpath(directory)) {
     if (errorOut) *errorOut = QStringLiteral("Cannot create folder");
@@ -30,7 +31,13 @@ QString SurveyProjectFactory::createNewSurvey(const QString& directory,
   const QString gpkgPath = dir.filePath(safe + QStringLiteral(".gpkg"));
   if (QFile::exists(gpkgPath)) QFile::remove(gpkgPath);
 
-  const QgsCoordinateReferenceSystem crs(QString::fromUtf8(defaultCrsAuthId()));
+  QString crsId = workCrsAuthId.trimmed();
+  if (crsId.isEmpty()) crsId = QString::fromUtf8(defaultWorkCrsAuthId());
+  QgsCoordinateReferenceSystem crs(crsId);
+  if (!crs.isValid()) {
+    if (errorOut) *errorOut = QStringLiteral("Invalid work CRS: %1").arg(crsId);
+    return {};
+  }
   QgsCoordinateTransformContext transformContext;
 
   struct LayerDef { const char* name; const char* geom; };
