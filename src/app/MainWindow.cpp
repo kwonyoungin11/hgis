@@ -2,6 +2,8 @@
 #include "core/ChecklistEngine.h"
 #include "core/SurveyProjectFactory.h"
 #include "core/ExportService.h"
+#include "core/ProjectStateBuilder.h"
+#include "core/LayoutService.h"
 
 #include <QAction>
 #include <QDockWidget>
@@ -65,7 +67,6 @@ QString MainWindow::rulesPath() const {
   const QStringList cands = {
     QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../data/rules/drawing_checklist.v1.json")),
     QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("data/rules/drawing_checklist.v1.json")),
-    QStringLiteral("D:/qgis/data/rules/drawing_checklist.v1.json"),
     QDir::current().filePath(QStringLiteral("data/rules/drawing_checklist.v1.json"))
   };
   for (const QString& c : cands) if (QFile::exists(c)) return c;
@@ -221,6 +222,9 @@ void MainWindow::newSurvey() {
   m_surveyPath = path;
   m_stubSurveyArea = 0; m_stubFeatures = 0; m_stubGcp = 0; m_stubHasMeta = false;
   loadSurveyLayers(path);
+#if KA_HGIS_HAS_QGIS
+  LayoutService::ensureDefaultLayouts(QgsProject::instance());
+#endif
   setWindowTitle(QStringLiteral("고고학 전용 HGIS — %1").arg(name));
   statusBar()->showMessage(QStringLiteral("조사 생성: %1 %2").arg(path, err), 8000);
   m_steps->setCurrentRow(1);
@@ -258,11 +262,48 @@ void MainWindow::beginEdit(QgsVectorLayer* layer) {
   snap.setTolerance(15);
   snap.setUnits(Qgis::MapToolUnit::Pixels);
   QgsProject::instance()->setSnappingConfig(snap);
-  // Prefer digitize feature tool when available
-  auto* tool = new QgsMapToolDigitizeFeature(m_canvas, nullptr, QgsMapToolCapture::CaptureNone);
+
+  QgsMapToolCapture::CaptureMode mode = QgsMapToolCapture::CaptureNone;
+  const Qgis::GeometryType gt = layer->geometryType();
+  if (gt == Qgis::GeometryType::Polygon) mode = QgsMapToolCapture::CapturePolygon;
+  else if (gt == Qgis::GeometryType::Line) mode = QgsMapToolCapture::CaptureLine;
+  else if (gt == Qgis::GeometryType::Point) mode = QgsMapToolCapture::CapturePoint;
+
+  auto* tool = new QgsMapToolDigitizeFeature(m_canvas, nullptr, mode);
   tool->setLayer(layer);
+  QObject::connect(tool, &QgsMapToolDigitizeFeature::digitizingCompleted, this,
+                   [this, layer](const QgsFeature& inFeat) {
+    if (!layer) return;
+    QgsFeature feat(inFeat);
+    feat.setFields(layer->fields(), true);
+    if (layer->name() == QLatin1String("feature_poly")) {
+      bool ok = false;
+      const QString kind = QInputDialog::getText(this, QStringLiteral("유구 속성"),
+          QStringLiteral("종류(필수)"), QLineEdit::Normal, QString(), &ok);
+      if (!ok || kind.trimmed().isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("필수"), QStringLiteral("종류를 입력해야 합니다."));
+        return;
+      }
+      const QString period = QInputDialog::getText(this, QStringLiteral("유구 속성"),
+          QStringLiteral("시대(필수)"), QLineEdit::Normal, QString(), &ok);
+      if (!ok || period.trimmed().isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("필수"), QStringLiteral("시대를 입력해야 합니다."));
+        return;
+      }
+      feat.setAttribute(QStringLiteral("kind"), kind.trimmed());
+      feat.setAttribute(QStringLiteral("period"), period.trimmed());
+    } else if (layer->name() == QLatin1String("survey_area")) {
+      const QString sn = QInputDialog::getText(this, QStringLiteral("조사구역"), QStringLiteral("조사명(선택)"));
+      if (!sn.trimmed().isEmpty()) feat.setAttribute(QStringLiteral("survey_name"), sn.trimmed());
+    }
+    if (!layer->addFeature(feat)) {
+      QMessageBox::warning(this, QStringLiteral("오류"), QStringLiteral("피처 추가 실패"));
+      return;
+    }
+    statusBar()->showMessage(QStringLiteral("피처 추가됨 — 저장을 누르세요"), 5000);
+  });
   m_canvas->setMapTool(tool);
-  statusBar()->showMessage(QStringLiteral("편집 중: %1 — 완료 후 저장").arg(layer->name()), 0);
+  statusBar()->showMessage(QStringLiteral("편집 중: %1 — 우클릭 완료 후 속성, 저장 클릭").arg(layer->name()), 0);
 }
 #endif
 
@@ -321,7 +362,9 @@ void MainWindow::addControlPoint() {
   auto* ell = new QLineEdit(QStringLiteral("GRS80"), &dlg);
   auto* proj = new QLineEdit(QStringLiteral("TM/UTM-K"), &dlg);
   auto* origin = new QLineEdit(&dlg);
-  auto* acc = new QLineEdit(QStringLiteral("2DRMS<=1m"), &dlg);
+  auto* acc = new QLineEdit(QStringLiteral("1.0"), &dlg);
+  auto* pdop = new QLineEdit(QStringLiteral("1.5"), &dlg);
+  auto* fix = new QLineEdit(QStringLiteral("RTK"), &dlg);
   form->addRow(QStringLiteral("점ID"), id);
   form->addRow(QStringLiteral("X"), x);
   form->addRow(QStringLiteral("Y"), y);
@@ -329,7 +372,9 @@ void MainWindow::addControlPoint() {
   form->addRow(QStringLiteral("타원체"), ell);
   form->addRow(QStringLiteral("투영"), proj);
   form->addRow(QStringLiteral("원점"), origin);
-  form->addRow(QStringLiteral("정확도"), acc);
+  form->addRow(QStringLiteral("accuracy_m"), acc);
+  form->addRow(QStringLiteral("PDOP"), pdop);
+  form->addRow(QStringLiteral("fix_type"), fix);
   auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
   form->addRow(buttons);
   connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
@@ -352,6 +397,9 @@ void MainWindow::addControlPoint() {
     f.setAttribute(QStringLiteral("projection"), proj->text());
     f.setAttribute(QStringLiteral("origin"), origin->text());
     f.setAttribute(QStringLiteral("accuracy"), acc->text());
+    f.setAttribute(QStringLiteral("accuracy_m"), acc->text().toDouble());
+    f.setAttribute(QStringLiteral("pdop"), pdop->text().toDouble());
+    f.setAttribute(QStringLiteral("fix_type"), fix->text());
     QgsPointXY pt(x->text().toDouble(), y->text().toDouble());
     f.setGeometry(QgsGeometry::fromPointXY(pt));
     layer->addFeature(f);
@@ -383,46 +431,21 @@ void MainWindow::importControlCsv() {
 }
 
 QJsonObject MainWindow::buildProjectState() const {
-  QJsonObject st;
-  int survey = m_stubSurveyArea;
-  int gcp = m_stubGcp;
-  int feats = m_stubFeatures;
-  bool hasMeta = m_stubHasMeta;
 #if KA_HGIS_HAS_QGIS
-  if (auto* sa = layerByName(QStringLiteral("survey_area"))) survey = std::max(survey, (int)sa->featureCount());
-  if (auto* cp = layerByName(QStringLiteral("control_points"))) {
-    gcp = std::max(gcp, (int)cp->featureCount());
-    // meta presence
-    bool d=false,e=false,p=false;
-    QgsFeatureIterator it = cp->getFeatures();
-    QgsFeature f;
-    while (it.nextFeature(f)) {
-      if (!f.attribute(QStringLiteral("datum")).toString().isEmpty()) d=true;
-      if (!f.attribute(QStringLiteral("ellipsoid")).toString().isEmpty()) e=true;
-      if (!f.attribute(QStringLiteral("projection")).toString().isEmpty()) p=true;
-    }
-    hasMeta = d && e && p;
-  }
-  if (auto* fp = layerByName(QStringLiteral("feature_poly"))) feats = std::max(feats, (int)fp->featureCount());
-  st.insert(QStringLiteral("project_crs_set"), QgsProject::instance()->crs().isValid());
+  return ProjectStateBuilder::fromProject(QgsProject::instance());
 #else
+  QJsonObject st = ProjectStateBuilder::empty();
+  st.insert(QStringLiteral("survey_area_count"), m_stubSurveyArea);
+  st.insert(QStringLiteral("control_points_count"), m_stubGcp);
+  st.insert(QStringLiteral("feature_poly_count"), m_stubFeatures);
   st.insert(QStringLiteral("project_crs_set"), true);
-#endif
-  st.insert(QStringLiteral("survey_area_count"), survey);
-  st.insert(QStringLiteral("control_points_count"), gcp);
-  st.insert(QStringLiteral("feature_poly_count"), feats);
-  st.insert(QStringLiteral("has_datum"), hasMeta);
-  st.insert(QStringLiteral("has_ellipsoid"), hasMeta);
-  st.insert(QStringLiteral("has_projection"), hasMeta);
-  st.insert(QStringLiteral("has_origin"), true);
-  st.insert(QStringLiteral("has_accuracy"), true);
-  st.insert(QStringLiteral("has_kind_period"), feats == 0 || true);
-  st.insert(QStringLiteral("has_abstract_marker"), false);
-  st.insert(QStringLiteral("layout_exists:site_location"), true);
-  st.insert(QStringLiteral("layout_exists:feature_plan"), true);
-  st.insert(QStringLiteral("layout_exists:feature_detail"), true);
-  st.insert(QStringLiteral("layout_exists:section"), true);
+  st.insert(QStringLiteral("has_datum"), m_stubHasMeta);
+  st.insert(QStringLiteral("has_ellipsoid"), m_stubHasMeta);
+  st.insert(QStringLiteral("has_projection"), m_stubHasMeta);
+  st.insert(QStringLiteral("has_kind_period"), true);
+  st.insert(QStringLiteral("survey_is_polygon"), m_stubSurveyArea > 0);
   return st;
+#endif
 }
 
 void MainWindow::runChecklist() {
@@ -443,12 +466,23 @@ void MainWindow::runChecklist() {
 }
 
 void MainWindow::exportPdf() {
-  const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("PDF"), QStringLiteral("도면.pdf"), QStringLiteral("PDF (*.pdf)"));
+#if KA_HGIS_HAS_QGIS
+  LayoutService::ensureDefaultLayouts(QgsProject::instance());
+  const QString layoutName = QInputDialog::getItem(
+      this, QStringLiteral("도면 PDF"), QStringLiteral("레이아웃"),
+      LayoutService::defaultLayoutNames(), 0, false);
+  if (layoutName.isEmpty()) return;
+  const QString path = QFileDialog::getSaveFileName(
+      this, QStringLiteral("PDF"), layoutName + QStringLiteral(".pdf"), QStringLiteral("PDF (*.pdf)"));
   if (path.isEmpty()) return;
   QString err;
-  if (ExportService::writePdfPlaceholder(path, QStringLiteral("KA-HGIS Drawing"), &err).isEmpty())
+  if (ExportService::writePdfViaLayout(QgsProject::instance(), layoutName, path, &err).isEmpty())
     QMessageBox::warning(this, QStringLiteral("PDF"), err);
-  else statusBar()->showMessage(QStringLiteral("PDF: %1").arg(path), 5000);
+  else
+    statusBar()->showMessage(QStringLiteral("PDF: %1").arg(path), 5000);
+#else
+  QMessageBox::warning(this, QStringLiteral("PDF"), QStringLiteral("QGIS 빌드 필요"));
+#endif
 }
 
 void MainWindow::exportShpPackage() {
@@ -462,27 +496,22 @@ void MainWindow::exportShpPackage() {
     }
   }
   if (summary.isEmpty()) summary = QStringLiteral("OK\n");
-  QString enc = QInputDialog::getItem(this, QStringLiteral("인코딩"), QStringLiteral("SHP 인코딩"),
+  const QString enc = QInputDialog::getItem(this, QStringLiteral("인코딩"), QStringLiteral("SHP 인코딩"),
                                       {QStringLiteral("UTF-8"), QStringLiteral("EUC-KR")}, 0, false);
   const QString dir = QFileDialog::getExistingDirectory(this, QStringLiteral("제출 폴더"));
   if (dir.isEmpty()) return;
   QString err;
-  const QString out = ExportService::exportSubmissionPackage(dir, enc, summary, true, hasErr, &err);
-  if (out.isEmpty()) QMessageBox::warning(this, QStringLiteral("제출 차단"), err);
-  else {
 #if KA_HGIS_HAS_QGIS
-    // best-effort SHP export of survey_area
-    if (auto* sa = layerByName(QStringLiteral("survey_area"))) {
-      const QString shp = QDir(dir).filePath(QStringLiteral("survey_area.shp"));
-      QgsVectorFileWriter::SaveVectorOptions opts;
-      opts.driverName = QStringLiteral("ESRI Shapefile");
-      opts.fileEncoding = enc == QLatin1String("EUC-KR") ? QStringLiteral("CP949") : QStringLiteral("UTF-8");
-      QString e2; QString nf;
-      QgsVectorFileWriter::writeAsVectorFormatV3(sa, shp, QgsProject::instance()->transformContext(), opts, &e2, &nf, nullptr);
-    }
+  const QString out = ExportService::exportSubmissionPackage(
+      QgsProject::instance(), dir, enc, summary, true, hasErr, &err);
+#else
+  const QString out;
+  err = QStringLiteral("QGIS required");
 #endif
+  if (out.isEmpty())
+    QMessageBox::warning(this, QStringLiteral("제출 차단"), err);
+  else
     statusBar()->showMessage(QStringLiteral("제출 패키지: %1").arg(out), 6000);
-  }
 }
 
 void MainWindow::crsDefineOnly() {
@@ -545,5 +574,6 @@ void MainWindow::showAbout() {
                    "기본 CRS: EPSG:5179\n"
                    "소스: 본 저장소 제공"));
 }
+
 
 
