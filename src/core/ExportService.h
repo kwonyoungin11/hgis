@@ -1,13 +1,19 @@
 ﻿#pragma once
 #include <QString>
+#include <QStringList>
+class QgsProject;
 class ExportService {
 public:
-  // Writes README + copies/exports layers. Returns package dir or empty.
-  static QString exportSubmissionPackage(const QString& outDir,
+  static QString exportSubmissionPackage(QgsProject* project,
+                                         const QString& outDir,
                                          const QString& encoding,
                                          const QString& checklistSummary,
                                          bool blockOnError,
                                          bool hasChecklistErrors,
                                          QString* errorOut = nullptr);
-  static QString writePdfPlaceholder(const QString& outPath, const QString& title, QString* errorOut = nullptr);
+  static QString writePdfViaLayout(QgsProject* project,
+                                   const QString& layoutName,
+                                   const QString& outPath,
+                                   QString* errorOut = nullptr);
+  static bool writeSha256Manifest(const QString& dir, QString* errorOut = nullptr);
 };
