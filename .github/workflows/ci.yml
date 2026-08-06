@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Always runs on GitHub-hosted runners — no OSGeo4W required
+  sanity:
+    name: Sanity checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Required paths exist
+        run: |
+          set -euo pipefail
+          test -f CMakeLists.txt
+          test -f README.md
+          test -f LICENSE
+          test -f VERSION
+          test -f VERSION_QGIS_PIN.txt
+          test -f data/rules/drawing_checklist.v1.json
+          test -f data/schemas/ka_hgis_layers.yaml
+          test -f src/app/main.cpp
+          test -f src/core/ChecklistEngine.cpp
+          test -f tests/test_checklist.cpp
+          test -f scripts/dev-env.ps1
+          test -f scripts/run-ka-hgis.ps1
+          test -f scripts/e2e-smoke.ps1
+          echo "Required paths OK"
+
+      - name: Validate checklist JSON
+        run: python3 -m json.tool data/rules/drawing_checklist.v1.json > /dev/null
+
+      - name: Validate sample survey JSON
+        run: |
+          python3 -m json.tool samples/demo_survey/demo.ka-survey.json > /dev/null
+          python3 -m json.tool samples/bad_survey/bad.ka-survey.json > /dev/null
+
+      - name: CMakeLists basic shape
+        run: |
+          set -euo pipefail
+          grep -q 'project(ka-hgis' CMakeLists.txt
+          grep -q 'add_executable(ka-hgis' CMakeLists.txt
+          grep -q 'add_library(ka_core' CMakeLists.txt
+          grep -q 'KA_HGIS_BUILD_TESTS' CMakeLists.txt
+          echo "CMakeLists shape OK"
+
+  # Full Windows build — needs a self-hosted runner with OSGeo4W + VS2022
+  # Register runner: https://github.com/kwonyoungin11/hgis/settings/actions/runners
+  # Labels must include: self-hosted, Windows, ka-hgis
+  windows-build:
+    name: Windows build (self-hosted)
+    needs: sanity
+    if: ${{ vars.ENABLE_SELF_HOSTED_BUILD == 'true' }}
+    runs-on: [self-hosted, Windows, ka-hgis]
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure (VS 2022 x64)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:OSGEO4W_ROOT) { $env:OSGEO4W_ROOT = 'D:\OSGeo4W' }
+          if (-not (Test-Path $env:OSGEO4W_ROOT)) {
+            throw "OSGEO4W_ROOT not found: $($env:OSGEO4W_ROOT)"
+          }
+          . .\scripts\dev-env.ps1
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DKA_HGIS_BUILD_TESTS=ON
+
+      - name: Build Release
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . .\scripts\dev-env.ps1
+          cmake --build build --config Release
+
+      - name: CTest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . .\scripts\dev-env.ps1
+          ctest --test-dir build -C Release --output-on-failure
+
+      - name: Smoke quit
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . .\scripts\dev-env.ps1
+          .\scripts\run-ka-hgis.ps1 --smoke-quit
+
+      - name: E2E smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . .\scripts\dev-env.ps1
+          .\scripts\e2e-smoke.ps1
