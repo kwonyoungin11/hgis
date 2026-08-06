@@ -8,6 +8,7 @@
 #include "core/LayoutService.h"
 #include "core/LayerOps.h"
 #include "core/LocationSearch.h"
+#include "core/FeatureWriteService.h"
 
 #include <QAction>
 #include <QDockWidget>
@@ -780,20 +781,8 @@ void MainWindow::onGeometryCaptured(const QgsGeometry& geom) {
       statusBar()->showMessage(QStringLiteral("편집 레이어 없음 — 새 조사 후 다시 그리기"), 5000);
       return;
     }
-    if (geom.isEmpty()) {
-      statusBar()->showMessage(QStringLiteral("빈 도형 (면은 점 3개 이상, 선은 2개 이상)"), 5000);
-      return;
-    }
-    if (!layer->isEditable()) {
-      if (!layer->startEditing()) {
-        QMessageBox::warning(this, QStringLiteral("편집"), QStringLiteral("편집 모드 실패"));
-        return;
-      }
-    }
 
-    QgsFeature feat(layer->fields());
-    feat.setGeometry(geom);
-
+    QVariantMap attrs;
     if (layer->name() == QLatin1String("feature_poly") || layer->name() == QLatin1String("feature_line")) {
       bool ok = false;
       const QString kind = QInputDialog::getText(this, QStringLiteral("유구 속성"),
@@ -808,19 +797,17 @@ void MainWindow::onGeometryCaptured(const QgsGeometry& geom) {
         statusBar()->showMessage(QStringLiteral("시대 미입력 — 도형 저장 안 함"), 4000);
         return;
       }
-      const int ik = layer->fields().indexOf(QStringLiteral("kind"));
-      const int ip = layer->fields().indexOf(QStringLiteral("period"));
-      if (ik >= 0) feat.setAttribute(ik, kind.trimmed());
-      if (ip >= 0) feat.setAttribute(ip, period.trimmed());
+      attrs.insert(QStringLiteral("kind"), kind.trimmed());
+      attrs.insert(QStringLiteral("period"), period.trimmed());
     } else if (layer->name() == QLatin1String("survey_area")) {
       const QString sn = QInputDialog::getText(this, QStringLiteral("조사구역"), QStringLiteral("조사명(선택)"));
-      const int isn = layer->fields().indexOf(QStringLiteral("survey_name"));
-      if (isn >= 0 && !sn.trimmed().isEmpty()) feat.setAttribute(isn, sn.trimmed());
+      if (!sn.trimmed().isEmpty()) attrs.insert(QStringLiteral("survey_name"), sn.trimmed());
     }
 
-    if (!layer->addFeature(feat)) {
-      QMessageBox::warning(this, QStringLiteral("오류"),
-                           QStringLiteral("피처 추가 실패\n%1").arg(layer->commitErrors().join(QLatin1Char('\n'))));
+    const FeatureWriteResult wr = FeatureWriteService::addFeature(layer, geom, attrs);
+    if (!wr.ok) {
+      QMessageBox::warning(this, QStringLiteral("도형 저장"), wr.errorKo);
+      statusBar()->showMessage(wr.errorKo, 6000);
       return;
     }
     layer->triggerRepaint();

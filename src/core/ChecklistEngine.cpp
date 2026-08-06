@@ -42,6 +42,14 @@ bool ChecklistEngine::evalOne(const Rule& r, const QJsonObject& state) {
     return state.value(QStringLiteral("has_accuracy")).toBool(true);
   if (ct.startsWith(QLatin1String("project_crs_set")))
     return state.value(QStringLiteral("project_crs_set")).toBool();
+  if (ct.startsWith(QLatin1String("work_crs_korea"))) {
+    const QString crs = state.value(QStringLiteral("work_crs")).toString();
+    if (crs.isEmpty()) return true;
+    return crs.contains(QLatin1String("5186")) || crs.contains(QLatin1String("5187"))
+           || crs.contains(QLatin1String("5179"));
+  }
+  if (ct.startsWith(QLatin1String("geometries_valid")))
+    return state.value(QStringLiteral("geometries_valid")).toBool(true);
   if (ct.startsWith(QLatin1String("geometry_type:survey_area")))
     return state.value(QStringLiteral("survey_area_count")).toInt() == 0
         || state.value(QStringLiteral("survey_is_polygon")).toBool();

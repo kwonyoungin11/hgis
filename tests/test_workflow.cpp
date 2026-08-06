@@ -55,11 +55,12 @@ void TestWorkflow::fullWorkflowSurveyToPackage() {
   const QString dir = QDir::temp().filePath(QStringLiteral("ka_wf_") + QString::number(QDateTime::currentMSecsSinceEpoch()));
   QDir().mkpath(dir);
   QString err;
-  const QString gpkg = SurveyProjectFactory::createNewSurvey(dir, QStringLiteral("wfdemo"), &err);
+  const QString gpkg = SurveyProjectFactory::createNewSurvey(dir, QStringLiteral("wfdemo"), &err,
+                                                             QStringLiteral("EPSG:5186"));
   QVERIFY2(!gpkg.isEmpty(), qPrintable(err));
 
   QgsProject proj;
-  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5179")));
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
   for (const char* n : {"survey_area", "feature_poly", "feature_line", "section_line", "control_points"}) {
     auto* vl = new QgsVectorLayer(QStringLiteral("%1|layername=%2").arg(gpkg, QString::fromUtf8(n)),
                                   QString::fromUtf8(n), QStringLiteral("ogr"));

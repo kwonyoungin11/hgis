@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-06 17:57:06 +09:00 |
+| Updated (local) | 2026-08-07 07:51:43 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `cc4d983` |
-| HEAD full | `cc4d983a33de4a653a9215a9f7f4c9ed3e2d2c25` |
-| HEAD date | 2026-08-06 17:56:54 +0900 |
+| HEAD short | `43a94c6` |
+| HEAD full | `43a94c6921adb84c525d0d189377cf01209c8ae3` |
+| HEAD date | 2026-08-06 17:57:05 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Sync COMMIT_STATUS ledger after digitizing UX commit. |
-| Total commits | 46 |
+| HEAD subject | Refresh COMMIT_STATUS after push |
+| Total commits | 47 |
 | Upstream | `origin/main` |
 | Sync | up to date with origin/main |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (1 paths) |
+| Working tree dirty | **yes** (23 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Sync COMMIT_STATUS ledger after digitizing UX commit. (`cc4d983` @ 2026-08-06 17:56:54 +0900)
+- **Recorded tip when this file was written:** Refresh COMMIT_STATUS after push (`43a94c6` @ 2026-08-06 17:57:05 +0900)
 - **Remote sync at write time:** up to date with origin/main
-- **Uncommitted local changes at write time:** yes (1 paths)
+- **Uncommitted local changes at write time:** yes (23 paths)
 
 ### Read this correctly
 
@@ -47,11 +47,13 @@
 - `d9b7c2e` commit progress ledger ??Refresh COMMIT_STATUS snapshot to current HEAD
 - `ff2adeb` commit progress ledger ??Sync COMMIT_STATUS after push
 - `cc4d983` commit progress ledger ??Sync COMMIT_STATUS ledger after digitizing UX commit.
+- `43a94c6` commit progress ledger ??Refresh COMMIT_STATUS after push
 
 ## Recent commits (newest first, max 30)
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `43a94c6` | 2026-08-06T17:57:05+09:00 | Refresh COMMIT_STATUS after push |
 | `cc4d983` | 2026-08-06T17:56:54+09:00 | Sync COMMIT_STATUS ledger after digitizing UX commit. |
 | `fdf9a32` | 2026-08-06T17:56:03+09:00 | Stabilize digitizing and ship field-ready UX for ka-hgis. |
 | `cf24f11` | 2026-08-06T17:40:59+09:00 | Make post-commit only refresh ledger without amend |
@@ -81,12 +83,33 @@
 | `6c10f8d` | 2026-08-06T16:30:24+09:00 | Add LayerOps for reproject, basemap, style, and georef |
 | `a9e84f4` | 2026-08-06T16:30:24+09:00 | Ignore portable dist output directory |
 | `aff389c` | 2026-08-06T16:20:11+09:00 | Refresh e2e smoke script and demo GCP sample |
-| `9097a63` | 2026-08-06T16:20:11+09:00 | Update job cards and document architecture data flow |
 
 ## Staged in this commit
 
 ```
+M	CMakeLists.txt
+M	data/rules/drawing_checklist.v1.json
 M	docs/COMMIT_STATUS.md
+A	icon/README.md
+A	icon/ka-hgis-128.png
+A	icon/ka-hgis-16.png
+A	icon/ka-hgis-24.png
+A	icon/ka-hgis-256.png
+A	icon/ka-hgis-32.png
+A	icon/ka-hgis-48.png
+A	icon/ka-hgis-512.png
+A	icon/ka-hgis-64.png
+A	icon/ka-hgis-icon.png
+A	icon/ka-hgis-icon.svg
+A	icon/ka-hgis.ico
+A	icon/render_icons.py
+M	src/app/MainWindow.cpp
+M	src/core/ChecklistEngine.cpp
+A	src/core/FeatureWriteService.cpp
+A	src/core/FeatureWriteService.h
+M	src/core/ProjectStateBuilder.cpp
+A	tests/test_domain_tdd.cpp
+M	tests/test_workflow.cpp
 ```
 ## Other PC checklist
 

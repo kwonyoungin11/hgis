@@ -15,6 +15,7 @@ QJsonObject ProjectStateBuilder::empty() {
   st.insert(QStringLiteral("feature_poly_count"), 0);
   st.insert(QStringLiteral("feature_line_count"), 0);
   st.insert(QStringLiteral("project_crs_set"), false);
+  st.insert(QStringLiteral("work_crs"), QString());
   st.insert(QStringLiteral("has_datum"), false);
   st.insert(QStringLiteral("has_ellipsoid"), false);
   st.insert(QStringLiteral("has_projection"), false);
@@ -45,6 +46,7 @@ QJsonObject ProjectStateBuilder::fromProject(QgsProject* project) {
   if (!project) return st;
 
   st.insert(QStringLiteral("project_crs_set"), project->crs().isValid());
+  st.insert(QStringLiteral("work_crs"), project->crs().authid());
 
   auto* sa = layerByName(project, QStringLiteral("survey_area"));
   auto* fp = layerByName(project, QStringLiteral("feature_poly"));

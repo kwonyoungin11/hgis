@@ -18,7 +18,9 @@
     {"id": "FEATURE_NO_SYMBOL_ONLY", "severity": "error", "message_ko": "유구는 면/선 기하여야 합니다.", "check_type": "geometry_type:feature_poly|feature_line"},
     {"id": "FEATURE_LEGEND_FIELDS", "severity": "error", "message_ko": "유구 종류/시대 속성 필요.", "check_type": "field_any:feature_poly:kind,period"},
     {"id": "EXTENT_MATCH", "severity": "warn", "message_ko": "유구 범위가 조사구역과 어긋날 수 있음.", "check_type": "extent_within:features,survey_area"},
-    {"id": "CRS_PROJECT_SET", "severity": "error", "message_ko": "프로젝트 좌표계 미설정 (EPSG:5179 권장).", "check_type": "project_crs_set"},
-    {"id": "EXPORT_SHP_READY", "severity": "error", "message_ko": "SHP 내보내기 전 조사구역 무효.", "check_type": "export_ready:survey_area"}
+    {"id": "CRS_PROJECT_SET", "severity": "error", "message_ko": "프로젝트 좌표계 미설정. 작업은 EPSG:5186(중부) 또는 5187(동부), 업로드는 5179.", "check_type": "project_crs_set"},
+    {"id": "CRS_WORK_KOREA", "severity": "warn", "message_ko": "작업 CRS가 5186/5187이 아닙니다. 수치지형·지적과 맞는지 확인하세요.", "check_type": "work_crs_korea"},
+    {"id": "EXPORT_SHP_READY", "severity": "error", "message_ko": "SHP 내보내기 전 조사구역 무효.", "check_type": "export_ready:survey_area"},
+    {"id": "GEOM_VALID", "severity": "error", "message_ko": "유효하지 않은 도형이 있습니다. 꼬인 폴리곤을 수정하세요.", "check_type": "geometries_valid"}
   ]
 }

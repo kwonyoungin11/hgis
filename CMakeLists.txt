@@ -30,6 +30,7 @@ add_library(ka_core STATIC
   src/core/LayoutService.cpp
   src/core/LayerOps.cpp
   src/core/LocationSearch.cpp
+  src/core/FeatureWriteService.cpp
   src/core/ChecklistEngine.h
   src/core/SurveyProjectFactory.h
   src/core/ExportService.h
@@ -37,6 +38,7 @@ add_library(ka_core STATIC
   src/core/LayoutService.h
   src/core/LayerOps.h
   src/core/LocationSearch.h
+  src/core/FeatureWriteService.h
 )
 target_include_directories(ka_core PUBLIC ${KA_INCLUDES})
 target_link_directories(ka_core PUBLIC ${KA_LIBDIRS})
@@ -84,4 +86,11 @@ if(KA_HGIS_BUILD_TESTS)
   target_link_directories(ka_workflow_tests PRIVATE ${KA_LIBDIRS})
   target_compile_definitions(ka_workflow_tests PRIVATE ${KA_TEST_DEFS})
   add_test(NAME workflow_engine COMMAND ka_workflow_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+  add_executable(ka_domain_tdd_tests tests/test_domain_tdd.cpp)
+  target_link_libraries(ka_domain_tdd_tests PRIVATE ${KA_TEST_LIBS} Qt6::Network Qt6::Svg)
+  target_include_directories(ka_domain_tdd_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_domain_tdd_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_domain_tdd_tests PRIVATE ${KA_TEST_DEFS})
+  add_test(NAME domain_tdd COMMAND ka_domain_tdd_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 endif()
