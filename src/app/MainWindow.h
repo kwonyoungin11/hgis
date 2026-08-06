@@ -5,6 +5,7 @@ class QListWidget;
 class QListWidgetItem;
 class QLabel;
 class QToolBar;
+class QEvent;
 class ChecklistEngine;
 #if KA_HGIS_HAS_QGIS
 class QgsMapCanvas;
@@ -18,6 +19,7 @@ class MainWindow : public QMainWindow {
 public:
   explicit MainWindow(QWidget* parent = nullptr);
   ~MainWindow() override;
+  bool eventFilter(QObject* watched, QEvent* event) override;
 
 private slots:
   void onStepChanged(int row);
@@ -44,6 +46,7 @@ private slots:
   void addBasemapVworld();
   void addBasemapVworldSat();
   void addBasemapGoogle();
+  void removeSelectedLayers();
   void georefAssistant();
   void showAbout();
 
