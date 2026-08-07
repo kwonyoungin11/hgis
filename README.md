@@ -2,7 +2,8 @@
 
 C++/Qt6 독립 실행형 필드고고학 HGIS. **OSGeo4W qgis-dev (QGIS 4.x) 라이브러리 링크**. 소스 포크 아님.
 
-기본 CRS: **EPSG:5179**. 초보자 7단계 UI. 측량 폴리곤 중심 작성(제26조급 규칙 검수).
+**작업 CRS:** EPSG:5186(중부) / 5187(동부). **업로드/인트라넷:** EPSG:5179.  
+초보자 7단계 UI. 측량 폴리곤 중심 작성(제26조급 규칙 검수).
 
 ## 환경 (이 머신 검증)
 - CMake 4.4+, VS 2022 BuildTools MSVC 19.4x
@@ -36,22 +37,22 @@ cd dist\ka-hgis-portable
 ```
 
 ### 7단계
-1. 새 조사 (GPKG 도메인 레이어)
-2. 배경 (파일 / OSM)
-3. 구역 디지타이즈
-4. 유구 폴리곤 (kind/period 필수)
-5. GPS/GCP (accuracy_m, pdop, fix_type, pixel_x/y)
-6. 검수 (18규칙 체크리스트)
-7. 제출 (PDF 5종 + SHP 패키지 + MANIFEST.sha256)
+1. 새 조사 (GPKG, 작업 CRS 5186/5187 선택)
+2. 배경·지적 (VWorld/파일; 위치검색)
+3. 구역 디지타이즈 (폴리곤)
+4. 유구 면/선 (kind/period 필수)
+5. GPS/GCP ≥2 (accuracy_m, pdop, fix_type 등)
+6. 검수 (체크리스트 error=0)
+7. 제출: **5179 SHP 변환** + PDF(범례·축척) + 패키지·MANIFEST
 
-### 도구 메뉴
+### 좌표계·도구
 | 기능 | 설명 |
 |---|---|
-| CRS 이름만 지정 | 좌표 변환 없이 라벨만 변경 (위험) |
-| 좌표 변환(재투영) | 벡터 → 새 GPKG/SHP |
-| 지오레퍼런스 | GCP≥2 월드파일; pixel_x/y 3점+ 시 아핀 LS |
-| OSM 배경 | XYZ 타일 |
-| 유구 스타일 | kind/period 범주 |
+| 작업 CRS 5186/5187 | 수치지형·지적·작도 |
+| 5179 SHP 변환 | 문화재 인트라넷 업/다운로드용 |
+| CRS 이름만 지정 | 좌표 미변환 라벨만 (위험) |
+| 지오레퍼런스 | GCP≥2 월드파일 |
+| VWorld/위성 배경 | 한국 타일 배경 |
 
 ## 문서
 - 시나리오: `docs/user/gui-scenario-checklist.md`

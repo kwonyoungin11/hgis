@@ -53,6 +53,8 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QTimer>
+#include <QBrush>
+#include <QColor>
 
 #if KA_HGIS_HAS_QGIS
 #include <qgsmapcanvas.h>
@@ -224,18 +226,16 @@ void MainWindow::buildMenus() {
   mainTb->addSeparator();
   mainTb->addAction(KaIcons::icon(QStringLiteral("layer")), QStringLiteral("벡터"), this, &MainWindow::openVectorLayer);
   mainTb->addAction(KaIcons::icon(QStringLiteral("map")), QStringLiteral("VWorld"), this, &MainWindow::addBasemapVworld);
-  mainTb->addAction(KaIcons::icon(QStringLiteral("satellite")), QStringLiteral("위성"), this, &MainWindow::addBasemapGoogle);
   mainTb->addSeparator();
-  mainTb->addAction(KaIcons::icon(QStringLiteral("draw_area")), QStringLiteral("구역그리기"), this, &MainWindow::startEditSurveyArea);
-  mainTb->addAction(KaIcons::icon(QStringLiteral("draw_poly")), QStringLiteral("유구면그리기"), this, &MainWindow::startEditFeaturePoly);
-  mainTb->addAction(KaIcons::icon(QStringLiteral("draw_line")), QStringLiteral("선그리기"), this, &MainWindow::startEditFeatureLine);
+  mainTb->addAction(KaIcons::icon(QStringLiteral("draw_area")), QStringLiteral("구역"), this, &MainWindow::startEditSurveyArea);
+  mainTb->addAction(KaIcons::icon(QStringLiteral("draw_poly")), QStringLiteral("유구면"), this, &MainWindow::startEditFeaturePoly);
+  mainTb->addAction(KaIcons::icon(QStringLiteral("draw_line")), QStringLiteral("선"), this, &MainWindow::startEditFeatureLine);
   mainTb->addAction(KaIcons::icon(QStringLiteral("gps")), QStringLiteral("GPS"), this, &MainWindow::addControlPoint);
   mainTb->addSeparator();
   mainTb->addAction(KaIcons::icon(QStringLiteral("check")), QStringLiteral("검수"), this, &MainWindow::runChecklist);
-  mainTb->addAction(KaIcons::icon(QStringLiteral("upload")), QStringLiteral("5179변환"), this, &MainWindow::convertSelectedTo5179);
+  mainTb->addAction(KaIcons::icon(QStringLiteral("upload")), QStringLiteral("5179"), this, &MainWindow::convertSelectedTo5179);
   mainTb->addAction(KaIcons::icon(QStringLiteral("pdf")), QStringLiteral("PDF"), this, &MainWindow::exportPdf);
   mainTb->addAction(KaIcons::icon(QStringLiteral("export")), QStringLiteral("제출"), this, &MainWindow::exportShpPackage);
-  mainTb->addAction(KaIcons::icon(QStringLiteral("trash")), QStringLiteral("삭제"), this, &MainWindow::removeSelectedLayers);
 }
 
 void MainWindow::buildUi() {
@@ -246,7 +246,7 @@ void MainWindow::buildUi() {
   m_steps->setObjectName(QStringLiteral("stepRail"));
   m_steps->setIconSize(QSize(32, 32));
   m_steps->setSpacing(4);
-  const QStringList stepLabels = {
+  m_stepBaseLabels = {
     QStringLiteral("새 조사 만들기"),
     QStringLiteral("배경·지적 불러오기"),
     QStringLiteral("조사구역 그리기"),
@@ -255,8 +255,8 @@ void MainWindow::buildUi() {
     QStringLiteral("도면 검수"),
     QStringLiteral("제출 패키지")
   };
-  for (int i = 0; i < stepLabels.size(); ++i) {
-    auto* it = new QListWidgetItem(KaIcons::step(i + 1), stepLabels[i]);
+  for (int i = 0; i < m_stepBaseLabels.size(); ++i) {
+    auto* it = new QListWidgetItem(KaIcons::step(i + 1), m_stepBaseLabels[i]);
     it->setSizeHint(QSize(200, 44));
     m_steps->addItem(it);
   }
@@ -391,6 +391,7 @@ void MainWindow::buildUi() {
 
   setCentralWidget(central);
 
+  refreshStepProgress();
   if (!QSettings().value(QStringLiteral("ui/beginnerTipShown")).toBool()) {
     QTimer::singleShot(600, this, &MainWindow::showBeginnerGuide);
     QSettings().setValue(QStringLiteral("ui/beginnerTipShown"), true);
@@ -398,8 +399,65 @@ void MainWindow::buildUi() {
 }
 
 void MainWindow::onStepChanged(int row) {
+  if (row > 0 && !isStepComplete(row - 1)) {
+    statusBar()->showMessage(
+        QStringLiteral("안내: 이전 단계(%1)를 먼저 끝내는 것이 좋습니다. (이동은 가능)")
+            .arg(row),
+        5000);
+  }
   setStepTools(row);
   updateBeginnerGuide(row);
+  refreshStepProgress();
+}
+
+bool MainWindow::isStepComplete(int step) const {
+  if (step < 0 || step > 6) return false;
+#if KA_HGIS_HAS_QGIS
+  auto count = [this](const char* name) -> int {
+    if (auto* vl = layerByName(QString::fromUtf8(name))) return int(vl->featureCount());
+    return 0;
+  };
+  switch (step) {
+  case 0: return !m_surveyPath.isEmpty() || layerByName(QStringLiteral("survey_area")) != nullptr;
+  case 1: return isStepComplete(0);
+  case 2: return count("survey_area") >= 1 || m_stubSurveyArea >= 1;
+  case 3: return (count("feature_poly") + count("feature_line")) >= 1 || m_stubFeatures >= 1;
+  case 4: return count("control_points") >= 2 || m_stubGcp >= 2;
+  case 5: return m_lastChecklistErrors == 0;
+  case 6: return m_exportedOnce;
+  default: return false;
+  }
+#else
+  switch (step) {
+  case 0: return !m_surveyPath.isEmpty();
+  case 1: return isStepComplete(0);
+  case 2: return m_stubSurveyArea >= 1;
+  case 3: return m_stubFeatures >= 1;
+  case 4: return m_stubGcp >= 2;
+  case 5: return m_lastChecklistErrors == 0;
+  case 6: return m_exportedOnce;
+  default: return false;
+  }
+#endif
+}
+
+void MainWindow::refreshStepProgress() {
+  if (!m_steps || m_stepBaseLabels.size() != 7) return;
+  for (int i = 0; i < 7; ++i) {
+    QListWidgetItem* it = m_steps->item(i);
+    if (!it) continue;
+    const bool done = isStepComplete(i);
+    const QString base = m_stepBaseLabels[i];
+    it->setText(done ? (QStringLiteral("✓ ") + base) : base);
+    it->setIcon(done ? KaIcons::icon(QStringLiteral("check")) : KaIcons::step(i + 1));
+    if (done) {
+      it->setForeground(QBrush(QColor(22, 101, 52)));
+    } else if (i > 0 && !isStepComplete(i - 1)) {
+      it->setForeground(QBrush(QColor(148, 163, 184)));
+    } else {
+      it->setForeground(QBrush(QColor(15, 23, 42)));
+    }
+  }
 }
 
 void MainWindow::updateBeginnerGuide(int step) {
@@ -553,6 +611,7 @@ void MainWindow::newSurvey() {
   statusBar()->showMessage(QStringLiteral("조사 생성 %1 | 작업 %2 | 업로드시 5179 변환")
                                .arg(path, m_workCrs),
                            10000);
+  refreshStepProgress();
   m_steps->setCurrentRow(1);
 }
 
@@ -602,10 +661,12 @@ void MainWindow::convertSelectedTo5179() {
   if (LayerOps::convertToShp5179(vl, out, QgsProject::instance(), &err).isEmpty())
     QMessageBox::warning(this, QStringLiteral("변환 실패"), err);
   else {
+    m_exportedOnce = true;
     if (m_canvas) m_canvas->refresh();
     statusBar()->showMessage(QStringLiteral("5179 SHP 생성(업로드용): %1").arg(out), 10000);
     QMessageBox::information(this, QStringLiteral("완료"),
                              QStringLiteral("EPSG:5179 SHP 저장됨.\n인트라넷 업로드에 이 파일을 사용하세요.\n%1").arg(out));
+    refreshStepProgress();
   }
 #else
   QMessageBox::warning(this, QStringLiteral("CRS"), QStringLiteral("QGIS 빌드 필요"));
@@ -753,6 +814,7 @@ void MainWindow::loadSurveyLayers(const QString& gpkgOrStub) {
     LayerOps::applyFeaturePolyStyle(fp);
   LayoutService::ensureDefaultLayouts(QgsProject::instance());
   if (m_canvas) m_canvas->refresh();
+  refreshStepProgress();
 #else
   Q_UNUSED(gpkgOrStub);
 #endif
@@ -917,6 +979,7 @@ void MainWindow::saveEdits() {
   }
   if (m_canvas) m_canvas->refresh();
   statusBar()->showMessage(QStringLiteral("저장 완료 (%1개 레이어)").arg(n), 5000);
+  refreshStepProgress();
 #else
   statusBar()->showMessage(QStringLiteral("스텁 저장"), 3000);
 #endif
@@ -1040,7 +1103,9 @@ void MainWindow::runChecklist() {
   }
   if (err == 0 && warn == 0) html += QStringLiteral("<span style='color:green'>모두 통과</span>");
   m_checkView->setText(html);
+  m_lastChecklistErrors = err;
   statusBar()->showMessage(QStringLiteral("검수: error %1 / warn %2").arg(err).arg(warn), 6000);
+  refreshStepProgress();
 }
 
 void MainWindow::exportPdf() {
@@ -1056,8 +1121,11 @@ void MainWindow::exportPdf() {
   QString err;
   if (ExportService::writePdfViaLayout(QgsProject::instance(), layoutName, path, &err).isEmpty())
     QMessageBox::warning(this, QStringLiteral("PDF"), err);
-  else
+  else {
+    m_exportedOnce = true;
     statusBar()->showMessage(QStringLiteral("PDF: %1").arg(path), 5000);
+    refreshStepProgress();
+  }
 #else
   QMessageBox::warning(this, QStringLiteral("PDF"), QStringLiteral("QGIS 빌드 필요"));
 #endif
@@ -1088,8 +1156,11 @@ void MainWindow::exportShpPackage() {
 #endif
   if (out.isEmpty())
     QMessageBox::warning(this, QStringLiteral("제출 차단"), err);
-  else
+  else {
+    m_exportedOnce = true;
     statusBar()->showMessage(QStringLiteral("제출 패키지: %1").arg(out), 6000);
+    refreshStepProgress();
+  }
 }
 
 void MainWindow::crsDefineOnly() {

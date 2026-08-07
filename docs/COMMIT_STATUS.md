@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-07 07:51:43 +09:00 |
+| Updated (local) | 2026-08-07 09:04:05 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `43a94c6` |
-| HEAD full | `43a94c6921adb84c525d0d189377cf01209c8ae3` |
-| HEAD date | 2026-08-06 17:57:05 +0900 |
+| HEAD short | `40ee2f5` |
+| HEAD full | `40ee2f5b1f524eff5c7a458a735f31d37bbbd730` |
+| HEAD date | 2026-08-07 07:51:42 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Refresh COMMIT_STATUS after push |
-| Total commits | 47 |
+| HEAD subject | Lock domain rules with TDD and FeatureWriteService. |
+| Total commits | 48 |
 | Upstream | `origin/main` |
-| Sync | up to date with origin/main |
+| Sync | ahead 1 of origin/main (push pending) |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (23 paths) |
+| Working tree dirty | **yes** (11 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Refresh COMMIT_STATUS after push (`43a94c6` @ 2026-08-06 17:57:05 +0900)
-- **Remote sync at write time:** up to date with origin/main
-- **Uncommitted local changes at write time:** yes (23 paths)
+- **Recorded tip when this file was written:** Lock domain rules with TDD and FeatureWriteService. (`40ee2f5` @ 2026-08-07 07:51:42 +0900)
+- **Remote sync at write time:** ahead 1 of origin/main (push pending)
+- **Uncommitted local changes at write time:** yes (11 paths)
 
 ### Read this correctly
 
@@ -53,6 +53,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `40ee2f5` | 2026-08-07T07:51:42+09:00 | Lock domain rules with TDD and FeatureWriteService. |
 | `43a94c6` | 2026-08-06T17:57:05+09:00 | Refresh COMMIT_STATUS after push |
 | `cc4d983` | 2026-08-06T17:56:54+09:00 | Sync COMMIT_STATUS ledger after digitizing UX commit. |
 | `fdf9a32` | 2026-08-06T17:56:03+09:00 | Stabilize digitizing and ship field-ready UX for ka-hgis. |
@@ -82,34 +83,19 @@
 | `a96e5c1` | 2026-08-06T16:30:24+09:00 | Enrich default layouts with extent, legend, and titles |
 | `6c10f8d` | 2026-08-06T16:30:24+09:00 | Add LayerOps for reproject, basemap, style, and georef |
 | `a9e84f4` | 2026-08-06T16:30:24+09:00 | Ignore portable dist output directory |
-| `aff389c` | 2026-08-06T16:20:11+09:00 | Refresh e2e smoke script and demo GCP sample |
 
 ## Staged in this commit
 
 ```
 M	CMakeLists.txt
-M	data/rules/drawing_checklist.v1.json
-M	docs/COMMIT_STATUS.md
-A	icon/README.md
-A	icon/ka-hgis-128.png
-A	icon/ka-hgis-16.png
-A	icon/ka-hgis-24.png
-A	icon/ka-hgis-256.png
-A	icon/ka-hgis-32.png
-A	icon/ka-hgis-48.png
-A	icon/ka-hgis-512.png
-A	icon/ka-hgis-64.png
-A	icon/ka-hgis-icon.png
-A	icon/ka-hgis-icon.svg
-A	icon/ka-hgis.ico
-A	icon/render_icons.py
+A	DESIGN.md
+M	README.md
+M	docs/user/gui-scenario-checklist.md
+M	docs/ux/ia-beginner.md
+M	docs/ux/mainwindow-wireframe.md
+M	src/app/KaApplication.cpp
 M	src/app/MainWindow.cpp
-M	src/core/ChecklistEngine.cpp
-A	src/core/FeatureWriteService.cpp
-A	src/core/FeatureWriteService.h
-M	src/core/ProjectStateBuilder.cpp
-A	tests/test_domain_tdd.cpp
-M	tests/test_workflow.cpp
+M	src/app/MainWindow.h
 ```
 ## Other PC checklist
 

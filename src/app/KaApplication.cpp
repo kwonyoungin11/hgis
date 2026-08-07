@@ -3,9 +3,25 @@
 #include <QApplication>
 #include <QDebug>
 #include <QDir>
+#include <QFileInfo>
+#include <QIcon>
 #include <QMetaObject>
 #include <QCoreApplication>
 #include <cstdlib>
+
+static QIcon loadAppIcon() {
+  const QStringList cands = {
+    QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("ka-hgis.ico")),
+    QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../icon/ka-hgis.ico")),
+    QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../../icon/ka-hgis.ico")),
+    QDir::current().filePath(QStringLiteral("icon/ka-hgis.ico")),
+    QStringLiteral("D:/qgis/icon/ka-hgis.ico"),
+  };
+  for (const QString& p : cands) {
+    if (QFileInfo::exists(p)) return QIcon(p);
+  }
+  return {};
+}
 
 #if KA_HGIS_HAS_QGIS
 #include <qgsapplication.h>
@@ -56,8 +72,12 @@ int KaApplication::run(int argc, char** argv) {
 
   app.setApplicationName(QStringLiteral("ka-hgis"));
   app.setApplicationDisplayName(QStringLiteral("고고학 전용 HGIS"));
+  app.setOrganizationName(QStringLiteral("ka-hgis"));
+  const QIcon appIcon = loadAppIcon();
+  if (!appIcon.isNull()) app.setWindowIcon(appIcon);
 
   MainWindow w;
+  if (!appIcon.isNull()) w.setWindowIcon(appIcon);
   w.show();
 
   if (smokeQuit) {

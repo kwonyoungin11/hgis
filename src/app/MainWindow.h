@@ -65,6 +65,8 @@ private:
   void buildMenus();
   void setStepTools(int step);
   void updateBeginnerGuide(int step);
+  void refreshStepProgress();
+  bool isStepComplete(int step) const;
   void loadSurveyLayers(const QString& gpkgOrStub);
   void applyStartupMap();
   void setWorkCrs(const QString& authId);
@@ -95,6 +97,9 @@ private:
   int m_stubFeatures = 0;
   int m_stubGcp = 0;
   bool m_stubHasMeta = false;
+  int m_lastChecklistErrors = -1;
+  bool m_exportedOnce = false;
+  QStringList m_stepBaseLabels;
 #if KA_HGIS_HAS_QGIS
   QgsMapCanvas* m_canvas = nullptr;
   QgsLayerTreeView* m_layerTree = nullptr;

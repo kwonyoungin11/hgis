@@ -66,6 +66,9 @@ add_custom_command(TARGET ka-hgis POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${CMAKE_SOURCE_DIR}/data/rules/drawing_checklist.v1.json"
     "$<TARGET_FILE_DIR:ka-hgis>/data/rules/drawing_checklist.v1.json"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_SOURCE_DIR}/icon/ka-hgis.ico"
+    "$<TARGET_FILE_DIR:ka-hgis>/ka-hgis.ico"
 )
 
 if(KA_HGIS_BUILD_TESTS)
