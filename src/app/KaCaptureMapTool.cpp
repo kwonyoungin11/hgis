@@ -8,7 +8,6 @@
 #include <qgsmapsettings.h>
 #include <QKeyEvent>
 #include <QColor>
-#include <QTimer>
 #include <cmath>
 
 KaCaptureMapTool::KaCaptureMapTool(QgsMapCanvas* canvas)
@@ -18,6 +17,10 @@ KaCaptureMapTool::KaCaptureMapTool(QgsMapCanvas* canvas)
 
 KaCaptureMapTool::~KaCaptureMapTool() {
   destroyRubber();
+}
+
+QgsMapTool::Flags KaCaptureMapTool::flags() const {
+  return QgsMapTool::EditTool;
 }
 
 void KaCaptureMapTool::setMode(Mode mode) {
@@ -37,12 +40,24 @@ void KaCaptureMapTool::resetSession() {
 
 void KaCaptureMapTool::destroyRubber() {
   if (!m_rubber) return;
-  QgsMapCanvas* c = canvas();
-  if (c) {
-    m_rubber->reset(Qgis::GeometryType::Line);
-  }
+  m_rubber->reset(Qgis::GeometryType::Line);
   delete m_rubber;
   m_rubber = nullptr;
+}
+
+bool KaCaptureMapTool::mapPointFromEvent(QgsMapMouseEvent* e, QgsPointXY* out) {
+  if (!e || !out || !canvas()) return false;
+  try {
+    *out = e->mapPoint();
+  } catch (...) {
+    try {
+      *out = toMapCoordinates(e->pos());
+    } catch (...) {
+      return false;
+    }
+  }
+  if (std::isnan(out->x()) || std::isnan(out->y())) return false;
+  return true;
 }
 
 void KaCaptureMapTool::rebuildRubber(const QgsPointXY* cursorOrNull) {
@@ -54,10 +69,10 @@ void KaCaptureMapTool::rebuildRubber(const QgsPointXY* cursorOrNull) {
     if (m_mode == Mode::Polygon) gt = Qgis::GeometryType::Polygon;
     else if (m_mode == Mode::Point) gt = Qgis::GeometryType::Point;
     m_rubber = new QgsRubberBand(c, gt);
-    m_rubber->setWidth(2);
-    m_rubber->setSecondaryStrokeColor(QColor(255, 255, 255, 180));
+    m_rubber->setWidth(3);
+    m_rubber->setSecondaryStrokeColor(QColor(255, 255, 255, 200));
     m_rubber->setColor(QColor(37, 99, 235));
-    m_rubber->setFillColor(QColor(37, 99, 235, 70));
+    m_rubber->setFillColor(QColor(37, 99, 235, 80));
   }
 
   Qgis::GeometryType gt = Qgis::GeometryType::Line;
@@ -78,7 +93,13 @@ void KaCaptureMapTool::activate() {
   m_finishing = false;
   m_points.clear();
   destroyRubber();
+  if (canvas()) {
+    canvas()->setMouseTracking(true);
+    canvas()->freeze(false);
+    canvas()->setRenderFlag(true);
+  }
   QgsMapTool::activate();
+  setCursor(Qt::CrossCursor);
 }
 
 void KaCaptureMapTool::deactivate() {
@@ -90,18 +111,12 @@ void KaCaptureMapTool::deactivate() {
 
 void KaCaptureMapTool::canvasPressEvent(QgsMapMouseEvent* e) {
   if (!e || !canvas() || m_finishing) return;
-  e->accept();
 
   QgsPointXY mapPt;
-  try {
-    mapPt = e->mapPoint();
-  } catch (...) {
-    return;
-  }
-  if (std::isnan(mapPt.x()) || std::isnan(mapPt.y()))
-    return;
+  if (!mapPointFromEvent(e, &mapPt)) return;
 
   if (e->button() == Qt::LeftButton) {
+    e->accept();
     if (m_mode == Mode::Point) {
       m_points.clear();
       m_points.append(mapPt);
@@ -110,21 +125,32 @@ void KaCaptureMapTool::canvasPressEvent(QgsMapMouseEvent* e) {
     }
     m_points.append(mapPt);
     rebuildRubber(&mapPt);
-    return;
   }
+}
 
-  if (e->button() == Qt::RightButton) {
-    finish();
+void KaCaptureMapTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
+  if (!e || !canvas() || m_finishing) return;
+  if (e->button() != Qt::RightButton) return;
+  e->accept();
+  finish();
+}
+
+void KaCaptureMapTool::canvasDoubleClickEvent(QgsMapMouseEvent* e) {
+  if (!e || m_finishing || m_mode == Mode::Point) return;
+  e->accept();
+  QgsPointXY mapPt;
+  if (mapPointFromEvent(e, &mapPt)) {
+    if (m_points.isEmpty() || m_points.last() != mapPt)
+      m_points.append(mapPt);
   }
+  finish();
 }
 
 void KaCaptureMapTool::canvasMoveEvent(QgsMapMouseEvent* e) {
   if (!e || m_points.isEmpty() || m_mode == Mode::Point || m_finishing) return;
-  try {
-    const QgsPointXY mapPt = e->mapPoint();
-    rebuildRubber(&mapPt);
-  } catch (...) {
-  }
+  QgsPointXY mapPt;
+  if (!mapPointFromEvent(e, &mapPt)) return;
+  rebuildRubber(&mapPt);
 }
 
 void KaCaptureMapTool::keyPressEvent(QKeyEvent* e) {
@@ -139,7 +165,7 @@ void KaCaptureMapTool::keyPressEvent(QKeyEvent* e) {
     e->accept();
     return;
   }
-  if (e->key() == Qt::Key_Backspace) {
+  if (e->key() == Qt::Key_Backspace || e->key() == Qt::Key_Delete) {
     if (!m_points.isEmpty()) {
       m_points.removeLast();
       if (m_points.isEmpty())
@@ -155,31 +181,36 @@ void KaCaptureMapTool::keyPressEvent(QKeyEvent* e) {
 
 void KaCaptureMapTool::finish() {
   if (m_finishing) return;
+
+  const int need = (m_mode == Mode::Point) ? 1 : (m_mode == Mode::Line ? 2 : 3);
+  if (m_points.size() < need) {
+    emit captureCanceled();
+    return;
+  }
+
   m_finishing = true;
 
   QgsGeometry geom;
   bool ok = false;
-  if (m_mode == Mode::Point && m_points.size() >= 1) {
+  if (m_mode == Mode::Point) {
     geom = QgsGeometry::fromPointXY(m_points.first());
     ok = !geom.isEmpty();
-  } else if (m_mode == Mode::Line && m_points.size() >= 2) {
+  } else if (m_mode == Mode::Line) {
     geom = QgsGeometry::fromPolylineXY(m_points);
     ok = !geom.isEmpty();
-  } else if (m_mode == Mode::Polygon && m_points.size() >= 3) {
+  } else {
     QgsPolylineXY ring = m_points;
     if (!ring.isEmpty() && ring.first() != ring.last())
       ring.append(ring.first());
     geom = QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring);
-    ok = !geom.isEmpty() && geom.isGeosValid();
-    if (!ok && !geom.isEmpty()) {
-      geom = geom.makeValid();
-      ok = !geom.isEmpty();
+    ok = !geom.isEmpty();
+    if (ok && !geom.isGeosValid()) {
+      const QgsGeometry fixed = geom.makeValid();
+      if (!fixed.isEmpty())
+        geom = fixed;
     }
+    ok = !geom.isEmpty();
   }
-
-  const QVector<QgsPointXY> savedPts = m_points;
-  m_points.clear();
-  destroyRubber();
 
   if (!ok) {
     m_finishing = false;
@@ -190,22 +221,29 @@ void KaCaptureMapTool::finish() {
   if (m_layer && canvas()) {
     const QgsCoordinateReferenceSystem src = canvas()->mapSettings().destinationCrs();
     const QgsCoordinateReferenceSystem dst = m_layer->crs();
-    if (src.isValid() && dst.isValid() && src.authid() != dst.authid()) {
+    if (src.isValid() && dst.isValid() && src != dst) {
       try {
-        QgsCoordinateTransform xf(src, dst, QgsProject::instance()->transformContext());
+        QgsCoordinateTransform xf(src, dst, QgsProject::instance()
+                                                ? QgsProject::instance()->transformContext()
+                                                : QgsCoordinateTransformContext());
         xf.setBallparkTransformsAreAppropriate(true);
-        geom.transform(xf);
+        if (geom.transform(xf) != Qgis::GeometryOperationResult::Success) {
+          m_finishing = false;
+          emit captureCanceled();
+          return;
+        }
       } catch (...) {
+        m_finishing = false;
+        emit captureCanceled();
+        return;
       }
     }
   }
 
-  const QgsGeometry out = geom;
-  QTimer::singleShot(0, this, [this, out]() {
-    m_finishing = false;
-    emit geometryCaptured(out);
-  });
-  Q_UNUSED(savedPts);
+  m_points.clear();
+  destroyRubber();
+  m_finishing = false;
+  emit geometryCaptured(geom);
 }
 
 void KaCaptureMapTool::cancel() {
@@ -214,4 +252,3 @@ void KaCaptureMapTool::cancel() {
   m_finishing = false;
   emit captureCanceled();
 }
-

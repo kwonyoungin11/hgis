@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-09 18:53:45 +09:00 |
+| Updated (local) | 2026-08-09 18:53:47 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `f659bdb` |
-| HEAD full | `f659bdb3d177eb76830ae2cb913a6fe3a54fd812` |
-| HEAD date | 2026-08-09 18:53:27 +0900 |
+| HEAD short | `ca3a77e` |
+| HEAD full | `ca3a77eb90f25c56c87a82e845f60f92ec47404d` |
+| HEAD date | 2026-08-09 18:53:44 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Add QGIS 3.44 manuals as design guide and agent SSOT rules. |
-| Total commits | 4 |
+| HEAD subject | Fix domain layer symbology so digitized features render on canvas. |
+| Total commits | 5 |
 | Upstream | `origin/main` |
-| Sync | ahead 1 of origin/main (push pending) |
+| Sync | ahead 2 of origin/main (push pending) |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (12 paths) |
+| Working tree dirty | **yes** (10 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Add QGIS 3.44 manuals as design guide and agent SSOT rules. (`f659bdb` @ 2026-08-09 18:53:27 +0900)
-- **Remote sync at write time:** ahead 1 of origin/main (push pending)
-- **Uncommitted local changes at write time:** yes (12 paths)
+- **Recorded tip when this file was written:** Fix domain layer symbology so digitized features render on canvas. (`ca3a77e` @ 2026-08-09 18:53:44 +0900)
+- **Remote sync at write time:** ahead 2 of origin/main (push pending)
+- **Uncommitted local changes at write time:** yes (10 paths)
 
 ### Read this correctly
 
@@ -44,6 +44,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `ca3a77e` | 2026-08-09T18:53:44+09:00 | Fix domain layer symbology so digitized features render on canvas. |
 | `f659bdb` | 2026-08-09T18:53:27+09:00 | Add QGIS 3.44 manuals as design guide and agent SSOT rules. |
 | `536977c` | 2026-08-09T16:10:06+09:00 | Sync COMMIT_STATUS to HEAD after push. |
 | `99bd664` | 2026-08-09T16:09:56+09:00 | Refresh COMMIT_STATUS for baseline HEAD. |
@@ -52,8 +53,8 @@
 ## Staged in this commit
 
 ```
-M	src/core/LayerOps.cpp
-M	src/core/LayerOps.h
+M	src/app/KaCaptureMapTool.cpp
+M	src/app/KaCaptureMapTool.h
 ```
 ## Other PC checklist
 
