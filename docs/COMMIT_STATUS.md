@@ -8,24 +8,24 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-09 18:57:29 +09:00 |
+| Updated (local) | 2026-08-09 18:57:38 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `30c1a6d` |
-| HEAD full | `30c1a6d210dd8bdf19975565eb027c6ddd7b990b` |
-| HEAD date | 2026-08-09 18:57:26 +0900 |
+| HEAD short | `6b9f373` |
+| HEAD full | `6b9f373c74fcacead496ab931cadc8862b941dd3` |
+| HEAD date | 2026-08-09 18:57:28 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Add bootstrap-dev-pc so a fresh clone can build and develop immediately. |
-| Total commits | 12 |
+| HEAD subject | Refresh COMMIT_STATUS after bootstrap docs commit. |
+| Total commits | 13 |
 | Upstream | `origin/main` |
-| Sync | ahead 1 of origin/main (push pending) |
+| Sync | up to date with origin/main |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
 | Working tree dirty | **yes** (1 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Add bootstrap-dev-pc so a fresh clone can build and develop immediately. (`30c1a6d` @ 2026-08-09 18:57:26 +0900)
-- **Remote sync at write time:** ahead 1 of origin/main (push pending)
+- **Recorded tip when this file was written:** Refresh COMMIT_STATUS after bootstrap docs commit. (`6b9f373` @ 2026-08-09 18:57:28 +0900)
+- **Remote sync at write time:** up to date with origin/main
 - **Uncommitted local changes at write time:** yes (1 paths)
 
 ### Read this correctly
@@ -41,11 +41,13 @@
 - `536977c` commit progress ledger ??Sync COMMIT_STATUS to HEAD after push.
 - `c1a3c12` commit progress ledger ??Refresh COMMIT_STATUS ledger after feature commits.
 - `31e51be` commit progress ledger ??Sync COMMIT_STATUS to HEAD after push ledger update.
+- `6b9f373` commit progress ledger ??Refresh COMMIT_STATUS after bootstrap docs commit.
 
 ## Recent commits (newest first, max 30)
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `6b9f373` | 2026-08-09T18:57:28+09:00 | Refresh COMMIT_STATUS after bootstrap docs commit. |
 | `30c1a6d` | 2026-08-09T18:57:26+09:00 | Add bootstrap-dev-pc so a fresh clone can build and develop immediately. |
 | `31e51be` | 2026-08-09T18:54:02+09:00 | Sync COMMIT_STATUS to HEAD after push ledger update. |
 | `c1a3c12` | 2026-08-09T18:53:52+09:00 | Refresh COMMIT_STATUS ledger after feature commits. |
