@@ -17,8 +17,37 @@ Reply in the user’s language (usually Korean). Code/identifiers in files: Engl
 2. `docs/adr/0001-standalone-cpp-qgis-libs.md` — Architecture B, no fork
 3. `docs/domain/data-model.md` — GPKG layers & fields
 4. `docs/architecture/data-flow.md` — critical path
+5. **QGIS manuals (ALWAYS — behavior + API wiring)** under `docs/vendor/qgis-manual-3.44/`:
+   - Desktop User Guide (EN/KO) — UX lifecycle
+   - **PyQGIS Developer Cookbook (EN/KO)** — vector layer / edit buffer / addMapLayer
+   - Online: https://docs.qgis.org/latest/en/docs/user_manual/
+   - Cookbook: https://docs.qgis.org/latest/en/docs/pyqgis_developer_cookbook/vector.html
 
 Also useful: `docs/PO_GOAL_*.md`, `docs/user/gui-scenario-checklist.md`, `docs/COMMIT_STATUS.md`.
+
+---
+
+## QGIS manual + developer cookbook as design guide (ALWAYS)
+
+Use manuals to decide **how tools connect**, not to clone QGIS chrome.
+
+### From Desktop User Guide
+| QGIS concept | ka-hgis rule |
+| --- | --- |
+| Project starts without user layers until added/created | **새 조사** must NOT dump empty domain layers into the legend |
+| Layer = datasource; feature = digitized geometry | Legend entry only when user **draws / imports / opens** that layer |
+| Basemap separate from edit data | **참조 지도** vs survey domain |
+
+### From PyQGIS Developer Cookbook (vector layers) — mandatory wiring
+| Cookbook rule | ka-hgis implementation |
+| --- | --- |
+| Layer shows in legend only after `QgsProject::addMapLayer` | `LayerOps::ensureDomainLayer` is the **only** path that adds domain layers (from digitize/import) |
+| GUI edit: `startEditing` → modify → `commitChanges` / `rollBack` | Digitize: startEditing → addFeature → commit (keep tool); **편집저장** commits remaining |
+| `QgsFeature(layer.fields())` + `setGeometry` then `addFeature` | `onGeometryCaptured` must follow this; no attribute dialogs during draw |
+| Do not add layer to project just because GPKG table exists on disk | GPKG schema may exist after 새 조사; **legend stays empty until user action** |
+| Never silent auto-seed of demo geometries in normal UI | `--demo-seed` only for automated QA; never on plain run / 새 조사 |
+
+**Do not** paste QGIS UI wholesale. **Do** match project/layer/edit lifecycle so a QGIS-literate user is not surprised.
 
 ---
 
@@ -30,6 +59,7 @@ Also useful: `docs/PO_GOAL_*.md`, `docs/user/gui-scenario-checklist.md`, `docs/C
 - Legend groups: **조사 데이터** vs **참조 지도** (basemap is NOT survey data)
 - Work CRS: EPSG:5186 / 5187 OK; **upload/export = EPSG:5179** SHP(+PDF) + MANIFEST
 - `loadSurveyLayers` must NOT `removeAllMapLayers()` — drop domain layers only; keep basemaps
+- **`loadSurveyLayers` must NOT auto-add empty domain layers** — GPKG schema may exist on disk; legend only after user draw/import/open of that layer
 - No hardcoded VWorld production API key — `VworldSettings` only
 - No DXF as submit path (SHP/PDF package via `ExportService`)
 - GPLv2+ compliance (About notices)

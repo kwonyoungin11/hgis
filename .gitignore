@@ -85,3 +85,6 @@ venv/
 config/secrets.ini
 **/secrets.ini
 
+
+# QGIS offline manuals: large Desktop User Guide PDFs stay local (see docs/vendor/qgis-manual-3.44/README.md)
+docs/vendor/qgis-manual-3.44/QGIS-*-DesktopUserGuide-*.pdf

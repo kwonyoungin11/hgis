@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-09 16:10:07 +09:00 |
+| Updated (local) | 2026-08-09 18:53:28 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `99bd664` |
-| HEAD full | `99bd664222636a239ad3e1dec1d6cf1dca31e19c` |
-| HEAD date | 2026-08-09 16:09:56 +0900 |
+| HEAD short | `536977c` |
+| HEAD full | `536977c5f7da06425c427cd9473825667c2ffe81` |
+| HEAD date | 2026-08-09 16:10:06 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Refresh COMMIT_STATUS for baseline HEAD. |
-| Total commits | 2 |
+| HEAD subject | Sync COMMIT_STATUS to HEAD after push. |
+| Total commits | 3 |
 | Upstream | `origin/main` |
 | Sync | up to date with origin/main |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (1 paths) |
+| Working tree dirty | **yes** (16 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Refresh COMMIT_STATUS for baseline HEAD. (`99bd664` @ 2026-08-09 16:09:56 +0900)
+- **Recorded tip when this file was written:** Sync COMMIT_STATUS to HEAD after push. (`536977c` @ 2026-08-09 16:10:06 +0900)
 - **Remote sync at write time:** up to date with origin/main
-- **Uncommitted local changes at write time:** yes (1 paths)
+- **Uncommitted local changes at write time:** yes (16 paths)
 
 ### Read this correctly
 
@@ -38,18 +38,24 @@
 ## Milestone markers
 
 - `99bd664` commit progress ledger ??Refresh COMMIT_STATUS for baseline HEAD.
+- `536977c` commit progress ledger ??Sync COMMIT_STATUS to HEAD after push.
 
 ## Recent commits (newest first, max 30)
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `536977c` | 2026-08-09T16:10:06+09:00 | Sync COMMIT_STATUS to HEAD after push. |
 | `99bd664` | 2026-08-09T16:09:56+09:00 | Refresh COMMIT_STATUS for baseline HEAD. |
 | `eac6c9c` | 2026-08-09T16:09:43+09:00 | Initial baseline: ka-hgis v0.3 archaeology HGIS (C++/Qt6 + QGIS libs). |
 
 ## Staged in this commit
 
 ```
-M	docs/COMMIT_STATUS.md
+M	.gitignore
+M	AGENTS.md
+A	docs/vendor/qgis-manual-3.44/QGIS-3.44-PyQGISDeveloperCookbook-en.pdf
+A	docs/vendor/qgis-manual-3.44/QGIS-3.44-PyQGISDeveloperCookbook-ko.pdf
+A	docs/vendor/qgis-manual-3.44/README.md
 ```
 ## Other PC checklist
 
