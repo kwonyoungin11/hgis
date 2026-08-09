@@ -27,15 +27,16 @@ bool FeatureWriteService::isAcceptablePolygon(const QgsGeometry& geom, QString* 
     if (errorKo) *errorKo = QStringLiteral("면은 꼭짓점 3개 이상 필요합니다. (닫힌 링 기준 4좌표)");
     return false;
   }
-  if (!geom.isGeosValid()) {
-    QgsGeometry fixed = geom.makeValid();
-    if (fixed.isEmpty() || fixed.area() <= 0) {
+  QgsGeometry g = geom;
+  if (!g.isGeosValid()) {
+    g = g.makeValid();
+    if (g.isEmpty()) {
       if (errorKo) *errorKo = QStringLiteral("유효하지 않은 면 도형입니다. 선을 꼬이지 않게 다시 그려 주세요.");
       return false;
     }
   }
-  if (geom.area() <= 0) {
-    if (errorKo) *errorKo = QStringLiteral("면적이 0입니다. 폴리곤으로 닫아 주세요.");
+  if (g.area() <= 0) {
+    if (errorKo) *errorKo = QStringLiteral("면적이 0입니다. 점 3개 이상으로 크게 그려 주세요.");
     return false;
   }
   return true;
@@ -90,16 +91,28 @@ FeatureWriteResult FeatureWriteService::addFeature(QgsVectorLayer* layer,
 
   QString gerr;
   const Qgis::GeometryType lgt = layer->geometryType();
-  bool gok = false;
-  if (lgt == Qgis::GeometryType::Polygon) gok = isAcceptablePolygon(geom, &gerr);
-  else if (lgt == Qgis::GeometryType::Line) gok = isAcceptableLine(geom, &gerr);
-  else if (lgt == Qgis::GeometryType::Point) gok = isAcceptablePoint(geom, &gerr);
-  else {
+  QgsGeometry useGeom = geom;
+  if (lgt == Qgis::GeometryType::Polygon) {
+    if (!isAcceptablePolygon(useGeom, &gerr)) {
+      r.errorKo = gerr;
+      return r;
+    }
+    if (!useGeom.isGeosValid()) {
+      const QgsGeometry fixed = useGeom.makeValid();
+      if (!fixed.isEmpty()) useGeom = fixed;
+    }
+  } else if (lgt == Qgis::GeometryType::Line) {
+    if (!isAcceptableLine(useGeom, &gerr)) {
+      r.errorKo = gerr;
+      return r;
+    }
+  } else if (lgt == Qgis::GeometryType::Point) {
+    if (!isAcceptablePoint(useGeom, &gerr)) {
+      r.errorKo = gerr;
+      return r;
+    }
+  } else {
     r.errorKo = QStringLiteral("지원하지 않는 레이어 기하 유형입니다.");
-    return r;
-  }
-  if (!gok) {
-    r.errorKo = gerr;
     return r;
   }
 
@@ -114,7 +127,7 @@ FeatureWriteResult FeatureWriteService::addFeature(QgsVectorLayer* layer,
   }
 
   QgsFeature feat(layer->fields());
-  feat.setGeometry(geom);
+  feat.setGeometry(useGeom);
   for (auto it = attributes.constBegin(); it != attributes.constEnd(); ++it) {
     const int idx = layer->fields().indexOf(it.key());
     if (idx >= 0) feat.setAttribute(idx, it.value());

@@ -7,6 +7,7 @@
 #include <cmath>
 #include <algorithm>
 #include <QPainter>
+#include <QUrl>
 
 #include <qgsproject.h>
 #include <qgsvectorlayer.h>
@@ -23,6 +24,8 @@
 #include <qgsgeometry.h>
 #include <qgspointxy.h>
 #include <qgscategorizedsymbolrenderer.h>
+#include <qgssinglesymbolrenderer.h>
+#include <qgssymbollayer.h>
 #include <qgssymbol.h>
 #include <qgsrenderer.h>
 #include <qgsrectangle.h>
@@ -32,6 +35,7 @@
 #include <qgsrasterresamplefilter.h>
 #include <qgsrasterdataprovider.h>
 #include <qgsnetworkaccessmanager.h>
+#include "LocationSearch.h"
 
 QString LayerOps::reprojectVectorLayer(QgsVectorLayer* layer, const QString& targetCrsAuthId,
                                        const QString& outPath, QgsProject* project, QString* errorOut) {
@@ -95,9 +99,25 @@ int LayerOps::ensureControlPointQualityFields(QgsVectorLayer* controlPoints) {
 
 bool LayerOps::applyFeaturePolyStyle(QgsVectorLayer* featurePoly) {
   if (!featurePoly || !featurePoly->isValid()) return false;
+
+  auto brightPoly = []() -> QgsSymbol* {
+    QgsSymbol* sym = QgsSymbol::defaultSymbol(Qgis::GeometryType::Polygon);
+    if (!sym) return nullptr;
+    sym->setColor(QColor(234, 88, 12, 160));
+    if (sym->symbolLayerCount() > 0)
+      sym->symbolLayer(0)->setStrokeColor(QColor(154, 52, 18));
+    return sym;
+  };
+
   QString field = QStringLiteral("kind");
   if (featurePoly->fields().indexOf(field) < 0) field = QStringLiteral("period");
-  if (featurePoly->fields().indexOf(field) < 0) return false;
+  if (featurePoly->fields().indexOf(field) < 0) {
+    if (QgsSymbol* sym = brightPoly()) {
+      featurePoly->setRenderer(new QgsSingleSymbolRenderer(sym));
+      featurePoly->triggerRepaint();
+    }
+    return true;
+  }
 
   QSet<QString> values;
   QgsFeatureIterator it = featurePoly->getFeatures();
@@ -106,19 +126,32 @@ bool LayerOps::applyFeaturePolyStyle(QgsVectorLayer* featurePoly) {
     const QString v = f.attribute(field).toString().trimmed();
     if (!v.isEmpty()) values.insert(v);
   }
+
+  if (values.isEmpty()) {
+    if (QgsSymbol* sym = brightPoly()) {
+      featurePoly->setRenderer(new QgsSingleSymbolRenderer(sym));
+      featurePoly->triggerRepaint();
+    }
+    return true;
+  }
+
   QgsCategoryList cats;
   int i = 0;
   const QList<QString> sorted = values.values();
   for (const QString& v : sorted) {
-    QColor c = QColor::fromHsv((i * 47) % 360, 160, 220, 140);
+    QColor c = QColor::fromHsv((i * 47) % 360, 180, 230, 140);
     QgsSymbol* sym = QgsSymbol::defaultSymbol(featurePoly->geometryType());
     if (sym) {
       sym->setColor(c);
+      if (sym->symbolLayerCount() > 0)
+        sym->symbolLayer(0)->setStrokeColor(c.darker(150));
       cats.append(QgsRendererCategory(QVariant(v), sym, v));
     }
     ++i;
   }
   auto* renderer = new QgsCategorizedSymbolRenderer(field, cats);
+  if (QgsSymbol* def = brightPoly())
+    renderer->setSourceSymbol(def);
   featurePoly->setRenderer(renderer);
   featurePoly->triggerRepaint();
   return true;
@@ -146,20 +179,29 @@ static bool addXyzBasemap(QgsProject* project, QgsMapCanvas* canvas, const QStri
 
   QgsNetworkAccessManager::instance()->setCacheDisabled(false);
 
-  auto* rl = new QgsRasterLayer(url, name, QStringLiteral("wms"));
-  if (!rl->isValid()) {
-    delete rl;
-    rl = new QgsRasterLayer(url, name, QStringLiteral("xyz"));
+  QgsRasterLayer* rl = nullptr;
+  const QStringList providers = {QStringLiteral("wms"), QStringLiteral("xyz")};
+  for (const QString& prov : providers) {
+    auto* tryRl = new QgsRasterLayer(url, name, prov);
+    if (tryRl->isValid()) {
+      rl = tryRl;
+      break;
+    }
+    delete tryRl;
   }
-  if (!rl->isValid()) {
-    if (errorOut) *errorOut = QStringLiteral("Basemap failed: %1").arg(name);
-    delete rl;
+  if (!rl) {
+    if (errorOut) *errorOut = QStringLiteral("배경 레이어 생성 실패: %1\nURI=%2").arg(name, url.left(120));
     return false;
   }
   tuneBasemapLayer(rl);
-  project->addMapLayer(rl, false);
-  QgsLayerTree* root = project->layerTreeRoot();
-  root->insertChildNode(root->children().size(), new QgsLayerTreeLayer(rl));
+  QgsMapLayer* added = project->addMapLayer(rl, true);
+  if (!added) {
+    if (errorOut) *errorOut = QStringLiteral("프로젝트에 레이어 추가 실패: %1").arg(name);
+    delete rl;
+    return false;
+  }
+  if (QgsLayerTreeLayer* node = project->layerTreeRoot()->findLayer(rl->id()))
+    node->setItemVisibilityChecked(true);
   if (canvas) {
     canvas->setCachingEnabled(true);
     canvas->refreshAllLayers();
@@ -167,10 +209,120 @@ static bool addXyzBasemap(QgsProject* project, QgsMapCanvas* canvas, const QStri
   return true;
 }
 
+bool LayerOps::applyReferenceVectorStyle(QgsVectorLayer* layer, const QString& role) {
+  if (!layer || !layer->isValid()) return false;
+  const Qgis::GeometryType gt = layer->geometryType();
+  QgsSymbol* sym = QgsSymbol::defaultSymbol(gt);
+  if (!sym) return false;
+  const bool cadastral = role.contains(QStringLiteral("지적")) || role.contains(QStringLiteral("parcel"), Qt::CaseInsensitive)
+                         || layer->name().contains(QStringLiteral("지적")) || layer->name().contains(QStringLiteral("연속"));
+  if (gt == Qgis::GeometryType::Polygon) {
+    if (cadastral) {
+      sym->setColor(QColor(255, 0, 0, 15));
+      if (sym->symbolLayerCount() > 0)
+        sym->symbolLayer(0)->setStrokeColor(QColor(220, 38, 38));
+    } else {
+      sym->setColor(QColor(59, 130, 246, 40));
+      if (sym->symbolLayerCount() > 0)
+        sym->symbolLayer(0)->setStrokeColor(QColor(29, 78, 216));
+    }
+  } else if (gt == Qgis::GeometryType::Line) {
+    sym->setColor(cadastral ? QColor(220, 38, 38) : QColor(37, 99, 235));
+  } else {
+    sym->setColor(QColor(220, 38, 38));
+  }
+  layer->setRenderer(new QgsSingleSymbolRenderer(sym));
+  layer->triggerRepaint();
+  return true;
+}
+
 bool LayerOps::addOsmBasemap(QgsProject* project, QgsMapCanvas* canvas, QString* errorOut) {
   const QString url = QStringLiteral(
       "type=xyz&url=https://tile.openstreetmap.org/%7Bz%7D/%7Bx%7D/%7By%7D.png&zmax=19&zmin=0&crs=EPSG3857");
   return addXyzBasemap(project, canvas, url, QStringLiteral("OSM"), errorOut);
+}
+
+static bool addVworldCadastralWms(QgsProject* project, QgsMapCanvas* canvas, QString* errorOut) {
+  const QString key = LocationSearch::vworldApiKey();
+  if (key.isEmpty()) {
+    if (errorOut) *errorOut = QStringLiteral("VWorld API 키 없음 (지적 WMS)");
+    return false;
+  }
+  // QGIS WMS URI — continuous cadastral parcel boundary
+  const QString urlEncoded = QStringLiteral("https://api.vworld.kr/req/wms");
+  const QString uri = QStringLiteral(
+      "IgnoreGetMapUrl=1&contextualWMSLegend=0&crs=EPSG:3857&dpiMode=7&featureCount=10"
+      "&format=image/png&layers=lp_pa_cbnd_bubun&styles=lp_pa_cbnd_bubun"
+      "&url=%1?SERVICE%3DWMS%26REQUEST%3DGetCapabilities%26key%3D%2")
+                          .arg(QString::fromUtf8(QUrl::toPercentEncoding(urlEncoded)),
+                               QString::fromUtf8(QUrl::toPercentEncoding(key)));
+
+  const QString name = QStringLiteral("VWorld 지적(연속)");
+  const auto existing = project->mapLayersByName(name);
+  for (QgsMapLayer* old : existing) {
+    if (old) project->removeMapLayer(old->id());
+  }
+  auto* rl = new QgsRasterLayer(uri, name, QStringLiteral("wms"));
+  if (!rl->isValid()) {
+    // alternate layer name
+    delete rl;
+    const QString uri2 = QStringLiteral(
+        "IgnoreGetMapUrl=1&crs=EPSG:3857&dpiMode=7&format=image/png"
+        "&layers=lp_pa_cbnd_bonbun&styles=&url=https://api.vworld.kr/req/wms?key%3D%1")
+                             .arg(QString::fromUtf8(QUrl::toPercentEncoding(key)));
+    rl = new QgsRasterLayer(uri2, name, QStringLiteral("wms"));
+  }
+  if (!rl->isValid()) {
+    if (errorOut) *errorOut = QStringLiteral("지적 WMS 실패: %1").arg(rl->error().message());
+    delete rl;
+    return false;
+  }
+  project->addMapLayer(rl, true);
+  if (QgsLayerTreeLayer* node = project->layerTreeRoot()->findLayer(rl->id())) {
+    node->setItemVisibilityChecked(true);
+    QgsLayerTreeNode* n = node;
+    project->layerTreeRoot()->takeChild(n);
+    project->layerTreeRoot()->insertChildNode(0, n);
+  }
+  if (canvas) canvas->refreshAllLayers();
+  return true;
+}
+
+bool LayerOps::addVworldParcelOverlay(QgsProject* project, QgsMapCanvas* canvas, QString* errorOut) {
+  if (!project) {
+    if (errorOut) *errorOut = QStringLiteral("No project");
+    return false;
+  }
+  QString lastErr;
+  if (addVworldCadastralWms(project, canvas, &lastErr))
+    return true;
+
+  const QStringList urls = {
+    QStringLiteral(
+        "type=xyz&url=https://xdworld.vworld.kr/2d/Hybrid/service/%7Bz%7D/%7Bx%7D/%7By%7D.png&zmax=18&zmin=8&crs=EPSG3857"),
+  };
+  for (const QString& url : urls) {
+    QString err;
+    if (addXyzBasemap(project, canvas, url, QStringLiteral("VWorld 지적(하이브리드)"), &err)) {
+      if (project) {
+        QgsLayerTree* root = project->layerTreeRoot();
+        const auto layers = project->mapLayersByName(QStringLiteral("VWorld 지적(하이브리드)"));
+        if (!layers.isEmpty()) {
+          if (QgsLayerTreeLayer* node = root->findLayer(layers.first()->id())) {
+            QgsLayerTreeNode* n = node;
+            root->takeChild(n);
+            root->insertChildNode(0, n);
+            node->setItemVisibilityChecked(true);
+          }
+        }
+      }
+      if (canvas) canvas->refreshAllLayers();
+      return true;
+    }
+    lastErr = err;
+  }
+  if (errorOut) *errorOut = lastErr.isEmpty() ? QStringLiteral("VWorld 지적 실패") : lastErr;
+  return false;
 }
 
 bool LayerOps::addKoreaBasemap(QgsProject* project, QgsMapCanvas* canvas, KoreaBasemap kind,
@@ -193,6 +345,8 @@ bool LayerOps::addKoreaBasemap(QgsProject* project, QgsMapCanvas* canvas, KoreaB
     url = QStringLiteral(
         "type=xyz&url=https://xdworld.vworld.kr/2d/Hybrid/service/%7Bz%7D/%7Bx%7D/%7By%7D.png&zmax=18&zmin=5&crs=EPSG3857");
     break;
+  case KoreaBasemap::VWorldParcel:
+    return addVworldParcelOverlay(project, canvas, errorOut);
   case KoreaBasemap::GoogleRoad:
     name = QStringLiteral("Google 도로");
     url = QStringLiteral(
@@ -212,6 +366,33 @@ bool LayerOps::addKoreaBasemap(QgsProject* project, QgsMapCanvas* canvas, KoreaB
       return addOsmBasemap(project, canvas, errorOut);
     return false;
   }
+  // Basemap at bottom of TOC
+  if (project) {
+    QgsLayerTree* root = project->layerTreeRoot();
+    if (QgsMapLayer* ml = project->mapLayersByName(name).value(0)) {
+      if (QgsLayerTreeLayer* node = root->findLayer(ml->id())) {
+        QgsLayerTreeNode* n = node;
+        root->takeChild(n);
+        root->insertChildNode(root->children().size(), n);
+      }
+    }
+  }
+  return true;
+}
+
+bool LayerOps::addKoreaBasemapWithParcel(QgsProject* project, QgsMapCanvas* canvas, KoreaBasemap kind,
+                                         QString* errorOut) {
+  QString err;
+  if (!addKoreaBasemap(project, canvas, kind, &err)) {
+    if (errorOut) *errorOut = err;
+    return false;
+  }
+  QString perr;
+  if (!addVworldParcelOverlay(project, canvas, &perr)) {
+    // Base/sat ok but parcel failed — still success with warning
+    if (errorOut) *errorOut = QStringLiteral("배경 OK, 지적 오버레이 실패: %1").arg(perr);
+  }
+  if (canvas) canvas->refreshAllLayers();
   return true;
 }
 

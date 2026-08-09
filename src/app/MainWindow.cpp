@@ -64,6 +64,7 @@
 #include <qgslayertree.h>
 #include <qgslayertreenode.h>
 #include <qgslayertreelayer.h>
+#include <qgslayertreegroup.h>
 #include <qgslayertreeview.h>
 #include <qgslayertreemodel.h>
 #include <qgslayertreemapcanvasbridge.h>
@@ -76,6 +77,9 @@
 #include <qgsgeometry.h>
 #include <qgspointxy.h>
 #include <qgsvectorfilewriter.h>
+#include <qgssinglesymbolrenderer.h>
+#include <qgssymbol.h>
+#include <qgssymbollayer.h>
 #include <qgscoordinatetransform.h>
 #include <qgscoordinatetransformcontext.h>
 #include <qgsrectangle.h>
@@ -220,22 +224,51 @@ void MainWindow::buildMenus() {
   mainTb->setObjectName(QStringLiteral("mainToolbar"));
   mainTb->setIconSize(QSize(28, 28));
   mainTb->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-  mainTb->addAction(KaIcons::icon(QStringLiteral("new")), QStringLiteral("새 조사"), this, &MainWindow::newSurvey);
-  mainTb->addAction(KaIcons::icon(QStringLiteral("open")), QStringLiteral("열기"), this, &MainWindow::openProject);
-  mainTb->addAction(KaIcons::icon(QStringLiteral("save")), QStringLiteral("저장"), this, &MainWindow::saveProject);
+  auto tip = [](QAction* a, const QString& t) {
+    if (a) a->setToolTip(t);
+    return a;
+  };
+  tip(mainTb->addAction(KaIcons::icon(QStringLiteral("new")), QStringLiteral("새 조사"), this, &MainWindow::newSurvey),
+      QStringLiteral("새 조사 폴더·GPKG 만들기 (레이어는 비어 있음. 그린 뒤에만 도형 생김)"));
+  tip(mainTb->addAction(KaIcons::icon(QStringLiteral("open")), QStringLiteral("열기"), this, &MainWindow::openProject),
+      QStringLiteral("저장해 둔 조사 프로젝트(.qgz) 열기"));
+  tip(mainTb->addAction(KaIcons::icon(QStringLiteral("save")), QStringLiteral("저장"), this, &MainWindow::saveProject),
+      QStringLiteral("현재 프로젝트를 파일로 저장"));
   mainTb->addSeparator();
-  mainTb->addAction(KaIcons::icon(QStringLiteral("layer")), QStringLiteral("벡터"), this, &MainWindow::openVectorLayer);
-  mainTb->addAction(KaIcons::icon(QStringLiteral("map")), QStringLiteral("VWorld"), this, &MainWindow::addBasemapVworld);
+  tip(mainTb->addAction(KaIcons::icon(QStringLiteral("layer")), QStringLiteral("지적파일"), this, &MainWindow::openVectorLayer),
+      QStringLiteral("로컬 지적·수치지형 SHP/GPKG 불러오기 (빨간 외곽선으로 표시)"));
+  tip(mainTb->addAction(KaIcons::icon(QStringLiteral("map")), QStringLiteral("VWorld"), this, &MainWindow::addBasemapVworld),
+      QStringLiteral("VWorld 일반지도 + 지적(필지) 겹쳐 표시"));
+  tip(mainTb->addAction(KaIcons::icon(QStringLiteral("satellite")), QStringLiteral("위성"), this, &MainWindow::addBasemapVworldSat),
+      QStringLiteral("VWorld 위성 + 지적(필지) 겹쳐 표시"));
+  tip(mainTb->addAction(KaIcons::icon(QStringLiteral("layer")), QStringLiteral("지적ON"), this, [this]() {
+#if KA_HGIS_HAS_QGIS
+    QString err;
+    if (!LayerOps::addVworldParcelOverlay(QgsProject::instance(), m_canvas, &err))
+      QMessageBox::warning(this, QStringLiteral("지적"), err);
+    else statusBar()->showMessage(QStringLiteral("VWorld 지적 오버레이 추가"), 5000);
+#endif
+  }), QStringLiteral("VWorld 연속지적/필지 타일만 다시 올리기"));
   mainTb->addSeparator();
-  mainTb->addAction(KaIcons::icon(QStringLiteral("draw_area")), QStringLiteral("구역"), this, &MainWindow::startEditSurveyArea);
-  mainTb->addAction(KaIcons::icon(QStringLiteral("draw_poly")), QStringLiteral("유구면"), this, &MainWindow::startEditFeaturePoly);
-  mainTb->addAction(KaIcons::icon(QStringLiteral("draw_line")), QStringLiteral("선"), this, &MainWindow::startEditFeatureLine);
-  mainTb->addAction(KaIcons::icon(QStringLiteral("gps")), QStringLiteral("GPS"), this, &MainWindow::addControlPoint);
+  tip(mainTb->addAction(KaIcons::icon(QStringLiteral("draw_area")), QStringLiteral("구역"), this, &MainWindow::startEditSurveyArea),
+      QStringLiteral("【조사구역】발굴·조사 범위 폴리곤 그리기\n좌클릭 3점+ → 우클릭 완료 → survey_area 레이어에 저장"));
+  tip(mainTb->addAction(KaIcons::icon(QStringLiteral("draw_poly")), QStringLiteral("유구면"), this, &MainWindow::startEditFeaturePoly),
+      QStringLiteral("【유구 면】주거지·수혈 등 면 유구 그리기\n좌클릭 3점+ → 우클릭 → 종류·시대 입력 → feature_poly 저장"));
+  tip(mainTb->addAction(KaIcons::icon(QStringLiteral("draw_line")), QStringLiteral("유구선"), this, &MainWindow::startEditFeatureLine),
+      QStringLiteral("【유구/단면 선】구·도랑·단면선 등\n좌클릭 2점+ → 우클릭 → feature_line 저장"));
+  tip(mainTb->addAction(KaIcons::icon(QStringLiteral("gps")), QStringLiteral("기준점"), this, &MainWindow::addControlPoint),
+      QStringLiteral("【GPS 기준점】절대좌표 점 등록 (최소 2개 권장)"));
   mainTb->addSeparator();
-  mainTb->addAction(KaIcons::icon(QStringLiteral("check")), QStringLiteral("검수"), this, &MainWindow::runChecklist);
-  mainTb->addAction(KaIcons::icon(QStringLiteral("upload")), QStringLiteral("5179"), this, &MainWindow::convertSelectedTo5179);
-  mainTb->addAction(KaIcons::icon(QStringLiteral("pdf")), QStringLiteral("PDF"), this, &MainWindow::exportPdf);
-  mainTb->addAction(KaIcons::icon(QStringLiteral("export")), QStringLiteral("제출"), this, &MainWindow::exportShpPackage);
+  tip(mainTb->addAction(KaIcons::icon(QStringLiteral("check")), QStringLiteral("검수"), this, &MainWindow::runChecklist),
+      QStringLiteral("【도면 검수】제출 전에 필수 항목 자동 확인\n"
+                     "예: 조사구역 있는지, 기준점 2개+, 유구 종류/시대, 좌표계 등\n"
+                     "error=0 이어야 제출 패키지 가능 (문화재 도면 품질 게이트)"));
+  tip(mainTb->addAction(KaIcons::icon(QStringLiteral("upload")), QStringLiteral("5179변환"), this, &MainWindow::convertSelectedTo5179),
+      QStringLiteral("선택한 레이어를 문화재 인트라넷용 EPSG:5179 SHP로 변환"));
+  tip(mainTb->addAction(KaIcons::icon(QStringLiteral("pdf")), QStringLiteral("PDF"), this, &MainWindow::exportPdf),
+      QStringLiteral("범례·축척·방위 포함 도면 PDF 내보내기"));
+  tip(mainTb->addAction(KaIcons::icon(QStringLiteral("export")), QStringLiteral("제출"), this, &MainWindow::exportShpPackage),
+      QStringLiteral("SHP 제출 폴더 + MANIFEST 생성 (검수 error 있으면 차단)"));
 }
 
 void MainWindow::buildUi() {
@@ -514,18 +547,22 @@ void MainWindow::rebuildLayouts() {
 
 void MainWindow::showBeginnerGuide() {
   QMessageBox::information(
-      this, QStringLiteral("초보자 가이드 — 3분 흐름"),
+      this, QStringLiteral("초보자 가이드 — 아이콘 설명"),
       QStringLiteral(
-          "현장 작업 순서 (왼쪽 1→7을 위에서 아래로)\n\n"
-          "1. 새 조사 — 작업좌표계 5186(중부) 또는 5187(동부)\n"
-          "2. 지적·지형 불러오기 + 위치검색으로 현장 이동\n"
-          "3. 조사구역을 면(폴리곤)으로 그리기\n"
-          "4. 유구 면/선 + 종류·시대\n"
-          "5. GPS 기준점 2개 이상\n"
-          "6. 검수 (빨간 오류 0)\n"
-          "7. 5179 SHP 변환 → PDF(범례·축척) → 제출\n\n"
-          "오른쪽 「지금 할 일」만 따라 하면 됩니다.\n"
-          "막히면 「다음 단계」 버튼을 누르세요."));
+          "【새 조사】이름·폴더만 만듭니다. 레이어는 비어 있습니다.\n"
+          "  도형은 아래 그리기 아이콘으로 직접 그릴 때만 생깁니다.\n\n"
+          "【구역】조사·발굴 범위(큰 폴리곤) → 레이어 survey_area\n"
+          "【유구면】주거지·수혈 등 면 유구 → feature_poly (종류·시대 입력)\n"
+          "【유구선】구·도랑·단면선 → feature_line\n"
+          "【기준점】GPS 점 2개 이상 → control_points\n\n"
+          "그리기: 좌클릭으로 점 → 우클릭/더블클릭 완료\n"
+          "면은 점 3개 이상 필요합니다.\n\n"
+          "【검수】제출 전 자동 점검(구역·점·속성·CRS).\n"
+          "  error가 0이어야 제출 패키지가 만들어집니다.\n"
+          "【5179변환】인트라넷 업로드용 좌표계로 SHP 저장\n"
+          "【PDF】범례·축척 있는 도면\n"
+          "【제출】SHP 폴더 + 목록 파일\n\n"
+          "작업 CRS=5186/5187, 업로드=5179"));
 }
 
 void MainWindow::setStepTools(int step) {
@@ -618,12 +655,19 @@ void MainWindow::newSurvey() {
 void MainWindow::applyStartupMap() {
 #if KA_HGIS_HAS_QGIS
   LayerOps::setWorkCrs(QgsProject::instance(), m_canvas, m_workCrs, nullptr);
-  const bool hasVworld = !QgsProject::instance()->mapLayersByName(QStringLiteral("VWorld 배경")).isEmpty();
-  if (!hasVworld) {
+  const bool hasBase = !QgsProject::instance()->mapLayersByName(QStringLiteral("VWorld 배경")).isEmpty()
+                       || !QgsProject::instance()->mapLayersByName(QStringLiteral("VWorld 위성")).isEmpty();
+  if (!hasBase) {
     QString err;
-    if (!LayerOps::addKoreaBasemap(QgsProject::instance(), m_canvas, LayerOps::KoreaBasemap::VWorldBase, &err)) {
-      statusBar()->showMessage(QStringLiteral("VWorld 실패, OSM 시도: %1").arg(err), 8000);
+    if (!LayerOps::addKoreaBasemapWithParcel(QgsProject::instance(), m_canvas,
+                                             LayerOps::KoreaBasemap::VWorldBase, &err)) {
+      statusBar()->showMessage(QStringLiteral("VWorld 실패: %1").arg(err), 8000);
+      LayerOps::addOsmBasemap(QgsProject::instance(), m_canvas, nullptr);
+    } else {
+      statusBar()->showMessage(QStringLiteral("시작: VWorld + 지적 표시"), 5000);
     }
+  } else if (QgsProject::instance()->mapLayersByName(QStringLiteral("VWorld 지적")).isEmpty()) {
+    LayerOps::addVworldParcelOverlay(QgsProject::instance(), m_canvas, nullptr);
   }
   LayerOps::zoomToKorea(m_canvas, m_workCrs);
 #endif
@@ -772,28 +816,49 @@ void MainWindow::removeSelectedLayers() {
 void MainWindow::addBasemapVworld() {
 #if KA_HGIS_HAS_QGIS
   QString err;
-  if (!LayerOps::addKoreaBasemap(QgsProject::instance(), m_canvas, LayerOps::KoreaBasemap::VWorldBase, &err))
-    QMessageBox::warning(this, QStringLiteral("배경"), err);
+  if (!LayerOps::addKoreaBasemapWithParcel(QgsProject::instance(), m_canvas, LayerOps::KoreaBasemap::VWorldBase, &err))
+    QMessageBox::warning(this, QStringLiteral("배경"), err.isEmpty() ? QStringLiteral("VWorld 실패") : err);
   else {
     LayerOps::zoomToKorea(m_canvas, m_workCrs);
-    statusBar()->showMessage(QStringLiteral("VWorld 배경 (%1)").arg(m_workCrs), 5000);
+    const int n = QgsProject::instance()->mapLayers().size();
+    QMessageBox::information(this, QStringLiteral("배경"),
+                             QStringLiteral("VWorld 배경(+지적) 레이어 추가 시도 완료.\n"
+                                            "현재 프로젝트 레이어 수: %1\n"
+                                            "왼쪽 목록에 「VWorld 배경」「VWorld 지적」을 확인하세요.\n%2")
+                                 .arg(n)
+                                 .arg(err));
+    statusBar()->showMessage(QStringLiteral("VWorld+지적 | 레이어 %1개").arg(n), 6000);
   }
 #endif
 }
 void MainWindow::addBasemapVworldSat() {
 #if KA_HGIS_HAS_QGIS
   QString err;
-  if (!LayerOps::addKoreaBasemap(QgsProject::instance(), m_canvas, LayerOps::KoreaBasemap::VWorldSatellite, &err))
-    QMessageBox::warning(this, QStringLiteral("배경"), err);
-  else LayerOps::zoomToKorea(m_canvas, m_workCrs);
+  if (!LayerOps::addKoreaBasemapWithParcel(QgsProject::instance(), m_canvas,
+                                           LayerOps::KoreaBasemap::VWorldSatellite, &err))
+    QMessageBox::warning(this, QStringLiteral("위성"), err.isEmpty() ? QStringLiteral("위성 실패") : err);
+  else {
+    LayerOps::zoomToKorea(m_canvas, m_workCrs);
+    const int n = QgsProject::instance()->mapLayers().size();
+    QMessageBox::information(this, QStringLiteral("위성"),
+                             QStringLiteral("VWorld 위성(+지적) 레이어 추가 완료.\n"
+                                            "레이어 수: %1\n왼쪽 목록 확인.\n%2")
+                                 .arg(n)
+                                 .arg(err));
+    statusBar()->showMessage(QStringLiteral("위성+지적 | 레이어 %1개").arg(n), 6000);
+  }
 #endif
 }
 void MainWindow::addBasemapGoogle() {
 #if KA_HGIS_HAS_QGIS
   QString err;
-  if (!LayerOps::addKoreaBasemap(QgsProject::instance(), m_canvas, LayerOps::KoreaBasemap::GoogleSatellite, &err))
-    QMessageBox::warning(this, QStringLiteral("배경"), err);
-  else LayerOps::zoomToKorea(m_canvas, m_workCrs);
+  if (!LayerOps::addKoreaBasemapWithParcel(QgsProject::instance(), m_canvas,
+                                           LayerOps::KoreaBasemap::GoogleSatellite, &err))
+    QMessageBox::warning(this, QStringLiteral("위성"), err.isEmpty() ? QStringLiteral("위성 실패") : err);
+  else {
+    LayerOps::zoomToKorea(m_canvas, m_workCrs);
+    statusBar()->showMessage(QStringLiteral("Google 위성+지적 %1").arg(err), 6000);
+  }
 #endif
 }
 
@@ -846,35 +911,95 @@ void MainWindow::onGeometryCaptured(const QgsGeometry& geom) {
 
     QVariantMap attrs;
     if (layer->name() == QLatin1String("feature_poly") || layer->name() == QLatin1String("feature_line")) {
-      bool ok = false;
-      const QString kind = QInputDialog::getText(this, QStringLiteral("유구 속성"),
-          QStringLiteral("종류(필수) 예: 수혈주거지"), QLineEdit::Normal, QString(), &ok);
-      if (!ok || kind.trimmed().isEmpty()) {
-        statusBar()->showMessage(QStringLiteral("종류 미입력 — 도형 저장 안 함"), 4000);
+      QDialog dlg(this);
+      dlg.setWindowTitle(QStringLiteral("유구 속성 (필수)"));
+      auto* form = new QFormLayout(&dlg);
+      auto* kindEdit = new QLineEdit(QStringLiteral("수혈주거지"), &dlg);
+      auto* periodEdit = new QLineEdit(QStringLiteral("청동기"), &dlg);
+      form->addRow(QStringLiteral("종류"), kindEdit);
+      form->addRow(QStringLiteral("시대"), periodEdit);
+      auto* box = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+      form->addRow(box);
+      connect(box, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+      connect(box, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+      if (dlg.exec() != QDialog::Accepted) {
+        statusBar()->showMessage(QStringLiteral("유구 속성 취소 — 도형 저장 안 함. 다시 그려 주세요."), 5000);
         return;
       }
-      const QString period = QInputDialog::getText(this, QStringLiteral("유구 속성"),
-          QStringLiteral("시대(필수) 예: 청동기"), QLineEdit::Normal, QString(), &ok);
-      if (!ok || period.trimmed().isEmpty()) {
-        statusBar()->showMessage(QStringLiteral("시대 미입력 — 도형 저장 안 함"), 4000);
+      if (kindEdit->text().trimmed().isEmpty() || periodEdit->text().trimmed().isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("필수"), QStringLiteral("종류와 시대를 모두 입력하세요."));
         return;
       }
-      attrs.insert(QStringLiteral("kind"), kind.trimmed());
-      attrs.insert(QStringLiteral("period"), period.trimmed());
-    } else if (layer->name() == QLatin1String("survey_area")) {
-      const QString sn = QInputDialog::getText(this, QStringLiteral("조사구역"), QStringLiteral("조사명(선택)"));
-      if (!sn.trimmed().isEmpty()) attrs.insert(QStringLiteral("survey_name"), sn.trimmed());
+      attrs.insert(QStringLiteral("kind"), kindEdit->text().trimmed());
+      attrs.insert(QStringLiteral("period"), periodEdit->text().trimmed());
     }
 
     const FeatureWriteResult wr = FeatureWriteService::addFeature(layer, geom, attrs);
     if (!wr.ok) {
       QMessageBox::warning(this, QStringLiteral("도형 저장"), wr.errorKo);
-      statusBar()->showMessage(wr.errorKo, 6000);
+      statusBar()->showMessage(wr.errorKo, 8000);
       return;
     }
+    if (!layer->commitChanges()) {
+      QMessageBox::warning(this, QStringLiteral("저장 실패"),
+                           layer->commitErrors().join(QLatin1Char('\n')));
+      layer->startEditing();
+      return;
+    }
+    layer->startEditing();
+    layer->updateExtents();
+    if (layer->name() == QLatin1String("feature_poly"))
+      LayerOps::applyFeaturePolyStyle(layer);
+    else if (layer->geometryType() == Qgis::GeometryType::Polygon) {
+      QgsSymbol* sym = QgsSymbol::defaultSymbol(Qgis::GeometryType::Polygon);
+      if (sym) {
+        sym->setColor(QColor(37, 99, 235, 120));
+        if (sym->symbolLayerCount() > 0)
+          sym->symbolLayer(0)->setStrokeColor(QColor(29, 78, 216));
+        layer->setRenderer(new QgsSingleSymbolRenderer(sym));
+      }
+    } else if (layer->geometryType() == Qgis::GeometryType::Line) {
+      QgsSymbol* sym = QgsSymbol::defaultSymbol(Qgis::GeometryType::Line);
+      if (sym) {
+        sym->setColor(QColor(190, 24, 93));
+        layer->setRenderer(new QgsSingleSymbolRenderer(sym));
+      }
+    }
     layer->triggerRepaint();
-    if (m_canvas) m_canvas->refresh();
-    statusBar()->showMessage(QStringLiteral("도형 추가됨 → 「저장」 누르세요. 계속 그리려면 지도 좌클릭."), 8000);
+
+    QgsLayerTree* root = QgsProject::instance()->layerTreeRoot();
+    if (QgsLayerTreeLayer* node = root->findLayer(layer->id())) {
+      node->setItemVisibilityChecked(true);
+      QgsLayerTreeNode* n = node;
+      QgsLayerTreeGroup* parent = root;
+      if (n->parent() && n->parent()->nodeType() == QgsLayerTreeNode::NodeGroup)
+        parent = static_cast<QgsLayerTreeGroup*>(n->parent());
+      const int idx = parent->children().indexOf(n);
+      if (idx > 0) {
+        parent->takeChild(n);
+        parent->insertChildNode(0, n);
+      }
+    }
+
+    if (m_canvas && !layer->extent().isEmpty()) {
+      QgsRectangle ext = m_canvas->extent();
+      ext.combineExtentWith(layer->extent());
+      ext.scale(1.2);
+      m_canvas->setExtent(ext);
+      m_canvas->refresh();
+    }
+    if (layer->name() == QLatin1String("survey_area")) m_stubSurveyArea = int(layer->featureCount());
+    if (layer->name() == QLatin1String("feature_poly") || layer->name() == QLatin1String("feature_line"))
+      m_stubFeatures = int(layer->featureCount());
+    refreshStepProgress();
+    QMessageBox::information(
+        this, QStringLiteral("저장됨"),
+        QStringLiteral("레이어「%1」에 도형이 저장되었습니다.\n현재 개수: %2\n\n"
+                       "왼쪽 레이어 목록에서 이름을 확인하세요.")
+            .arg(layer->name())
+            .arg(layer->featureCount()));
+    statusBar()->showMessage(
+        QStringLiteral("✓ %1 저장 (총 %2개)").arg(layer->name()).arg(layer->featureCount()), 8000);
   } catch (const std::exception& ex) {
     QMessageBox::critical(this, QStringLiteral("그리기 오류"), QString::fromUtf8(ex.what()));
   } catch (...) {
@@ -916,7 +1041,11 @@ void MainWindow::beginEdit(QgsVectorLayer* layer) {
       connect(m_captureTool, &KaCaptureMapTool::geometryCaptured, this, &MainWindow::onGeometryCaptured,
               Qt::QueuedConnection);
       connect(m_captureTool, &KaCaptureMapTool::captureCanceled, this, [this]() {
-        statusBar()->showMessage(QStringLiteral("그리기 취소 (점 부족 / ESC). 면≥3점, 선≥2점"), 5000);
+        statusBar()->showMessage(QStringLiteral("완료 실패: 면은 좌클릭 3번+우클릭, 선은 2번+우클릭"), 6000);
+      });
+      connect(m_captureTool, &KaCaptureMapTool::vertexAdded, this, [this](int n) {
+        statusBar()->showMessage(
+            QStringLiteral("점 %1개 — 면은 3개 이상 후 우클릭(또는 더블클릭) 완료").arg(n), 0);
       });
     }
     if (m_canvas->mapTool() == m_captureTool)
@@ -924,13 +1053,15 @@ void MainWindow::beginEdit(QgsVectorLayer* layer) {
 
     m_captureTool->setMode(mode);
     m_captureTool->setTargetLayer(layer);
+    m_canvas->setCurrentLayer(layer);
     m_canvas->setMapTool(m_captureTool);
     m_canvas->setFocus(Qt::OtherFocusReason);
+    m_canvas->setMouseTracking(true);
 
     const QString how = (mode == KaCaptureMapTool::Mode::Point)
-                            ? QStringLiteral("클릭=점")
-                            : QStringLiteral("좌클릭=점추가 / 우클릭·Enter=완료 / ESC=취소");
-    statusBar()->showMessage(QStringLiteral("그리기: %1 | %2").arg(layer->name(), how), 0);
+                            ? QStringLiteral("지도 클릭=점")
+                            : QStringLiteral("지도에 좌클릭으로 점 찍기 → 우클릭 또는 더블클릭으로 완료");
+    statusBar()->showMessage(QStringLiteral("✏ %1 그리기 | %2").arg(layer->name(), how), 0);
   } catch (const std::exception& ex) {
     QMessageBox::critical(this, QStringLiteral("그리기 시작 실패"), QString::fromUtf8(ex.what()));
   } catch (...) {
@@ -1092,7 +1223,11 @@ QJsonObject MainWindow::buildProjectState() const {
 void MainWindow::runChecklist() {
   if (m_checklist->ruleCount() == 0) m_checklist->loadRules(rulesPath());
   const auto results = m_checklist->evaluate(buildProjectState());
-  QString html = QStringLiteral("<b>검수 결과</b><br/>");
+  QString html = QStringLiteral(
+      "<b>도면 검수란?</b><br/>"
+      "문화재 제출 도면이 최소 기준을 만족하는지 <b>자동 확인</b>합니다.<br/>"
+      "조사구역·기준점 2개·유구 속성·좌표계 등을 봅니다.<br/>"
+      "<b>error=0</b> 이어야 「제출」패키지를 만들 수 있습니다.<br/><br/><b>결과</b><br/>");
   int err = 0, warn = 0;
   for (const auto& r : results) {
     if (r.passed) continue;
@@ -1101,7 +1236,9 @@ void MainWindow::runChecklist() {
               .arg(r.severity == QLatin1String("error") ? QStringLiteral("red") : QStringLiteral("orange"),
                    r.severity, r.messageKo);
   }
-  if (err == 0 && warn == 0) html += QStringLiteral("<span style='color:green'>모두 통과</span>");
+  if (err == 0 && warn == 0) html += QStringLiteral("<span style='color:green'>모두 통과 — 제출 가능</span>");
+  else if (err == 0) html += QStringLiteral("<br/><span style='color:orange'>경고만 있음 — 제출 가능(확인 권장)</span>");
+  else html += QStringLiteral("<br/><span style='color:red'>error 있음 — 제출 차단. 위 항목을 고치세요.</span>");
   m_checkView->setText(html);
   m_lastChecklistErrors = err;
   statusBar()->showMessage(QStringLiteral("검수: error %1 / warn %2").arg(err).arg(warn), 6000);
@@ -1232,13 +1369,29 @@ void MainWindow::georefAssistant() {
 
 void MainWindow::openVectorLayer() {
 #if KA_HGIS_HAS_QGIS
-  const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("벡터"), QString(), QStringLiteral("Vector (*.gpkg *.shp *.geojson)"));
+  const QString path = QFileDialog::getOpenFileName(
+      this, QStringLiteral("지적·지형 벡터"), QString(),
+      QStringLiteral("Vector (*.gpkg *.shp *.geojson *.zip)"));
   if (path.isEmpty()) return;
   auto* layer = new QgsVectorLayer(path, QFileInfo(path).completeBaseName(), QStringLiteral("ogr"));
-  if (!layer->isValid()) { QMessageBox::warning(this, QStringLiteral("오류"), QStringLiteral("열 수 없음")); delete layer; return; }
-  QgsProject::instance()->addMapLayer(layer);
-  m_canvas->setExtent(layer->extent());
-  m_canvas->refresh();
+  if (!layer->isValid()) {
+    QMessageBox::warning(this, QStringLiteral("오류"), QStringLiteral("열 수 없음: %1").arg(layer->error().message()));
+    delete layer;
+    return;
+  }
+  LayerOps::applyReferenceVectorStyle(layer, QStringLiteral("지적"));
+  QgsProject::instance()->addMapLayer(layer, false);
+  QgsLayerTree* root = QgsProject::instance()->layerTreeRoot();
+  root->insertChildNode(0, new QgsLayerTreeLayer(layer));
+  if (m_canvas) {
+    if (!layer->extent().isEmpty()) {
+      QgsRectangle ext = layer->extent();
+      ext.scale(1.15);
+      m_canvas->setExtent(ext);
+    }
+    m_canvas->refresh();
+  }
+  statusBar()->showMessage(QStringLiteral("불러옴(표시 스타일 적용): %1").arg(layer->name()), 6000);
 #else
   QMessageBox::information(this, QStringLiteral("스텁"), QStringLiteral("배경 레이어 로드 시뮬레이션"));
 #endif

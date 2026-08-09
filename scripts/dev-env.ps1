@@ -20,3 +20,5 @@ $proj = Join-Path $OSGEO "share\proj"
 if (Test-Path $proj) { $env:PROJ_DATA = $proj; $env:PROJ_LIB = $proj }
 Write-Host "OSGEO4W_ROOT=$env:OSGEO4W_ROOT"
 Write-Host "QGIS_PREFIX_PATH=$env:QGIS_PREFIX_PATH"
+# GRASS plugins often fail to load without full GRASS install — app still works.
+# Do not treat those stderr lines as fatal in callers.

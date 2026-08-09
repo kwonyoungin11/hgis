@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-07 09:04:05 +09:00 |
+| Updated (local) | 2026-08-10 08:12:31 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `40ee2f5` |
-| HEAD full | `40ee2f5b1f524eff5c7a458a735f31d37bbbd730` |
-| HEAD date | 2026-08-07 07:51:42 +0900 |
+| HEAD short | `75b8104` |
+| HEAD full | `75b81043fc38340f70a91f8aa6c75f4e70b908e1` |
+| HEAD date | 2026-08-07 09:04:05 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Lock domain rules with TDD and FeatureWriteService. |
-| Total commits | 48 |
+| HEAD subject | Polish beginner UX: step progress, app icon, CRS docs. |
+| Total commits | 49 |
 | Upstream | `origin/main` |
-| Sync | ahead 1 of origin/main (push pending) |
+| Sync | diverged: ahead 49, behind 14 vs origin/main |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (11 paths) |
+| Working tree dirty | **yes** (14 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Lock domain rules with TDD and FeatureWriteService. (`40ee2f5` @ 2026-08-07 07:51:42 +0900)
-- **Remote sync at write time:** ahead 1 of origin/main (push pending)
-- **Uncommitted local changes at write time:** yes (11 paths)
+- **Recorded tip when this file was written:** Polish beginner UX: step progress, app icon, CRS docs. (`75b8104` @ 2026-08-07 09:04:05 +0900)
+- **Remote sync at write time:** diverged: ahead 49, behind 14 vs origin/main
+- **Uncommitted local changes at write time:** yes (14 paths)
 
 ### Read this correctly
 
@@ -53,6 +53,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `75b8104` | 2026-08-07T09:04:05+09:00 | Polish beginner UX: step progress, app icon, CRS docs. |
 | `40ee2f5` | 2026-08-07T07:51:42+09:00 | Lock domain rules with TDD and FeatureWriteService. |
 | `43a94c6` | 2026-08-06T17:57:05+09:00 | Refresh COMMIT_STATUS after push |
 | `cc4d983` | 2026-08-06T17:56:54+09:00 | Sync COMMIT_STATUS ledger after digitizing UX commit. |
@@ -82,20 +83,20 @@
 | `a170348` | 2026-08-06T16:30:24+09:00 | Wire LayerOps tools and real CRS actions in MainWindow |
 | `a96e5c1` | 2026-08-06T16:30:24+09:00 | Enrich default layouts with extent, legend, and titles |
 | `6c10f8d` | 2026-08-06T16:30:24+09:00 | Add LayerOps for reproject, basemap, style, and georef |
-| `a9e84f4` | 2026-08-06T16:30:24+09:00 | Ignore portable dist output directory |
 
 ## Staged in this commit
 
 ```
-M	CMakeLists.txt
-A	DESIGN.md
-M	README.md
-M	docs/user/gui-scenario-checklist.md
-M	docs/ux/ia-beginner.md
-M	docs/ux/mainwindow-wireframe.md
-M	src/app/KaApplication.cpp
+A	scripts/README-terminal.md
+M	scripts/build-all.ps1
+M	scripts/dev-env.ps1
+M	scripts/run-ka-hgis.ps1
+M	src/app/KaCaptureMapTool.cpp
+M	src/app/KaCaptureMapTool.h
 M	src/app/MainWindow.cpp
-M	src/app/MainWindow.h
+M	src/core/FeatureWriteService.cpp
+M	src/core/LayerOps.cpp
+M	src/core/LayerOps.h
 ```
 ## Other PC checklist
 

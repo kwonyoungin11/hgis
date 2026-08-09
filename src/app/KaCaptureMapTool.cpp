@@ -20,6 +20,10 @@ KaCaptureMapTool::~KaCaptureMapTool() {
   destroyRubber();
 }
 
+QgsMapTool::Flags KaCaptureMapTool::flags() const {
+  return QgsMapTool::EditTool | QgsMapTool::AllowZoomRect;
+}
+
 void KaCaptureMapTool::setMode(Mode mode) {
   m_mode = mode;
   resetSession();
@@ -37,79 +41,102 @@ void KaCaptureMapTool::resetSession() {
 
 void KaCaptureMapTool::destroyRubber() {
   if (!m_rubber) return;
-  QgsMapCanvas* c = canvas();
-  if (c) {
-    m_rubber->reset(Qgis::GeometryType::Line);
-  }
+  m_rubber->reset(Qgis::GeometryType::Line);
   delete m_rubber;
   m_rubber = nullptr;
+}
+
+QgsPointXY KaCaptureMapTool::eventMapPoint(QgsMapMouseEvent* e) {
+  if (!e || !canvas()) return QgsPointXY();
+  QgsPointXY p = e->mapPoint();
+  if (std::isnan(p.x()) || std::isnan(p.y()))
+    p = toMapCoordinates(e->pos());
+  return p;
 }
 
 void KaCaptureMapTool::rebuildRubber(const QgsPointXY* cursorOrNull) {
   QgsMapCanvas* c = canvas();
   if (!c) return;
 
-  if (!m_rubber) {
-    Qgis::GeometryType gt = Qgis::GeometryType::Line;
-    if (m_mode == Mode::Polygon) gt = Qgis::GeometryType::Polygon;
-    else if (m_mode == Mode::Point) gt = Qgis::GeometryType::Point;
-    m_rubber = new QgsRubberBand(c, gt);
-    m_rubber->setWidth(2);
-    m_rubber->setSecondaryStrokeColor(QColor(255, 255, 255, 180));
-    m_rubber->setColor(QColor(37, 99, 235));
-    m_rubber->setFillColor(QColor(37, 99, 235, 70));
-  }
-
   Qgis::GeometryType gt = Qgis::GeometryType::Line;
   if (m_mode == Mode::Polygon) gt = Qgis::GeometryType::Polygon;
   else if (m_mode == Mode::Point) gt = Qgis::GeometryType::Point;
-  m_rubber->reset(gt);
 
+  if (!m_rubber) {
+    m_rubber = new QgsRubberBand(c, gt);
+    m_rubber->setWidth(3);
+    m_rubber->setSecondaryStrokeColor(QColor(255, 255, 255, 200));
+    m_rubber->setColor(QColor(220, 38, 38));
+    m_rubber->setFillColor(QColor(220, 38, 38, 80));
+  }
+
+  m_rubber->reset(gt);
   for (const QgsPointXY& p : m_points)
     m_rubber->addPoint(p, false);
-
   if (cursorOrNull && m_mode != Mode::Point)
     m_rubber->addPoint(*cursorOrNull, true);
   else if (!m_points.isEmpty())
     m_rubber->addPoint(m_points.last(), true);
+  m_rubber->show();
 }
 
 void KaCaptureMapTool::activate() {
   m_finishing = false;
   m_points.clear();
   destroyRubber();
+  if (canvas()) {
+    canvas()->setContextMenuPolicy(Qt::PreventContextMenu);
+    canvas()->setMouseTracking(true);
+  }
   QgsMapTool::activate();
 }
 
 void KaCaptureMapTool::deactivate() {
+  if (canvas())
+    canvas()->setContextMenuPolicy(Qt::DefaultContextMenu);
   destroyRubber();
   m_points.clear();
   m_finishing = false;
   QgsMapTool::deactivate();
 }
 
+void KaCaptureMapTool::addVertex(const QgsPointXY& mapPt) {
+  if (std::isnan(mapPt.x()) || std::isnan(mapPt.y())) return;
+
+  if (m_mode == Mode::Point) {
+    m_points.clear();
+    m_points.append(mapPt);
+    emit vertexAdded(1);
+    finish();
+    return;
+  }
+
+  if (!m_points.isEmpty()) {
+    const QgsPointXY& last = m_points.last();
+    if (std::hypot(last.x() - mapPt.x(), last.y() - mapPt.y()) < 1e-9)
+      return;
+  }
+  m_points.append(mapPt);
+  rebuildRubber(&mapPt);
+  emit vertexAdded(m_points.size());
+}
+
 void KaCaptureMapTool::canvasPressEvent(QgsMapMouseEvent* e) {
+  if (!e || !canvas() || m_finishing) return;
+  if (e->button() == Qt::RightButton) {
+    e->accept();
+    return;
+  }
+}
+
+void KaCaptureMapTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
   if (!e || !canvas() || m_finishing) return;
   e->accept();
 
-  QgsPointXY mapPt;
-  try {
-    mapPt = e->mapPoint();
-  } catch (...) {
-    return;
-  }
-  if (std::isnan(mapPt.x()) || std::isnan(mapPt.y()))
-    return;
-
   if (e->button() == Qt::LeftButton) {
-    if (m_mode == Mode::Point) {
-      m_points.clear();
-      m_points.append(mapPt);
-      finish();
-      return;
-    }
-    m_points.append(mapPt);
-    rebuildRubber(&mapPt);
+    const QgsPointXY mapPt = eventMapPoint(e);
+    if (std::isnan(mapPt.x()) || std::isnan(mapPt.y())) return;
+    addVertex(mapPt);
     return;
   }
 
@@ -118,13 +145,18 @@ void KaCaptureMapTool::canvasPressEvent(QgsMapMouseEvent* e) {
   }
 }
 
+void KaCaptureMapTool::canvasDoubleClickEvent(QgsMapMouseEvent* e) {
+  if (!e || m_finishing) return;
+  e->accept();
+  if (m_mode == Mode::Polygon || m_mode == Mode::Line)
+    finish();
+}
+
 void KaCaptureMapTool::canvasMoveEvent(QgsMapMouseEvent* e) {
   if (!e || m_points.isEmpty() || m_mode == Mode::Point || m_finishing) return;
-  try {
-    const QgsPointXY mapPt = e->mapPoint();
-    rebuildRubber(&mapPt);
-  } catch (...) {
-  }
+  const QgsPointXY mapPt = eventMapPoint(e);
+  if (std::isnan(mapPt.x())) return;
+  rebuildRubber(&mapPt);
 }
 
 void KaCaptureMapTool::keyPressEvent(QKeyEvent* e) {
@@ -139,7 +171,7 @@ void KaCaptureMapTool::keyPressEvent(QKeyEvent* e) {
     e->accept();
     return;
   }
-  if (e->key() == Qt::Key_Backspace) {
+  if (e->key() == Qt::Key_Backspace || e->key() == Qt::Key_Delete) {
     if (!m_points.isEmpty()) {
       m_points.removeLast();
       if (m_points.isEmpty())
@@ -148,6 +180,7 @@ void KaCaptureMapTool::keyPressEvent(QKeyEvent* e) {
         const QgsPointXY cur = toMapCoordinates(canvas()->mouseLastXY());
         rebuildRubber(&cur);
       }
+      emit vertexAdded(m_points.size());
     }
     e->accept();
   }
@@ -159,25 +192,30 @@ void KaCaptureMapTool::finish() {
 
   QgsGeometry geom;
   bool ok = false;
+  QString why;
   if (m_mode == Mode::Point && m_points.size() >= 1) {
     geom = QgsGeometry::fromPointXY(m_points.first());
     ok = !geom.isEmpty();
   } else if (m_mode == Mode::Line && m_points.size() >= 2) {
     geom = QgsGeometry::fromPolylineXY(m_points);
-    ok = !geom.isEmpty();
+    ok = !geom.isEmpty() && geom.length() > 0;
+    if (!ok) why = QStringLiteral("선은 점 2개 이상");
   } else if (m_mode == Mode::Polygon && m_points.size() >= 3) {
     QgsPolylineXY ring = m_points;
     if (!ring.isEmpty() && ring.first() != ring.last())
       ring.append(ring.first());
     geom = QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring);
-    ok = !geom.isEmpty() && geom.isGeosValid();
-    if (!ok && !geom.isEmpty()) {
-      geom = geom.makeValid();
-      ok = !geom.isEmpty();
+    if (!geom.isEmpty() && !geom.isGeosValid()) {
+      const QgsGeometry fixed = geom.makeValid();
+      if (!fixed.isEmpty()) geom = fixed;
     }
+    ok = !geom.isEmpty() && geom.area() > 0;
+    if (!ok) why = QStringLiteral("면은 점 3개 이상, 면적>0");
+  } else {
+    if (m_mode == Mode::Polygon) why = QStringLiteral("면: 좌클릭 3회 이상 후 우클릭");
+    else if (m_mode == Mode::Line) why = QStringLiteral("선: 좌클릭 2회 이상 후 우클릭");
   }
 
-  const QVector<QgsPointXY> savedPts = m_points;
   m_points.clear();
   destroyRubber();
 
@@ -187,7 +225,7 @@ void KaCaptureMapTool::finish() {
     return;
   }
 
-  if (m_layer && canvas()) {
+  if (m_layer && m_layer->isValid() && canvas()) {
     const QgsCoordinateReferenceSystem src = canvas()->mapSettings().destinationCrs();
     const QgsCoordinateReferenceSystem dst = m_layer->crs();
     if (src.isValid() && dst.isValid() && src.authid() != dst.authid()) {
@@ -205,7 +243,7 @@ void KaCaptureMapTool::finish() {
     m_finishing = false;
     emit geometryCaptured(out);
   });
-  Q_UNUSED(savedPts);
+  Q_UNUSED(why);
 }
 
 void KaCaptureMapTool::cancel() {
@@ -214,4 +252,3 @@ void KaCaptureMapTool::cancel() {
   m_finishing = false;
   emit captureCanceled();
 }
-

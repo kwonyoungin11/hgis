@@ -11,6 +11,7 @@ public:
     VWorldBase,
     VWorldSatellite,
     VWorldHybrid,
+    VWorldParcel,
     GoogleRoad,
     GoogleSatellite,
     Osm
@@ -23,10 +24,17 @@ public:
 
   static bool applyFeaturePolyStyle(QgsVectorLayer* featurePoly);
 
+  static bool applyReferenceVectorStyle(QgsVectorLayer* layer, const QString& role = QString());
+
   static bool addOsmBasemap(QgsProject* project, QgsMapCanvas* canvas, QString* errorOut = nullptr);
 
   static bool addKoreaBasemap(QgsProject* project, QgsMapCanvas* canvas, KoreaBasemap kind,
                               QString* errorOut = nullptr);
+
+  static bool addKoreaBasemapWithParcel(QgsProject* project, QgsMapCanvas* canvas, KoreaBasemap kind,
+                                        QString* errorOut = nullptr);
+
+  static bool addVworldParcelOverlay(QgsProject* project, QgsMapCanvas* canvas, QString* errorOut = nullptr);
 
   static bool setWorkCrs(QgsProject* project, QgsMapCanvas* canvas, const QString& epsgAuthId,
                          QString* errorOut = nullptr);

@@ -29,8 +29,11 @@ if ($LASTEXITCODE -ne 0) { throw "build failed" }
 & ctest --test-dir build -C Release --output-on-failure
 if ($LASTEXITCODE -ne 0) { throw "ctest failed" }
 
-& "$PSScriptRoot\run-ka-hgis.ps1" --smoke-quit
-if ($LASTEXITCODE -ne 0) { throw "smoke-quit failed: $LASTEXITCODE" }
+$smoke = Start-Process -FilePath "powershell.exe" -ArgumentList @(
+  "-NoProfile", "-ExecutionPolicy", "Bypass",
+  "-File", (Join-Path $PSScriptRoot "run-ka-hgis.ps1"), "--smoke-quit"
+) -Wait -PassThru -NoNewWindow
+if ($smoke.ExitCode -ne 0) { throw "smoke-quit failed: $($smoke.ExitCode)" }
 
 & "$PSScriptRoot\e2e-smoke.ps1"
 if ($LASTEXITCODE -ne 0) { throw "e2e failed" }
