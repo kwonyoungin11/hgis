@@ -13,6 +13,8 @@
 #include <QMetaObject>
 #include <QCoreApplication>
 #include <QToolBar>
+#include <QToolButton>
+#include <QDockWidget>
 #include <QAction>
 #include <QTreeView>
 #include <QMenu>
@@ -22,6 +24,9 @@
 #include <cstdlib>
 #include "core/VworldSettings.h"
 #include "core/LayerOps.h"
+#include "core/SurveyProjectFactory.h"
+#include "core/ExportService.h"
+#include <QTemporaryDir>
 
 #if KA_HGIS_HAS_QGIS
 #include <qgsapplication.h>
@@ -105,6 +110,11 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
         all = step(QStringLiteral("toolbar_enabled:") + a->text(), a->isEnabled(),
                    a->isEnabled() ? QStringLiteral("enabled") : QStringLiteral("disabled")) && all;
       }
+    }
+    for (auto* btn : tb->findChildren<QToolButton*>()) {
+      if (!btn) continue;
+      const QString t = btn->text().trimmed();
+      if (!t.isEmpty()) toolbarTexts << t;
     }
     const QStringList need = {
       QStringLiteral("새조사"), QStringLiteral("그리기"), QStringLiteral("배경"),
@@ -224,9 +234,37 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
         all;
 
   all = step(QStringLiteral("layers_final_count"),
-             QgsProject::instance()->mapLayers().size() >= 3,
-             qaLayerNames().join(QLatin1Char(','))) &&
+              QgsProject::instance()->mapLayers().size() >= 3,
+              qaLayerNames().join(QLatin1Char(','))) &&
         all;
+
+  {
+    QTemporaryDir tdir;
+    QString err;
+    const QString gpkg = SurveyProjectFactory::createNewSurvey(
+        tdir.isValid() ? tdir.path() : QDir::tempPath(), QStringLiteral("qa_survey"), &err,
+        QStringLiteral("EPSG:5186"));
+    const bool created = !gpkg.isEmpty() && QFile::exists(gpkg);
+    all = step(QStringLiteral("factory_create_gpkg"), created, created ? gpkg : err) && all;
+    if (created) {
+      const bool loaded = w->openSurveyGpkg(gpkg);
+      QCoreApplication::processEvents();
+      const int domEmpty = w->domainLayerCount();
+      all = step(QStringLiteral("new_survey_legend_empty"), loaded && domEmpty == 0,
+                 QStringLiteral("loaded=%1 domain=%2 (must be 0 until user draws)")
+                     .arg(loaded)
+                     .arg(domEmpty)) &&
+            all;
+      QString ensErr;
+      auto* fp = LayerOps::ensureDomainLayer(QgsProject::instance(), gpkg,
+                                             QStringLiteral("feature_poly"),
+                                             QStringLiteral("유구면"), &ensErr);
+      QCoreApplication::processEvents();
+      all = step(QStringLiteral("draw_tool_creates_layer"), fp != nullptr && w->domainLayerCount() >= 1,
+                 fp ? QStringLiteral("feature_poly ready") : ensErr) &&
+            all;
+    }
+  }
 
   if (canvas) {
     LayerOps::syncMapCanvas(QgsProject::instance(), canvas, true);
@@ -238,42 +276,94 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
           all;
   }
 
-  // Toolbar actions that map to basemap slots: trigger via QAction text match (no dialogs).
+  // Main toolbar + expandable sub-tools (draw/basemap/submit) after opening draw strip.
   if (tb) {
-    auto triggerIf = [&](const QString& needle, const QString& label) {
+    auto hasText = [&](const QString& needle) {
       for (QAction* a : tb->actions()) {
-        if (a && a->text().contains(needle)) {
-          all = step(label, a->isEnabled(), a->text()) && all;
-          return;
-        }
+        if (a && a->text().contains(needle)) return true;
       }
-      all = step(label, false, QStringLiteral("action missing")) && all;
+      for (auto* btn : tb->findChildren<QToolButton*>()) {
+        if (btn && btn->text().contains(needle)) return true;
+      }
+      return false;
     };
-    triggerIf(QStringLiteral("위성"), QStringLiteral("toolbar_sat_action"));
-    triggerIf(QStringLiteral("지적"), QStringLiteral("toolbar_cad_action"));
-    triggerIf(QStringLiteral("새조사"), QStringLiteral("toolbar_new_action"));
-    triggerIf(QStringLiteral("폴리곤"), QStringLiteral("toolbar_poly_action"));
-    triggerIf(QStringLiteral("선"), QStringLiteral("toolbar_line_action"));
-    triggerIf(QStringLiteral("구역"), QStringLiteral("toolbar_area_action"));
-    triggerIf(QStringLiteral("GPS"), QStringLiteral("toolbar_gps_action"));
-    triggerIf(QStringLiteral("조판PDF"), QStringLiteral("toolbar_pdf_action"));
-    triggerIf(QStringLiteral("5179"), QStringLiteral("toolbar_5179_action"));
-    triggerIf(QStringLiteral("SHP"), QStringLiteral("toolbar_shp_action"));
-    triggerIf(QStringLiteral("삭제"), QStringLiteral("toolbar_del_action"));
-    triggerIf(QStringLiteral("편집저장"), QStringLiteral("toolbar_saveedit_action"));
-    triggerIf(QStringLiteral("그리기종료"), QStringLiteral("toolbar_stopedit_action"));
+    all = step(QStringLiteral("toolbar_new_action"), hasText(QStringLiteral("새조사"))) && all;
+    all = step(QStringLiteral("toolbar_draw_toggle"), hasText(QStringLiteral("그리기"))) && all;
+    all = step(QStringLiteral("toolbar_basemap_toggle"), hasText(QStringLiteral("배경"))) && all;
+    all = step(QStringLiteral("toolbar_submit_toggle"), hasText(QStringLiteral("제출"))) && all;
+    all = step(QStringLiteral("toolbar_del_action"), hasText(QStringLiteral("삭제"))) && all;
+    all = step(QStringLiteral("toolbar_saveedit_action"), hasText(QStringLiteral("편집저장"))) && all;
+
+    if (auto* btnDraw = w->findChild<QToolButton*>(QStringLiteral("btnDraw"))) {
+      btnDraw->click();
+      QCoreApplication::processEvents();
+    }
+    auto* sub = w->findChild<QToolBar*>(QStringLiteral("subToolbar"));
+    auto subHas = [&](const QString& needle) {
+      if (!sub || !sub->isVisible()) return false;
+      for (QAction* a : sub->actions()) {
+        if (a && a->text().contains(needle)) return true;
+      }
+      return false;
+    };
+    all = step(QStringLiteral("sub_draw_poly"), subHas(QStringLiteral("면")) || subHas(QStringLiteral("폴리곤"))) && all;
+    all = step(QStringLiteral("sub_draw_line"), subHas(QStringLiteral("선"))) && all;
+    all = step(QStringLiteral("sub_draw_area"), subHas(QStringLiteral("구역"))) && all;
+    all = step(QStringLiteral("sub_draw_gps"), subHas(QStringLiteral("GPS"))) && all;
+    if (auto* btnSubmit = w->findChild<QToolButton*>(QStringLiteral("btnSubmit"))) {
+      btnSubmit->click();
+      QCoreApplication::processEvents();
+    }
+    all = step(QStringLiteral("sub_submit_check"), subHas(QStringLiteral("검수"))) && all;
+    all = step(QStringLiteral("sub_submit_shp"), subHas(QStringLiteral("SHP"))) && all;
+    all = step(QStringLiteral("sub_submit_pdf"), subHas(QStringLiteral("PDF")) || subHas(QStringLiteral("조판"))) && all;
   }
 #else
   all = step(QStringLiteral("layerTree"), false, QStringLiteral("no qgis")) && all;
   all = step(QStringLiteral("mapCanvas"), false, QStringLiteral("no qgis")) && all;
 #endif
 
-  const bool checkVisible = [&]() {
-    auto* cv = w->findChild<QWidget*>(QStringLiteral("checkView"));
-    return cv && cv->isVisible();
-  }();
-  all = step(QStringLiteral("checklist_not_primary"), !checkVisible,
-             checkVisible ? QStringLiteral("checkView visible") : QStringLiteral("ok")) && all;
+  {
+    auto* dock = w->findChild<QDockWidget*>(QStringLiteral("checkDock"));
+    const bool hiddenAtStart = !dock || !dock->isVisible();
+    all = step(QStringLiteral("checklist_dock_hidden_default"), hiddenAtStart,
+               hiddenAtStart ? QStringLiteral("ok") : QStringLiteral("checkDock visible at start")) &&
+          all;
+    w->runChecklistPublic();
+    QCoreApplication::processEvents();
+    dock = w->findChild<QDockWidget*>(QStringLiteral("checkDock"));
+    const bool shown = dock && dock->isVisible();
+    all = step(QStringLiteral("checklist_dock_shows_on_run"), shown,
+               shown ? QStringLiteral("shown") : QStringLiteral("dock missing/hidden")) &&
+          all;
+
+    const int errBeforeSeed = w->lastChecklistErrorCount();
+    all = step(QStringLiteral("checklist_has_errors_before_seed"), errBeforeSeed > 0,
+               QStringLiteral("errors=%1").arg(errBeforeSeed)) &&
+          all;
+
+    QString expErr;
+    const QString blockedDir = QDir::temp().filePath(QStringLiteral("ka-hgis-export-block-qa"));
+    const QString blocked = ExportService::exportSubmissionPackage(
+        QgsProject::instance(), blockedDir, QStringLiteral("UTF-8"), QStringLiteral("qa"),
+        /*blockOnError=*/true, /*hasChecklistErrors=*/errBeforeSeed > 0, &expErr);
+    all = step(QStringLiteral("export_blocked_on_errors"), blocked.isEmpty() && errBeforeSeed > 0,
+               blocked.isEmpty() ? expErr : QStringLiteral("exported unexpectedly: %1").arg(blocked)) &&
+          all;
+
+    const int seeded = w->seedDemoFieldData();
+    QCoreApplication::processEvents();
+    all = step(QStringLiteral("demo_seed_features"), seeded >= 3,
+               QStringLiteral("seeded=%1").arg(seeded)) &&
+          all;
+    w->runChecklistPublic();
+    QCoreApplication::processEvents();
+    const int errAfterSeed = w->lastChecklistErrorCount();
+    all = step(QStringLiteral("checklist_errors_drop_after_seed"),
+               errAfterSeed >= 0 && errAfterSeed < errBeforeSeed,
+               QStringLiteral("before=%1 after=%2").arg(errBeforeSeed).arg(errAfterSeed)) &&
+          all;
+  }
 
   QJsonObject root;
   root.insert(QStringLiteral("ok"), all);
@@ -289,10 +379,19 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
 int KaApplication::run(int argc, char** argv) {
   bool smokeQuit = false;
   bool qaPhase1 = false;
+  bool demoSurvey = false;
+  bool demoSeed = false;
+  QString openGpkg;
   for (int i = 1; i < argc; ++i) {
     const QString a = QString::fromLocal8Bit(argv[i]);
     if (a == QLatin1String("--smoke-quit")) smokeQuit = true;
     if (a == QLatin1String("--qa-phase1")) qaPhase1 = true;
+    if (a == QLatin1String("--demo-survey")) demoSurvey = true;
+    if (a == QLatin1String("--demo-seed")) demoSeed = true;
+    if (a.startsWith(QLatin1String("--open-gpkg=")))
+      openGpkg = a.mid(QStringLiteral("--open-gpkg=").size());
+    else if (a == QLatin1String("--open-gpkg") && i + 1 < argc)
+      openGpkg = QString::fromLocal8Bit(argv[++i]);
   }
 
 #if KA_HGIS_HAS_QGIS
@@ -352,6 +451,26 @@ int KaApplication::run(int argc, char** argv) {
 
   MainWindow w;
   w.show();
+  if (demoSurvey && openGpkg.isEmpty()) {
+    const QString dir = QDir::temp().filePath(QStringLiteral("ka-hgis-survey-verify"));
+    QDir().mkpath(dir);
+    QString err;
+    openGpkg = SurveyProjectFactory::createNewSurvey(dir, QStringLiteral("verify1"), &err,
+                                                     QStringLiteral("EPSG:5186"));
+    if (openGpkg.isEmpty())
+      qWarning() << "demo-survey create failed:" << err;
+  }
+  if (!openGpkg.isEmpty()) {
+    if (!w.openSurveyGpkg(openGpkg))
+      qWarning() << "Failed to open survey gpkg:" << openGpkg;
+    else {
+      qInfo() << "Opened survey gpkg:" << openGpkg << "legend domain layers:" << w.domainLayerCount();
+      if (demoSeed) {
+        const int seeded = w.seedDemoFieldData();
+        qInfo() << "Demo seed (explicit --demo-seed) features:" << seeded;
+      }
+    }
+  }
 
   int qaCode = 0;
   if (qaPhase1) {

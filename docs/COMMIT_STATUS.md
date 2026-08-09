@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-09 18:53:47 +09:00 |
+| Updated (local) | 2026-08-09 18:53:48 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `ca3a77e` |
-| HEAD full | `ca3a77eb90f25c56c87a82e845f60f92ec47404d` |
-| HEAD date | 2026-08-09 18:53:44 +0900 |
+| HEAD short | `3129ef6` |
+| HEAD full | `3129ef6b2142516d0a11ce73deec30f693867c33` |
+| HEAD date | 2026-08-09 18:53:46 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Fix domain layer symbology so digitized features render on canvas. |
-| Total commits | 5 |
+| HEAD subject | Harden digitize capture tool finish and keep drawing session. |
+| Total commits | 6 |
 | Upstream | `origin/main` |
-| Sync | ahead 2 of origin/main (push pending) |
+| Sync | ahead 3 of origin/main (push pending) |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (10 paths) |
+| Working tree dirty | **yes** (8 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Fix domain layer symbology so digitized features render on canvas. (`ca3a77e` @ 2026-08-09 18:53:44 +0900)
-- **Remote sync at write time:** ahead 2 of origin/main (push pending)
-- **Uncommitted local changes at write time:** yes (10 paths)
+- **Recorded tip when this file was written:** Harden digitize capture tool finish and keep drawing session. (`3129ef6` @ 2026-08-09 18:53:46 +0900)
+- **Remote sync at write time:** ahead 3 of origin/main (push pending)
+- **Uncommitted local changes at write time:** yes (8 paths)
 
 ### Read this correctly
 
@@ -44,6 +44,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `3129ef6` | 2026-08-09T18:53:46+09:00 | Harden digitize capture tool finish and keep drawing session. |
 | `ca3a77e` | 2026-08-09T18:53:44+09:00 | Fix domain layer symbology so digitized features render on canvas. |
 | `f659bdb` | 2026-08-09T18:53:27+09:00 | Add QGIS 3.44 manuals as design guide and agent SSOT rules. |
 | `536977c` | 2026-08-09T16:10:06+09:00 | Sync COMMIT_STATUS to HEAD after push. |
@@ -53,8 +54,9 @@
 ## Staged in this commit
 
 ```
-M	src/app/KaCaptureMapTool.cpp
-M	src/app/KaCaptureMapTool.h
+M	src/app/KaApplication.cpp
+M	src/app/MainWindow.cpp
+M	src/app/MainWindow.h
 ```
 ## Other PC checklist
 

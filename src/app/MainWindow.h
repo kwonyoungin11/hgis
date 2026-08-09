@@ -19,6 +19,7 @@ class QgsLayerTreeView;
 class QgsVectorLayer;
 class QgsMapTool;
 class KaCaptureMapTool;
+class KaLayoutWindow;
 class QgsMapToolPan;
 class QgsGeometry;
 class QgsLayerTreeMapCanvasBridge;
@@ -30,6 +31,12 @@ public:
   explicit MainWindow(QWidget* parent = nullptr);
   ~MainWindow() override;
   bool eventFilter(QObject* watched, QEvent* event) override;
+  bool openSurveyGpkg(const QString& gpkgPath);
+  int domainLayerCount() const;
+  QString workCrsAuthId() const { return m_workCrs; }
+  void runChecklistPublic() { runChecklist(); }
+  int seedDemoFieldData();
+  int lastChecklistErrorCount() const;
 
 private slots:
   void newSurvey();
@@ -79,6 +86,7 @@ private slots:
   void showSubToolsBasemap();
   void showSubToolsSubmit();
   void hideSubTools();
+  void openLayoutDesigner();
 
 private:
   void buildUi();
@@ -120,6 +128,7 @@ private:
   int m_stubGcp = 0;
   bool m_stubHasMeta = false;
   bool m_packageCreated = false;
+  mutable int m_lastChecklistErrors = -1;
 #if KA_HGIS_HAS_QGIS
   QgsMapCanvas* m_canvas = nullptr;
   QgsLayerTreeView* m_layerTree = nullptr;
@@ -133,5 +142,6 @@ private:
   bool m_extentClampGuard = false;
   QToolBar* m_subToolbar = nullptr;
   QString m_subToolsMode;
+  KaLayoutWindow* m_layoutWindow = nullptr;
 #endif
 };
