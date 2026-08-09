@@ -32,6 +32,7 @@ public:
   static int ensureControlPointQualityFields(QgsVectorLayer* controlPoints);
 
   static bool applyFeaturePolyStyle(QgsVectorLayer* featurePoly);
+  static bool applyDomainDrawStyle(QgsVectorLayer* layer, const QString& layerKey = {});
   static bool mergePolygonFeatures(QgsVectorLayer* layer, QString* errorOut = nullptr);
 
   static bool addOsmBasemap(QgsProject* project, QgsMapCanvas* canvas, QString* errorOut = nullptr);

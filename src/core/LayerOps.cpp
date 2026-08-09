@@ -27,7 +27,11 @@
 #include <qgsgeometry.h>
 #include <qgspointxy.h>
 #include <qgscategorizedsymbolrenderer.h>
+#include <qgssinglesymbolrenderer.h>
 #include <qgssymbol.h>
+#include <qgsfillsymbol.h>
+#include <qgslinesymbol.h>
+#include <qgsmarkersymbol.h>
 #include <qgsrenderer.h>
 #include <qgsrectangle.h>
 #include <qgslayertree.h>
@@ -101,11 +105,76 @@ int LayerOps::ensureControlPointQualityFields(QgsVectorLayer* controlPoints) {
   return added;
 }
 
+bool LayerOps::applyDomainDrawStyle(QgsVectorLayer* layer, const QString& layerKeyIn) {
+  if (!layer || !layer->isValid()) return false;
+  const QString key = layerKeyIn.isEmpty() ? layerKeyOf(layer) : layerKeyIn;
+  const Qgis::GeometryType gt = layer->geometryType();
+
+  QColor fill(37, 99, 235, 90);
+  QColor stroke(37, 99, 235, 255);
+  double strokeW = 1.2;
+  double markerSize = 3.5;
+
+  if (key == QLatin1String("survey_area")) {
+    fill = QColor(180, 83, 9, 70);
+    stroke = QColor(146, 64, 14, 255);
+    strokeW = 1.6;
+  } else if (key == QLatin1String("feature_poly")) {
+    fill = QColor(22, 163, 74, 90);
+    stroke = QColor(21, 128, 61, 255);
+    strokeW = 1.4;
+  } else if (key == QLatin1String("feature_line") || key == QLatin1String("section_line")) {
+    stroke = key == QLatin1String("section_line") ? QColor(190, 24, 93, 255) : QColor(202, 138, 4, 255);
+    strokeW = 1.8;
+  } else if (key == QLatin1String("control_points")) {
+    fill = QColor(234, 179, 8, 255);
+    stroke = QColor(161, 98, 7, 255);
+    markerSize = 4.0;
+  }
+
+  QgsSymbol* sym = nullptr;
+  if (gt == Qgis::GeometryType::Polygon) {
+    auto fs = QgsFillSymbol::createSimple({
+        {QStringLiteral("color"), fill.name(QColor::HexArgb)},
+        {QStringLiteral("outline_color"), stroke.name(QColor::HexArgb)},
+        {QStringLiteral("outline_width"), QString::number(strokeW)},
+        {QStringLiteral("outline_width_unit"), QStringLiteral("MM")},
+    });
+    sym = fs.release();
+  } else if (gt == Qgis::GeometryType::Line) {
+    auto ls = QgsLineSymbol::createSimple({
+        {QStringLiteral("line_color"), stroke.name(QColor::HexArgb)},
+        {QStringLiteral("line_width"), QString::number(strokeW)},
+        {QStringLiteral("line_width_unit"), QStringLiteral("MM")},
+    });
+    sym = ls.release();
+  } else if (gt == Qgis::GeometryType::Point) {
+    auto ms = QgsMarkerSymbol::createSimple({
+        {QStringLiteral("name"), QStringLiteral("circle")},
+        {QStringLiteral("color"), fill.name(QColor::HexArgb)},
+        {QStringLiteral("outline_color"), stroke.name(QColor::HexArgb)},
+        {QStringLiteral("outline_width"), QStringLiteral("0.6")},
+        {QStringLiteral("size"), QString::number(markerSize)},
+        {QStringLiteral("size_unit"), QStringLiteral("MM")},
+    });
+    sym = ms.release();
+  } else {
+    sym = QgsSymbol::defaultSymbol(gt);
+    if (sym)
+      sym->setColor(stroke);
+  }
+  if (!sym) return false;
+  layer->setRenderer(new QgsSingleSymbolRenderer(sym));
+  layer->triggerRepaint();
+  return true;
+}
+
 bool LayerOps::applyFeaturePolyStyle(QgsVectorLayer* featurePoly) {
   if (!featurePoly || !featurePoly->isValid()) return false;
   QString field = QStringLiteral("kind");
   if (featurePoly->fields().indexOf(field) < 0) field = QStringLiteral("period");
-  if (featurePoly->fields().indexOf(field) < 0) return false;
+  if (featurePoly->fields().indexOf(field) < 0)
+    return applyDomainDrawStyle(featurePoly, QStringLiteral("feature_poly"));
 
   QSet<QString> values;
   QgsFeatureIterator it = featurePoly->getFeatures();
@@ -114,11 +183,14 @@ bool LayerOps::applyFeaturePolyStyle(QgsVectorLayer* featurePoly) {
     const QString v = f.attribute(field).toString().trimmed();
     if (!v.isEmpty()) values.insert(v);
   }
+  if (values.isEmpty())
+    return applyDomainDrawStyle(featurePoly, QStringLiteral("feature_poly"));
+
   QgsCategoryList cats;
   int i = 0;
   const QList<QString> sorted = values.values();
   for (const QString& v : sorted) {
-    QColor c = QColor::fromHsv((i * 47) % 360, 160, 220, 140);
+    QColor c = QColor::fromHsv((i * 47) % 360, 180, 230, 160);
     QgsSymbol* sym = QgsSymbol::defaultSymbol(featurePoly->geometryType());
     if (sym) {
       sym->setColor(c);
@@ -126,6 +198,8 @@ bool LayerOps::applyFeaturePolyStyle(QgsVectorLayer* featurePoly) {
     }
     ++i;
   }
+  if (cats.isEmpty())
+    return applyDomainDrawStyle(featurePoly, QStringLiteral("feature_poly"));
   auto* renderer = new QgsCategorizedSymbolRenderer(field, cats);
   featurePoly->setRenderer(renderer);
   featurePoly->triggerRepaint();
@@ -367,6 +441,7 @@ QgsVectorLayer* LayerOps::ensureDomainLayer(QgsProject* project, const QString& 
   vl->setName(titleKo);
   markSurveyLayer(vl, layerKey);
   applyLegendCrsLabel(vl);
+  applyDomainDrawStyle(vl, layerKey);
   project->addMapLayer(vl, true);
   pruneEmptyLegendGroups(project);
   return vl;

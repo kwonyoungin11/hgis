@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-09 18:53:28 +09:00 |
+| Updated (local) | 2026-08-09 18:53:45 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `536977c` |
-| HEAD full | `536977c5f7da06425c427cd9473825667c2ffe81` |
-| HEAD date | 2026-08-09 16:10:06 +0900 |
+| HEAD short | `f659bdb` |
+| HEAD full | `f659bdb3d177eb76830ae2cb913a6fe3a54fd812` |
+| HEAD date | 2026-08-09 18:53:27 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Sync COMMIT_STATUS to HEAD after push. |
-| Total commits | 3 |
+| HEAD subject | Add QGIS 3.44 manuals as design guide and agent SSOT rules. |
+| Total commits | 4 |
 | Upstream | `origin/main` |
-| Sync | up to date with origin/main |
+| Sync | ahead 1 of origin/main (push pending) |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (16 paths) |
+| Working tree dirty | **yes** (12 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Sync COMMIT_STATUS to HEAD after push. (`536977c` @ 2026-08-09 16:10:06 +0900)
-- **Remote sync at write time:** up to date with origin/main
-- **Uncommitted local changes at write time:** yes (16 paths)
+- **Recorded tip when this file was written:** Add QGIS 3.44 manuals as design guide and agent SSOT rules. (`f659bdb` @ 2026-08-09 18:53:27 +0900)
+- **Remote sync at write time:** ahead 1 of origin/main (push pending)
+- **Uncommitted local changes at write time:** yes (12 paths)
 
 ### Read this correctly
 
@@ -44,6 +44,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `f659bdb` | 2026-08-09T18:53:27+09:00 | Add QGIS 3.44 manuals as design guide and agent SSOT rules. |
 | `536977c` | 2026-08-09T16:10:06+09:00 | Sync COMMIT_STATUS to HEAD after push. |
 | `99bd664` | 2026-08-09T16:09:56+09:00 | Refresh COMMIT_STATUS for baseline HEAD. |
 | `eac6c9c` | 2026-08-09T16:09:43+09:00 | Initial baseline: ka-hgis v0.3 archaeology HGIS (C++/Qt6 + QGIS libs). |
@@ -51,11 +52,8 @@
 ## Staged in this commit
 
 ```
-M	.gitignore
-M	AGENTS.md
-A	docs/vendor/qgis-manual-3.44/QGIS-3.44-PyQGISDeveloperCookbook-en.pdf
-A	docs/vendor/qgis-manual-3.44/QGIS-3.44-PyQGISDeveloperCookbook-ko.pdf
-A	docs/vendor/qgis-manual-3.44/README.md
+M	src/core/LayerOps.cpp
+M	src/core/LayerOps.h
 ```
 ## Other PC checklist
 
