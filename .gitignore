@@ -1,0 +1,87 @@
+﻿# Build
+build/
+build-clangd/
+out/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+*.dir/
+*.vcxproj
+*.vcxproj.filters
+*.sln
+*.user
+*.autosave
+
+# IDE / OS
+.vs/
+.vscode/
+.idea/
+*.suo
+*.ncb
+*.sdf
+*.opensdf
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Local agent / tooling caches (not product source)
+.codegraph/
+.omo/
+.opencode/
+
+# Logs & local DBs
+*.log
+setup.log
+setup.log.full
+symbology-style.db
+*.db-journal
+
+# Runtime / packages (build tree binaries stay ignored)
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.obj
+*.lib
+*.exp
+*.aps
+*.pch
+*.idb
+*.ipdb
+*.iobj
+
+# Track portable package under dist/ (including ka-hgis.exe for other PCs)
+# Still requires OSGeo4W on the target machine — DLLs are not vendored.
+!dist/
+!dist/**/
+!dist/**/*.exe
+!dist/**/*.bat
+!dist/**/*.ps1
+!dist/**/*.txt
+!dist/**/*.json
+!dist/**/*.yaml
+!dist/**/*.md
+dist/**/*.pdb
+dist/**/*.ilk
+
+# Python / misc
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+
+# Local survey / QGIS project files (do not commit field data)
+*.gpkg
+*.qgz
+!samples/**/*.gpkg
+
+config/secrets.ini
+**/secrets.ini
+
