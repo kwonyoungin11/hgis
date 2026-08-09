@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-09 18:53:51 +09:00 |
+| Updated (local) | 2026-08-09 18:53:53 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `fedd10d` |
-| HEAD full | `fedd10d80501446d591da539012ef1ec4c4f2fab` |
-| HEAD date | 2026-08-09 18:53:49 +0900 |
+| HEAD short | `e69ab63` |
+| HEAD full | `e69ab63f50038d2ae2c78e2aca687aa73bab6257` |
+| HEAD date | 2026-08-09 18:53:51 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Add separate print layout editor window using QgsLayoutView. |
-| Total commits | 8 |
+| HEAD subject | Skip live VWorld tests when API key missing or rejected. |
+| Total commits | 9 |
 | Upstream | `origin/main` |
-| Sync | ahead 5 of origin/main (push pending) |
+| Sync | ahead 6 of origin/main (push pending) |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (2 paths) |
+| Working tree dirty | **yes** (1 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Add separate print layout editor window using QgsLayoutView. (`fedd10d` @ 2026-08-09 18:53:49 +0900)
-- **Remote sync at write time:** ahead 5 of origin/main (push pending)
-- **Uncommitted local changes at write time:** yes (2 paths)
+- **Recorded tip when this file was written:** Skip live VWorld tests when API key missing or rejected. (`e69ab63` @ 2026-08-09 18:53:51 +0900)
+- **Remote sync at write time:** ahead 6 of origin/main (push pending)
+- **Uncommitted local changes at write time:** yes (1 paths)
 
 ### Read this correctly
 
@@ -44,6 +44,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `e69ab63` | 2026-08-09T18:53:51+09:00 | Skip live VWorld tests when API key missing or rejected. |
 | `fedd10d` | 2026-08-09T18:53:49+09:00 | Add separate print layout editor window using QgsLayoutView. |
 | `15fc5a4` | 2026-08-09T18:53:48+09:00 | Align survey layer lifecycle with QGIS: empty legend until draw. |
 | `3129ef6` | 2026-08-09T18:53:46+09:00 | Harden digitize capture tool finish and keep drawing session. |
@@ -56,7 +57,7 @@
 ## Staged in this commit
 
 ```
-M	tests/test_workflow.cpp
+M	docs/COMMIT_STATUS.md
 ```
 ## Other PC checklist
 
