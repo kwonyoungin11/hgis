@@ -59,10 +59,12 @@ add_executable(ka-hgis
   src/app/KaApplication.cpp
   src/app/KaIcons.cpp
   src/app/KaCaptureMapTool.cpp
+  src/app/KaLayoutWindow.cpp
   src/app/MainWindow.h
   src/app/KaApplication.h
   src/app/KaIcons.h
   src/app/KaCaptureMapTool.h
+  src/app/KaLayoutWindow.h
 )
 target_include_directories(ka-hgis PRIVATE ${KA_INCLUDES})
 target_link_directories(ka-hgis PRIVATE ${KA_LIBDIRS})
