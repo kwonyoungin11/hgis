@@ -6,23 +6,24 @@ C++/Qt6 독립 실행형 필드고고학 HGIS. **OSGeo4W qgis-dev (QGIS 4.x) 라
 
 **저장소:** https://github.com/kwonyoungin11/hgis · 브랜치 `main`
 
-## 다른 PC에서 작업
+## 다른 PC에서 바로 개발
 
 상세: [`docs/other-pc-setup.md`](docs/other-pc-setup.md)
 
 ```powershell
 git clone https://github.com/kwonyoungin11/hgis.git
 cd hgis
-# (최초 1회) 관리자 PowerShell — CMake/VS/OSGeo4W 시도
+# (최초 1회, 관리자 권장) CMake / VS2022 C++ / OSGeo4W
 # .\scripts\install-deps.ps1
-$env:PATH = "C:\CMake\bin;" + $env:PATH
-.\scripts\build-all.ps1
+
+.\scripts\bootstrap-dev-pc.ps1   # env 검사 + build + ctest + smoke
 .\scripts\run-ka-hgis.ps1
 ```
 
-- **개발:** 클론 + OSGeo4W(`qgis-dev` 등) + VS2022 + CMake → `build-all.ps1`
-- **실행만:** `dist\ka-hgis-portable\` 복사 후 `run.bat` (대상 PC에도 OSGeo4W 필요, DLL 미포함)
-- 조사 GPKG 등 필드 데이터는 git에 없음 → 별도 복사
+- **개발:** 클론 + OSGeo4W(`qgis-dev`) + VS2022 + CMake → `bootstrap-dev-pc.ps1` 또는 `build-all.ps1`
+- **실행만:** `dist\ka-hgis-portable\` + OSGeo4W 런타임 → `run.bat`
+- 조사 GPKG/SHP는 git에 없음 → 별도 복사
+- 규칙: `AGENTS.md` (QGIS 매뉴얼 연동) · `OPENCODE_HANDOFF.md`
 
 ## 환경 (검증된 구성)
 - CMake 4.4+ (`C:\CMake\bin` 권장)
@@ -60,15 +61,16 @@ cd dist\ka-hgis-portable
 .\run-ka-hgis.ps1
 ```
 
-### 제품 축 (GOAL-ORIG-1)
+### 제품 축 (현재)
 
-1. **새 조사** → GPKG 도메인 5레이어 (조사구역/유구면/유구선/단면선/GPS기준점)
-2. **배경지도** 메뉴에서 참조 지도 선택 (OSM/VWorld) — 조사 데이터와 분리 (범례 그룹)
-3. **디지타이즈** → 툴바 구역/유구면/선 + **편집저장** 커밋 / **그리기종료**
-4. **도면검수** → 체크리스트
-5. **제출패키지** → SHP(+PDF) EPSG:5179 + MANIFEST
+1. **새 조사** → GPKG 스키마 준비, **범례는 비움** (그릴 때/가져올 때 레이어 등장)
+2. **배경지도** → OSM/VWorld 등 **참조 지도** (조사 데이터와 분리)
+3. **그리기** → 면/선/구역/GPS · 우클릭 완료 · 속성 팝업 없음 · **편집저장**
+4. **조판 편집 창** → 별도 창 QgsLayoutView (도구 메뉴)
+5. **도면검수** → 체크리스트 (error 시 제출 차단)
+6. **제출패키지** → SHP(+PDF) **EPSG:5179** + MANIFEST
 
-작업 CRS는 5186/5187 가능. 업로드는 5179 변환.
+작업 CRS 5186/5187 OK. 업로드만 5179.
 
 ### 도구 메뉴
 | 기능 | 설명 |

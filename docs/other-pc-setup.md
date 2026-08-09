@@ -1,26 +1,37 @@
-# 다른 PC에서 작업하기 (Windows)
+# 다른 PC에서 바로 개발하기 (Windows)
 
-이 저장소는 GitHub에 올라가 있습니다. **소스 개발**과 **실행만** 두 경로를 지원합니다.
-
-- 원격: `https://github.com/kwonyoungin11/hgis`
-- 브랜치: `main`
-- DLL은 벤더링하지 않음 → **대상 PC에도 OSGeo4W(qgis-dev) 필요**
+원격: **https://github.com/kwonyoungin11/hgis** · 브랜치 **`main`**  
+DLL 미포함 → 대상 PC에 **OSGeo4W `qgis-dev`** 필요.
 
 ---
 
-## A) 개발 (클론 → 빌드 → 실행)
+## 30초 요약 (권장)
 
-### 1. 사전 요구 (대상 PC)
+```powershell
+git clone https://github.com/kwonyoungin11/hgis.git
+cd hgis
+# 최초 1회만 — 관리자 PowerShell 권장 (CMake/VS/OSGeo4W 설치 시도)
+# .\scripts\install-deps.ps1
+
+.\scripts\bootstrap-dev-pc.ps1
+.\scripts\run-ka-hgis.ps1
+```
+
+성공 시: `build\Release\ka-hgis.exe` + ctest + smoke 통과.
+
+---
+
+## A) 개발 환경 요구
 
 | 항목 | 권장 |
 |------|------|
 | OS | Windows 10/11 x64 |
-| Git | 설치됨 |
+| Git | 설치 |
 | CMake | 4.x (`C:\CMake\bin` 또는 PATH) |
-| 컴파일러 | **VS 2022** Build Tools (MSVC, C++ 워크로드) |
-| GIS SDK | **OSGeo4W** `C:\OSGeo4W` (또는 `D:\OSGeo4W` / `OSGEO4W_ROOT`) |
+| 컴파일러 | **VS 2022** (MSVC C++ 워크로드 / Build Tools) |
+| GIS SDK | **OSGeo4W** `C:\OSGeo4W` (또는 `D:\OSGeo4W` / `$env:OSGEO4W_ROOT`) |
 
-OSGeo4W 패키지 (개발용):
+OSGeo4W 패키지:
 
 - `qgis-dev`
 - `qt6-devel`
@@ -28,121 +39,123 @@ OSGeo4W 패키지 (개발용):
 - `sqlite3-devel`
 - `pdal-dev`
 
-> 첫 PC와 **같은 qgis-dev 계열**을 쓰는 것이 안전합니다. 핀: 저장소 `VERSION_QGIS_PIN.txt`.
+핀: 저장소 `VERSION_QGIS_PIN.txt` (가능하면 같은 qgis-dev 계열).
 
-### 2. 의존성 설치 (선택, 관리자 PowerShell)
+### 의존성 자동 설치 (관리자 PowerShell)
 
 ```powershell
-# 저장소 클론 후
-cd <클론경로>\hgis
-# CMake + VS Build Tools + OSGeo4W 패키지 시도
+cd <클론>\hgis
 .\scripts\install-deps.ps1
 ```
 
-수동 OSGeo4W: https://download.osgeo.org/osgeo4w/v2/osgeo4w-setup.exe  
-설치 루트 권장: `C:\OSGeo4W`, 패키지는 위 목록.
+수동 OSGeo4W: https://download.osgeo.org/osgeo4w/v2/osgeo4w-setup.exe → 루트 `C:\OSGeo4W`.
 
-### 3. 클론
+---
+
+## B) 클론 → 빌드 → 실행
+
+### 원클릭
 
 ```powershell
-cd $env:USERPROFILE\Documents   # 원하는 폴더
 git clone https://github.com/kwonyoungin11/hgis.git
 cd hgis
 git checkout main
 git pull
-```
-
-### 4. 빌드·검증
-
-```powershell
-$env:PATH = "C:\CMake\bin;" + $env:PATH   # CMake 위치에 맞게
-.\scripts\build-all.ps1
-```
-
-또는 수동:
-
-```powershell
-.\scripts\dev-env.ps1
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DOSGEO4W_ROOT=C:/OSGeo4W -DKA_HGIS_BUILD_TESTS=ON
-cmake --build build --config Release
-ctest --test-dir build -C Release --output-on-failure
-.\scripts\run-ka-hgis.ps1 --smoke-quit
+.\scripts\bootstrap-dev-pc.ps1
+.\scripts\run-ka-hgis.ps1
 ```
 
 OSGeo가 다른 경로면:
 
 ```powershell
-$env:OSGEO4W_ROOT = "D:\OSGeo4W"
+.\scripts\bootstrap-dev-pc.ps1 -OsgeoRoot "D:\OSGeo4W"
+```
+
+### 수동 (bootstrap 없이)
+
+```powershell
+$env:PATH = "C:\CMake\bin;" + $env:PATH
 .\scripts\dev-env.ps1
-```
-
-### 5. 일상 실행
-
-```powershell
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DOSGEO4W_ROOT=C:/OSGeo4W -DKA_HGIS_BUILD_TESTS=ON
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
+.\scripts\run-ka-hgis.ps1 --smoke-quit
 .\scripts\run-ka-hgis.ps1
-# 또는
-.\run-ka-hgis.bat
 ```
 
-### 6. 에이전트/OpenCode (선택)
+또는 `.\scripts\build-all.ps1` (build + test + smoke + e2e + portable).
 
-- 프로젝트 규칙: 루트 `AGENTS.md`, `OPENCODE_HANDOFF.md`
-- 로컬 OpenCode가 있으면 이 폴더를 워크스페이스로 열면 됨
+---
 
-### 7. 커밋 훅 (선택)
+## C) 일상 동기화 (두 PC)
 
 ```powershell
-.\scripts\install-git-hooks.ps1
-```
-
----
-
-## B) 실행만 (포터블 폴더)
-
-`dist\ka-hgis-portable\` 를 USB/네트워크로 복사하거나, 클론 후 그 폴더만 사용.
-
-```text
-dist\ka-hgis-portable\
-  ka-hgis.exe
-  run.bat
-  run-ka-hgis.ps1
-  dev-env.ps1
-  data\...
-  docs\user\...
-  README.txt
-```
-
-1. 대상 PC에 **OSGeo4W + qgis-dev 런타임** 설치 (위와 동일 루트 권장)
-2. `run.bat` 실행
-
-개발 없이 최신 exe만 쓰려면: 개발 PC에서 `.\scripts\build-all.ps1` 후 `dist\ka-hgis-portable` 통째 복사.
-
----
-
-## 자주 막히는 것
-
-| 증상 | 조치 |
-|------|------|
-| `OSGEO4W_ROOT not found` | OSGeo4W 설치 또는 `$env:OSGEO4W_ROOT` 설정 |
-| `qgis-dev missing` | OSGeo4W에서 `qgis-dev` 패키지 설치 |
-| DLL 없음 / 즉시 종료 | `.\scripts\dev-env.ps1` 후 실행; PATH에 `pdal-dev\bin` 포함 확인 |
-| 링크/런타임 크래시 | VS2022 MSVC와 OSGeo4W 빌드 툴체인 불일치 — Build Tools 재설치 |
-| CMake 없음 | `winget install Kitware.CMake` 또는 `C:\CMake\bin` PATH |
-| VWorld 배경 안 됨 | 앱 **도움말 → VWorld API 키 설정** (키는 PC마다 로컬 저장, 커밋 금지) |
-
----
-
-## 두 PC 동기화
-
-```powershell
-# 작업 시작
+# 시작
 git pull origin main
+.\scripts\build-all.ps1   # 또는 cmake --build build --config Release
 
-# 작업 끝 (커밋 후)
+# 끝 (커밋 후)
 git push origin main
 ```
 
-필드 데이터(`*.gpkg` 등)는 `.gitignore` 대상이라 **저장소에 안 올라갑니다**.  
-조사 파일은 OneDrive/NAS 등으로 따로 옮기세요.
+- 조사 파일 `*.gpkg` / 필드 SHP는 **git에 없음** → OneDrive/NAS 별도.
+- VWorld 키: **도움말 → VWorld API 키 설정** (PC 로컬, 커밋 금지).
 
-시크릿: `config/secrets.ini`, VWorld 키 — 커밋하지 마세요.
+---
+
+## D) 에이전트 / 제품 규칙 (개발 시 필수)
+
+| 파일 | 내용 |
+|------|------|
+| `AGENTS.md` | 에이전트 라우팅 + **QGIS 매뉴얼 연동 규칙** + 불변식 |
+| `OPENCODE_HANDOFF.md` | 제품 SSOT 요약 |
+| `docs/vendor/qgis-manual-3.44/` | PyQGIS Cookbook PDF (git) + User Guide 다운로드 스크립트 |
+| `docs/domain/data-model.md` | 도메인 레이어/필드 |
+| `docs/COMMIT_STATUS.md` | 최근 커밋 장부 |
+
+대용량 Desktop User Guide PDF:
+
+```powershell
+.\scripts\download-qgis-manuals.ps1
+```
+
+### 현재 제품 동작 (헷갈리지 말 것)
+
+1. **새 조사** → 저장소(GPKG 스키마)만 준비, **범례는 비어 있음** (QGIS: 레이어는 add 할 때만).
+2. **그리기 → 면/선/구역/GPS** → 그때 레이어가 생기고 디지타이즈.
+3. 좌클릭=점, **우클릭/더블클릭/Enter=완료**(도구 유지), **편집저장**=커밋.
+4. 그리기 중 **속성 팝업 없음** (나중에 편집).
+5. **도구 → 조판 편집 창** → 별도 창에서 QgsLayoutView 편집 + PDF.
+6. 제출: 검수 error 있으면 SHP 패키지 차단 · 업로드 CRS **EPSG:5179**.
+
+---
+
+## E) 실행만 (포터블)
+
+`dist\ka-hgis-portable\` 복사 + 대상 PC OSGeo4W 런타임 → `run.bat`.  
+개발 PC에서 `.\scripts\build-all.ps1` 후 portable 폴더 통째 복사.
+
+---
+
+## F) 자주 막히는 것
+
+| 증상 | 조치 |
+|------|------|
+| `OSGEO4W_ROOT not found` | OSGeo4W 설치 또는 `$env:OSGEO4W_ROOT` |
+| `qgis-dev missing` | OSGeo4W에서 `qgis-dev` |
+| DLL 없음 / 즉시 종료 | `dev-env.ps1` 후 실행; `pdal-dev\bin` PATH |
+| CMake 없음 | `winget install Kitware.CMake` |
+| VS 제너레이터 실패 | VS 2022 Build Tools + C++ 워크로드 |
+| VWorld 배경 안 됨 | 도움말 → API 키 (로컬) |
+| 조판 창 안 뜸 | Release 빌드 후 `도구 → 조판 편집 창` |
+
+---
+
+## G) 검증 체크리스트 (다른 PC 첫날)
+
+- [ ] `git log -1 --oneline` 가 GitHub `main` tip과 같음
+- [ ] `.\scripts\bootstrap-dev-pc.ps1` 성공
+- [ ] `ctest` 100%
+- [ ] 앱 기동 → 새 조사 → 레이어 목록 비어 있음
+- [ ] 그리기 → 면 → 우클릭 완료 → 도형 표시
+- [ ] 도구 → 조판 편집 창 열림

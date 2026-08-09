@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-09 18:54:03 +09:00 |
+| Updated (local) | 2026-08-09 18:57:27 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `c1a3c12` |
-| HEAD full | `c1a3c1249d70ba747b455a5704067235b9a464c4` |
-| HEAD date | 2026-08-09 18:53:52 +0900 |
+| HEAD short | `31e51be` |
+| HEAD full | `31e51be755801e241e7c2e699edc0ee3ee10ac54` |
+| HEAD date | 2026-08-09 18:54:02 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Refresh COMMIT_STATUS ledger after feature commits. |
-| Total commits | 10 |
+| HEAD subject | Sync COMMIT_STATUS to HEAD after push ledger update. |
+| Total commits | 11 |
 | Upstream | `origin/main` |
-| Sync | ahead 7 of origin/main (push pending) |
+| Sync | up to date with origin/main |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (1 paths) |
+| Working tree dirty | **yes** (6 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Refresh COMMIT_STATUS ledger after feature commits. (`c1a3c12` @ 2026-08-09 18:53:52 +0900)
-- **Remote sync at write time:** ahead 7 of origin/main (push pending)
-- **Uncommitted local changes at write time:** yes (1 paths)
+- **Recorded tip when this file was written:** Sync COMMIT_STATUS to HEAD after push ledger update. (`31e51be` @ 2026-08-09 18:54:02 +0900)
+- **Remote sync at write time:** up to date with origin/main
+- **Uncommitted local changes at write time:** yes (6 paths)
 
 ### Read this correctly
 
@@ -40,11 +40,13 @@
 - `99bd664` commit progress ledger ??Refresh COMMIT_STATUS for baseline HEAD.
 - `536977c` commit progress ledger ??Sync COMMIT_STATUS to HEAD after push.
 - `c1a3c12` commit progress ledger ??Refresh COMMIT_STATUS ledger after feature commits.
+- `31e51be` commit progress ledger ??Sync COMMIT_STATUS to HEAD after push ledger update.
 
 ## Recent commits (newest first, max 30)
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `31e51be` | 2026-08-09T18:54:02+09:00 | Sync COMMIT_STATUS to HEAD after push ledger update. |
 | `c1a3c12` | 2026-08-09T18:53:52+09:00 | Refresh COMMIT_STATUS ledger after feature commits. |
 | `e69ab63` | 2026-08-09T18:53:51+09:00 | Skip live VWorld tests when API key missing or rejected. |
 | `fedd10d` | 2026-08-09T18:53:49+09:00 | Add separate print layout editor window using QgsLayoutView. |
@@ -59,7 +61,12 @@
 ## Staged in this commit
 
 ```
-M	docs/COMMIT_STATUS.md
+M	OPENCODE_HANDOFF.md
+M	README.md
+M	docs/other-pc-setup.md
+M	docs/vendor/qgis-manual-3.44/README.md
+A	scripts/bootstrap-dev-pc.ps1
+A	scripts/download-qgis-manuals.ps1
 ```
 ## Other PC checklist
 

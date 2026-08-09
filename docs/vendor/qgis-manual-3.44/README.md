@@ -17,3 +17,12 @@ Not product docs. Use for project / layer / edit wiring.
 3. Digitize: `startEditing` → `addFeature` → `commitChanges`.
 
 See repo root `AGENTS.md`.
+
+## Download large Desktop User Guide PDFs
+
+```powershell
+# from repo root
+.\scripts\download-qgis-manuals.ps1
+```
+
+Cookbooks are already in this folder (git). User Guide EN/KO are large and gitignored.

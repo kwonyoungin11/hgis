@@ -13,10 +13,14 @@ This handoff remains **product SSOT**; `AGENTS.md` remains **agent behavior SSOT
 
 Korean field archaeology HGIS (standalone C++/Qt6 + QGIS libs):
 
-1. Survey **DATA** in one GPKG — domain keys: `survey_area`, `feature_poly`, `feature_line`, `section_line`, `control_points` (Korean UI titles; logic uses `ka_hgis/layer_key`)
-2. **참조 지도** basemap = user-chosen underlay (OSM / VWorld / file) — NOT survey data
-3. User **draws** + fills attributes; **편집저장** commits; checklist; submit SHP/PDF in EPSG:5179 + MANIFEST
-4. Work CRS 5186/5187 OK; upload via 5179 convert
+1. Survey store = GPKG schema on disk; **legend empty until user draws/imports** (QGIS layer lifecycle)
+2. Domain keys (when added): `survey_area`, `feature_poly`, `feature_line`, `section_line`, `control_points` (`ka_hgis/layer_key`)
+3. **참조 지도** basemap = user-chosen underlay — NOT survey data
+4. Digitize only (no attr popups while drawing); **편집저장** / per-feature commit; checklist blocks export on error
+5. Layout editor window (`KaLayoutWindow` / QgsLayoutView); submit SHP/PDF **EPSG:5179** + MANIFEST
+6. Work CRS 5186/5187 OK; upload 5179
+
+**Other PC:** `docs/other-pc-setup.md` · `.\scripts\bootstrap-dev-pc.ps1`
 
 ---
 
