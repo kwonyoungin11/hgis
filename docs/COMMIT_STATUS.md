@@ -8,15 +8,15 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-09 16:09:56 +09:00 |
+| Updated (local) | 2026-08-09 16:10:07 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `eac6c9c` |
-| HEAD full | `eac6c9cd72ab0af7ec1dd671d22abfb6cd36e301` |
-| HEAD date | 2026-08-09 16:09:43 +0900 |
+| HEAD short | `99bd664` |
+| HEAD full | `99bd664222636a239ad3e1dec1d6cf1dca31e19c` |
+| HEAD date | 2026-08-09 16:09:56 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Initial baseline: ka-hgis v0.3 archaeology HGIS (C++/Qt6 + QGIS libs). |
-| Total commits | 1 |
+| HEAD subject | Refresh COMMIT_STATUS for baseline HEAD. |
+| Total commits | 2 |
 | Upstream | `origin/main` |
 | Sync | up to date with origin/main |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
@@ -24,7 +24,7 @@
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Initial baseline: ka-hgis v0.3 archaeology HGIS (C++/Qt6 + QGIS libs). (`eac6c9c` @ 2026-08-09 16:09:43 +0900)
+- **Recorded tip when this file was written:** Refresh COMMIT_STATUS for baseline HEAD. (`99bd664` @ 2026-08-09 16:09:56 +0900)
 - **Remote sync at write time:** up to date with origin/main
 - **Uncommitted local changes at write time:** yes (1 paths)
 
@@ -37,12 +37,13 @@
 
 ## Milestone markers
 
-- (auto milestones not matched yet)
+- `99bd664` commit progress ledger ??Refresh COMMIT_STATUS for baseline HEAD.
 
 ## Recent commits (newest first, max 30)
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `99bd664` | 2026-08-09T16:09:56+09:00 | Refresh COMMIT_STATUS for baseline HEAD. |
 | `eac6c9c` | 2026-08-09T16:09:43+09:00 | Initial baseline: ka-hgis v0.3 archaeology HGIS (C++/Qt6 + QGIS libs). |
 
 ## Staged in this commit
