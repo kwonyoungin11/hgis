@@ -369,23 +369,39 @@ void TestWorkflow::vworldLayerOpsTest() {
 }
 
 void TestWorkflow::vworldSatAndCadastralLiveKey() {
-  const QString fallback = QStringLiteral("899763E1-765F-35C8-BBD2-570FB5B006CC");
   QString key = QString::fromUtf8(qgetenv("VWORLD_API_KEY")).trimmed();
   if (key.isEmpty()) {
     const QString stored = VworldSettings::loadApiKey();
     const bool looksReal = stored.size() >= 30 && stored.contains(QLatin1Char('-'));
-    key = looksReal ? stored : fallback;
+    key = looksReal ? stored : QString();
   }
+  if (key.isEmpty())
+    QSKIP("VWORLD_API_KEY / saved key missing — skip live VWorld network test");
+
   VworldSettings::saveApiKey(key);
 
   QgsProject proj;
   proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
   QString err;
-  QVERIFY2(LayerOps::addVworldSatelliteMap(&proj, nullptr, key, &err), qPrintable(err));
+  const bool satOk = LayerOps::addVworldSatelliteMap(&proj, nullptr, key, &err);
+  if (!satOk) {
+    const QString e = err;
+    if (e.contains(QStringLiteral("INVALID"), Qt::CaseInsensitive) ||
+        e.contains(QStringLiteral("등록")) || e.contains(QStringLiteral("키")))
+      QSKIP(qPrintable(QStringLiteral("VWorld key rejected by server: %1").arg(e)));
+    QFAIL(qPrintable(e));
+  }
   QVERIFY(projectHasLayerNamedLike(&proj, QStringLiteral("VWorld 위성")));
 
   err.clear();
-  QVERIFY2(LayerOps::addVworldCadastralMap(&proj, nullptr, key, &err), qPrintable(err));
+  const bool cadOk = LayerOps::addVworldCadastralMap(&proj, nullptr, key, &err);
+  if (!cadOk) {
+    const QString e = err;
+    if (e.contains(QStringLiteral("INVALID"), Qt::CaseInsensitive) ||
+        e.contains(QStringLiteral("등록")) || e.contains(QStringLiteral("키")))
+      QSKIP(qPrintable(QStringLiteral("VWorld cadastral rejected: %1").arg(e)));
+    QFAIL(qPrintable(e));
+  }
   QVERIFY(projectHasLayerNamedLike(&proj, QStringLiteral("VWorld 지적")) ||
           projectHasLayerNamedLike(&proj, QStringLiteral("VWorld 지적도")));
 }
