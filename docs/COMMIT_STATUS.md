@@ -8,24 +8,24 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-09 18:53:53 +09:00 |
+| Updated (local) | 2026-08-09 18:54:03 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `e69ab63` |
-| HEAD full | `e69ab63f50038d2ae2c78e2aca687aa73bab6257` |
-| HEAD date | 2026-08-09 18:53:51 +0900 |
+| HEAD short | `c1a3c12` |
+| HEAD full | `c1a3c1249d70ba747b455a5704067235b9a464c4` |
+| HEAD date | 2026-08-09 18:53:52 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Skip live VWorld tests when API key missing or rejected. |
-| Total commits | 9 |
+| HEAD subject | Refresh COMMIT_STATUS ledger after feature commits. |
+| Total commits | 10 |
 | Upstream | `origin/main` |
-| Sync | ahead 6 of origin/main (push pending) |
+| Sync | ahead 7 of origin/main (push pending) |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
 | Working tree dirty | **yes** (1 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Skip live VWorld tests when API key missing or rejected. (`e69ab63` @ 2026-08-09 18:53:51 +0900)
-- **Remote sync at write time:** ahead 6 of origin/main (push pending)
+- **Recorded tip when this file was written:** Refresh COMMIT_STATUS ledger after feature commits. (`c1a3c12` @ 2026-08-09 18:53:52 +0900)
+- **Remote sync at write time:** ahead 7 of origin/main (push pending)
 - **Uncommitted local changes at write time:** yes (1 paths)
 
 ### Read this correctly
@@ -39,11 +39,13 @@
 
 - `99bd664` commit progress ledger ??Refresh COMMIT_STATUS for baseline HEAD.
 - `536977c` commit progress ledger ??Sync COMMIT_STATUS to HEAD after push.
+- `c1a3c12` commit progress ledger ??Refresh COMMIT_STATUS ledger after feature commits.
 
 ## Recent commits (newest first, max 30)
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `c1a3c12` | 2026-08-09T18:53:52+09:00 | Refresh COMMIT_STATUS ledger after feature commits. |
 | `e69ab63` | 2026-08-09T18:53:51+09:00 | Skip live VWorld tests when API key missing or rejected. |
 | `fedd10d` | 2026-08-09T18:53:49+09:00 | Add separate print layout editor window using QgsLayoutView. |
 | `15fc5a4` | 2026-08-09T18:53:48+09:00 | Align survey layer lifecycle with QGIS: empty legend until draw. |
