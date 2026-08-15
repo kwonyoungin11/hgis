@@ -117,6 +117,10 @@ public:
   static QString layerKeyOf(const QgsMapLayer* layer);
   static bool isReferenceLayer(const QgsMapLayer* layer);
   static QgsVectorLayer* findByLayerKey(QgsProject* project, const QString& layerKey);
+  // Current layer is used only when its ka_hgis/layer_key equals requiredKey.
+  // 유구면 must not fall back to survey_area just because it is the current polygon.
+  static QgsVectorLayer* digitizeTargetLayer(QgsProject* project, QgsVectorLayer* current,
+                                             const QString& requiredKey);
   static void removeSurveyDomainLayers(QgsProject* project);
   static QStringList domainLayerKeys();
   static void pruneEmptyLegendGroups(QgsProject* project);

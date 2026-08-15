@@ -1,0 +1,25 @@
+{
+  "clangd": {
+    "command": "C:\\Users\\kwonyoungin1\\.grok\\tools\\clangd\\clangd.exe",
+    "args": [
+      "--background-index",
+      "--clang-tidy=0",
+      "--header-insertion=never",
+      "--limit-results=50",
+      "--pch-storage=memory"
+    ],
+    "extensionToLanguage": {
+      ".c": "c",
+      ".cc": "cpp",
+      ".cpp": "cpp",
+      ".cxx": "cpp",
+      ".h": "cpp",
+      ".hh": "cpp",
+      ".hpp": "cpp",
+      ".hxx": "cpp"
+    },
+    "startupTimeout": 60000,
+    "restartOnCrash": true,
+    "maxRestarts": 3
+  }
+}

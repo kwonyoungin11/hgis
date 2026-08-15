@@ -1,0 +1,50 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd.exe /d /c .grok\\hooks\\run.cmd session-start",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Write|Edit|search_replace|run_terminal_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd.exe /d /c .grok\\hooks\\run.cmd pre-tool",
+            "timeout": 8
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|run_terminal_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd.exe /d /c .grok\\hooks\\run.cmd post-tool",
+            "timeout": 8
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd.exe /d /c .grok\\hooks\\run.cmd stop-gate",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}

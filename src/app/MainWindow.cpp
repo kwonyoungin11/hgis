@@ -1,4 +1,5 @@
 ﻿#include "MainWindow.h"
+#include "KaTheme.h"
 #include "KaIcons.h"
 #include "KaCaptureMapTool.h"
 #include "KaAttributeMapTool.h"
@@ -426,12 +427,20 @@ void MainWindow::showSubToolsDraw() {
   clearSubToolbar();
   m_subToolsMode = QStringLiteral("draw");
   auto* lab = new QLabel(QStringLiteral("  그리기 › "));
-  lab->setStyleSheet(QStringLiteral("color:#115e59;font-weight:700;padding:0 4px;"));
+  lab->setObjectName(QStringLiteral("subToolbarCaption"));
   m_subToolbar->addWidget(lab);
   m_subToolbar->addAction(KaIcons::icon(QStringLiteral("select")), QStringLiteral("선택"),
                           this, &MainWindow::startSelectTool);
-  m_subToolbar->addAction(KaIcons::icon(QStringLiteral("draw_area")), QStringLiteral("구역그리기"),
+  m_subToolbar->addAction(KaIcons::icon(QStringLiteral("draw_area")), QStringLiteral("조사구역"),
+                          this, &MainWindow::startEditSurveyArea);
+  m_subToolbar->addAction(KaIcons::icon(QStringLiteral("draw_poly")), QStringLiteral("유구면"),
                           this, &MainWindow::startEditFeaturePoly);
+  m_subToolbar->addAction(KaIcons::icon(QStringLiteral("draw_line")), QStringLiteral("유구선"),
+                          this, &MainWindow::startEditFeatureLine);
+  m_subToolbar->addAction(KaIcons::icon(QStringLiteral("line")), QStringLiteral("단면선"),
+                          this, &MainWindow::startEditSectionLine);
+  m_subToolbar->addAction(KaIcons::icon(QStringLiteral("gps")), QStringLiteral("기준점"),
+                          this, &MainWindow::addControlPoint);
   m_subToolbar->addAction(QStringLiteral("속성"), this, &MainWindow::startAttributeEditTool);
   m_subToolbar->addAction(QStringLiteral("폴리곤 묶기"), this, &MainWindow::mergeFeaturePolygons);
   auto* closeAct = m_subToolbar->addAction(QStringLiteral("닫기"));
@@ -451,7 +460,7 @@ void MainWindow::showSubToolsBasemap() {
   clearSubToolbar();
   m_subToolsMode = QStringLiteral("basemap");
   auto* lab = new QLabel(QStringLiteral("  배경 › "));
-  lab->setStyleSheet(QStringLiteral("color:#0f766e;font-weight:700;padding:0 4px;"));
+  lab->setObjectName(QStringLiteral("subToolbarCaption"));
   m_subToolbar->addWidget(lab);
   m_subToolbar->addAction(KaIcons::icon(QStringLiteral("satellite")), QStringLiteral("위성"),
                           this, &MainWindow::addBasemapVworldSat);
@@ -477,7 +486,7 @@ void MainWindow::showSubToolsSubmit() {
   clearSubToolbar();
   m_subToolsMode = QStringLiteral("submit");
   auto* lab = new QLabel(QStringLiteral("  제출 › "));
-  lab->setStyleSheet(QStringLiteral("color:#b45309;font-weight:700;padding:0 4px;"));
+  lab->setObjectName(QStringLiteral("subToolbarCaption"));
   m_subToolbar->addWidget(lab);
   m_subToolbar->addAction(KaIcons::icon(QStringLiteral("check")), QStringLiteral("도면검수"),
                           this, &MainWindow::runChecklist);
@@ -499,137 +508,6 @@ void MainWindow::showSubToolsSubmit() {
 #endif
 }
 
-void MainWindow::applyPhase1Theme() {
-  QPalette light;
-  light.setColor(QPalette::Window, QColor(0xf3, 0xea, 0xd8));
-  light.setColor(QPalette::WindowText, QColor(0x29, 0x25, 0x24));
-  light.setColor(QPalette::Base, QColor(0xff, 0xfa, 0xf3));
-  light.setColor(QPalette::AlternateBase, QColor(0xf7, 0xf1, 0xe6));
-  light.setColor(QPalette::Text, QColor(0x29, 0x25, 0x24));
-  light.setColor(QPalette::Button, QColor(0xf7, 0xf1, 0xe6));
-  light.setColor(QPalette::ButtonText, QColor(0x29, 0x25, 0x24));
-  light.setColor(QPalette::ToolTipBase, QColor(0xff, 0xfb, 0xeb));
-  light.setColor(QPalette::ToolTipText, QColor(0x29, 0x25, 0x24));
-  light.setColor(QPalette::BrightText, QColor(0x29, 0x25, 0x24));
-  light.setColor(QPalette::Highlight, QColor(0x11, 0x5e, 0x59));
-  light.setColor(QPalette::HighlightedText, QColor(0xff, 0xfa, 0xf3));
-  light.setColor(QPalette::PlaceholderText, QColor(0x78, 0x71, 0x6c));
-  qApp->setPalette(light);
-  setPalette(light);
-
-  const QString sheet = QStringLiteral(
-      "QMainWindow, QDialog, QLabel, QPushButton, QToolButton, QMenu, QMenuBar,"
-      " QDockWidget, QStatusBar, QTreeView, QLineEdit, QComboBox, QAbstractSpinBox,"
-      " QCheckBox, QGroupBox, QListWidget, QTextEdit, QPlainTextEdit, QHeaderView {"
-      " color: #292524; }"
-      "QgsMapCanvas, QWidget#mapCanvas { background: none; border: none; }"
-      "QMainWindow, QWidget#centralRoot {"
-      " background: qlineargradient(x1:0, y1:0, x2:0.15, y2:1,"
-      "  stop:0 #fffaf3, stop:0.22 #f7f1e6, stop:0.62 #ebe2d2, stop:1 #e0d3be);"
-      " color: #292524; }"
-      "QDialog {"
-      " background: qlineargradient(x1:0, y1:0, x2:0.15, y2:1,"
-      "  stop:0 #fffaf3, stop:0.45 #f3ead8, stop:1 #e8dcc8);"
-      " color: #292524; }"
-      "QDialog QLabel { background: transparent; color: #292524; }"
-      "QDialog QCheckBox { background: transparent; color: #292524; spacing: 8px; font-weight: 700; }"
-      "QDialog QPushButton { color: #292524;"
-      " background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #fffaf3, stop:1 #eadfcb);"
-      " border: 1px solid #d6c4a8; border-top: 1px solid #ffffff; border-bottom: 2px solid #b45309;"
-      " border-radius: 8px; padding: 8px 16px; min-height: 32px; font-weight: 600; }"
-      "QDialog QPushButton:hover { background: #fde68a; }"
-      "QDialog QPushButton:default {"
-      " background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #0f766e, stop:1 #115e59);"
-      " color: white; border: 1px solid #134e4a; }"
-      "QDialog QComboBox, QDialog QLineEdit, QDialog QAbstractSpinBox {"
-      " min-height: 36px; font-size: 13px; background: #fffaf3; }"
-      "QAbstractSpinBox { padding-right: 26px; min-height: 36px; }"
-      "QAbstractSpinBox::up-button, QAbstractSpinBox::down-button {"
-      " subcontrol-origin: border; width: 22px;"
-      " background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #fffaf3, stop:1 #e8dcc8);"
-      " border-left: 1px solid #d6c4a8; }"
-      "QAbstractSpinBox::up-button { subcontrol-position: top right; border-top-right-radius: 8px; }"
-      "QAbstractSpinBox::down-button { subcontrol-position: bottom right; border-bottom-right-radius: 8px; }"
-      "QAbstractSpinBox::up-arrow { width: 8px; height: 8px; background: #115e59; }"
-      "QAbstractSpinBox::down-arrow { width: 8px; height: 8px; background: #115e59; }"
-      "QDialog QComboBox::drop-down { width: 28px; border: none; }"
-      "QDialog QComboBox QAbstractItemView { background: #fffaf3; color: #292524;"
-      " selection-background-color: #115e59; selection-color: white; min-height: 28px; }"
-      "QMenuBar { height: 0px; max-height: 0px; border: none; }"
-      "QToolBar#mainToolbar { background: #111827; border: none; spacing: 2px; padding: 4px 8px; }"
-      "QToolBar#mainToolbar QToolButton { color: #f9fafb; font-weight: 600; font-size: 11px;"
-      " padding: 4px 6px; border-radius: 8px; background: transparent; min-width: 44px; }"
-      "QToolBar#mainToolbar QToolButton:hover { background: #1f2937; color: #f9fafb; }"
-      "QToolBar#mainToolbar QToolButton:checked { background: #0f766e; color: #fff; }"
-      "QToolBar#subToolbar { background: #f3f4f6; border: none; border-bottom: 1px solid #e5e7eb;"
-      " spacing: 4px; padding: 3px 8px; }"
-      "QToolBar#subToolbar QToolButton, QToolBar#subToolbar QLabel {"
-      " color: #111827; font-weight: 600; font-size: 12px; padding: 3px 8px; border-radius: 6px; }"
-      "QToolBar#subToolbar QToolButton { background: #ffffff; border: 1px solid #e5e7eb; }"
-      "QToolBar#subToolbar QToolButton:hover { background: #ecfdf5; color: #111827; }"
-      "QLineEdit#locationSearch { background: #ffffff; color: #111827; border: 1px solid #4b5563;"
-      " border-radius: 6px; padding: 4px 8px; min-height: 26px; }"
-      "QFrame#filesCard, QFrame#layersCard, QFrame#mapCard {"
-      " background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #fffaf3, stop:0.2 #f7f1e6, stop:1 #efe6d6);"
-      " border: 1px solid #d6c4a8; border-top: 1px solid #fffaf3; border-left: 1px solid #fffaf3;"
-      " border-bottom: 2px solid #b08968; border-right: 2px solid #b08968;"
-      " border-radius: 14px; color: #292524; }"
-      "QFrame#filesCard { border-top: 5px solid #b45309; }"
-      "QFrame#layersCard { border-top: 5px solid #0f766e; }"
-      "QFrame#mapCard { border-top: 5px solid #1c1917; }"
-      "QFrame#filesCard QToolButton, QFrame#layersCard QToolButton, QFrame#mapCard QToolButton {"
-      " color: #292524;"
-      " background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #fffaf3, stop:1 #eadfcb);"
-      " border: 1px solid #d6c4a8; border-bottom: 2px solid #b08968;"
-      " border-radius: 8px; padding: 5px 10px; font-weight: 600; min-height: 26px; }"
-      "QFrame#filesCard QToolButton:hover, QFrame#layersCard QToolButton:hover, QFrame#mapCard QToolButton:hover {"
-      " background: #fde68a; color: #292524; }"
-      "QFrame#layersCard QToolButton:checked { background: #115e59; color: #fffaf3; }"
-      "QLabel { color: #292524; background: transparent; }"
-      "QLabel#cardCaption {"
-      " color: #292524; font-weight: 800; font-size: 14px; padding: 8px 10px 6px 10px;"
-      " background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #f3ead8, stop:1 #fffaf3);"
-      " border-radius: 8px; margin-bottom: 2px; }"
-      "QLabel#cardCaptionFiles { color: #b45309; }"
-      "QLabel#cardCaptionLayers { color: #115e59; }"
-      "QFrame#filesInner, QFrame#layersInner {"
-      " background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #fffaf3, stop:1 #f3ead8);"
-      " border: 1px solid #e8dcc8; border-radius: 10px; }"
-      "QStatusBar { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #1c1917, stop:1 #134e4a);"
-      " color: #fffaf3; font-weight: 600; }"
-      "QStatusBar QLabel { color: #fffaf3; }"
-      "QTreeView, QTreeView::item, QgsLayerTreeView, QgsLayerTreeView::item {"
-      " background: #fffaf3; color: #292524; border: none; border-radius: 8px;"
-      " font-size: 13px; padding: 3px; }"
-      "QTreeView::item:selected, QgsLayerTreeView::item:selected {"
-      " background: #ccfbf1; color: #292524; }"
-      "QTreeView::item:hover, QgsLayerTreeView::item:hover {"
-      " background: #fde68a; color: #292524; }"
-      "QHeaderView::section { background: #f3ead8; color: #292524; }"
-      "QLineEdit, QComboBox, QAbstractSpinBox {"
-      " border: 1px solid #d6c4a8; border-radius: 8px; padding: 4px 8px;"
-      " color: #292524; background: #fffaf3; selection-background-color: #fde68a;"
-      " selection-color: #292524; }"
-      "QComboBox QAbstractItemView { color: #292524; background: #fffaf3; selection-background-color: #ccfbf1; }"
-      "QMenuBar { color: #292524;"
-      " background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #fffaf3, stop:1 #eadfcb);"
-      " font-weight: 700; font-size: 13px; }"
-      "QMenuBar::item { color: #292524; padding: 6px 14px; background: transparent; }"
-      "QMenuBar::item:selected { background: #fde68a; color: #292524; border-radius: 4px; }"
-      "QMenuBar::icon { width: 0px; height: 0px; }"
-      "QMenu::icon { width: 0px; height: 0px; }"
-      "QMenu { color: #292524; background: #fffaf3; border: 1px solid #d6c4a8; padding: 6px; }"
-      "QMenu::item { color: #292524; padding: 10px 18px; border-radius: 6px; min-height: 22px; }"
-      "QMenu::item:selected { background: #115e59; color: #fffaf3; }"
-      "QMessageBox, QMessageBox QLabel { color: #292524; background: #fffaf3; }"
-      "QMessageBox QPushButton { color: #292524; background: #eadfcb; border: 1px solid #d6c4a8;"
-      " border-radius: 6px; padding: 6px 16px; min-width: 64px; }"
-      "QInputDialog { color: #292524; background: #fffaf3; }"
-      "QInputDialog QLabel, QDialog QLabel { color: #292524; }"
-      "QToolTip { color: #292524; background: #fffbeb; border: 1px solid #b45309; }");
-  qApp->setStyleSheet(sheet);
-  setStyleSheet(sheet);
-}
 
 void MainWindow::updateNextActionStatus() {
   QString msg;
@@ -654,7 +532,6 @@ void MainWindow::updateNextActionStatus() {
 }
 
 void MainWindow::buildUi() {
-  applyPhase1Theme();
   auto* central = new QWidget(this);
   central->setObjectName(QStringLiteral("centralRoot"));
   auto* root = new QHBoxLayout(central);
@@ -664,14 +541,8 @@ void MainWindow::buildUi() {
 #if KA_HGIS_HAS_QGIS
   m_canvas = new QgsMapCanvas(central);
   m_canvas->setObjectName(QStringLiteral("mapCanvas"));
-  m_canvas->setStyleSheet(QString());
-  m_canvas->setAttribute(Qt::WA_StyledBackground, false);
-  if (m_canvas->viewport()) {
-    m_canvas->viewport()->setStyleSheet(QString());
-    m_canvas->viewport()->setAttribute(Qt::WA_StyledBackground, false);
-    m_canvas->viewport()->setAutoFillBackground(true);
-  }
-  m_canvas->setCanvasColor(QColor(239, 232, 220));
+  KaTheme::excludeMapSurface(m_canvas);
+  m_canvas->setCanvasColor(KaTheme::tokens().canvasNeutral);
   m_canvas->enableAntiAliasing(true);
   m_canvas->setCachingEnabled(true);
   m_canvas->setParallelRenderingEnabled(true);
@@ -700,24 +571,6 @@ void MainWindow::buildUi() {
   m_layerTree->setDropIndicatorShown(true);
   m_layerTree->setDefaultDropAction(Qt::MoveAction);
   m_layerTree->setDragDropMode(QAbstractItemView::DragDrop);
-  m_layerTree->setStyleSheet(QStringLiteral(
-      "QgsLayerTreeView, QTreeView { background: #fffaf3; color: #292524; border: none;"
-      " border-radius: 8px; font-size: 13px; outline: none; }"
-      "QgsLayerTreeView::item, QTreeView::item { color: #292524; padding: 3px 4px; min-height: 22px; }"
-      "QgsLayerTreeView::item:selected, QTreeView::item:selected {"
-      " background: #ccfbf1; color: #292524; }"
-      "QgsLayerTreeView::item:hover, QTreeView::item:hover {"
-      " background: #fde68a; color: #292524; }"));
-  {
-    QPalette pal = m_layerTree->palette();
-    pal.setColor(QPalette::Base, QColor(0xff, 0xfa, 0xf3));
-    pal.setColor(QPalette::Text, QColor(0x29, 0x25, 0x24));
-    pal.setColor(QPalette::WindowText, QColor(0x29, 0x25, 0x24));
-    pal.setColor(QPalette::BrightText, QColor(0x29, 0x25, 0x24));
-    pal.setColor(QPalette::HighlightedText, QColor(0x29, 0x25, 0x24));
-    pal.setColor(QPalette::Highlight, QColor(0xcc, 0xfb, 0xf1));
-    m_layerTree->setPalette(pal);
-  }
   connect(model, &QAbstractItemModel::rowsMoved, this, [this](const QModelIndex&, int, int, const QModelIndex&, int) {
     onLayerTreeRowsMoved();
   });
@@ -802,7 +655,6 @@ void MainWindow::buildUi() {
   auto* capFiles = new QLabel(QStringLiteral("조사 파일"), filesCard);
   capFiles->setObjectName(QStringLiteral("cardCaption"));
   capFiles->setProperty("class", QStringLiteral("cardCaptionFiles"));
-  capFiles->setStyleSheet(QStringLiteral("QLabel { color: #b45309; font-weight: 800; font-size: 14px; }"));
   auto* pathBar = new QHBoxLayout();
   pathBar->setSpacing(6);
   auto* btnPc = new QToolButton(filesCard);
@@ -852,7 +704,6 @@ void MainWindow::buildUi() {
   layersLay->setSpacing(8);
   auto* capLayers = new QLabel(QStringLiteral("지도 목록"), layersCard);
   capLayers->setObjectName(QStringLiteral("cardCaption"));
-  capLayers->setStyleSheet(QStringLiteral("QLabel { color: #115e59; font-weight: 800; font-size: 14px; }"));
   auto* layersInner = new QFrame(layersCard);
   layersInner->setObjectName(QStringLiteral("layersInner"));
   auto* layersInnerLay = new QVBoxLayout(layersInner);
@@ -881,11 +732,6 @@ void MainWindow::buildUi() {
   leftSplit->setSizes({0, 420});
   leftSplit->setMinimumWidth(200);
   leftSplit->setMaximumWidth(280);
-  leftSplit->setStyleSheet(QStringLiteral(
-      "QSplitter::handle:vertical {"
-      " background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #e8dcc8, stop:0.5 #0f766e, stop:1 #b45309);"
-      " margin: 4px 16px; border-radius: 3px; height: 8px; }"
-      "QSplitter::handle:vertical:hover { background: #115e59; }"));
 
   auto* mapCard = new QFrame(central);
   mapCard->setObjectName(QStringLiteral("mapCard"));
@@ -969,18 +815,12 @@ void MainWindow::setupWorkPanel() {
   lay->setContentsMargins(10, 10, 10, 10);
   lay->setSpacing(8);
   auto* title = new QLabel(QStringLiteral("원하는 작업을 누르세요"), box);
-  title->setStyleSheet(QStringLiteral("font-weight:800;font-size:13px;color:#0f172a;"));
   m_workHint = new QLabel(box);
   m_workHint->setObjectName(QStringLiteral("workHint"));
   m_workHint->setWordWrap(true);
-  m_workHint->setStyleSheet(QStringLiteral("color:#334155;"));
   m_workList = new QListWidget(box);
   m_workList->setObjectName(QStringLiteral("workControlList"));
   m_workList->setSpacing(3);
-  m_workList->setStyleSheet(QStringLiteral(
-      "QListWidget { border:1px solid #cbd5e1; border-radius:8px; padding:4px; }"
-      "QListWidget::item { padding:8px; border-radius:6px; }"
-      "QListWidget::item:selected { background:#1d4ed8; color:white; }"));
   connect(m_workList, &QListWidget::itemClicked, this, &MainWindow::onWorkControlClicked);
   lay->addWidget(title);
   lay->addWidget(m_workHint);
@@ -1150,33 +990,18 @@ void MainWindow::newSurvey() {
   const bool use5187 = m_workCrs.contains(QLatin1String("5187"));
   btn5186->setChecked(!use5187);
   btn5187->setChecked(use5187);
-  auto paintCrs = [](QPushButton* b, bool on) {
-    b->setStyleSheet(on ? QStringLiteral(
-        "QPushButton { background:#1d4ed8; color:white; font-weight:800; border:none; border-radius:10px; }"
-        "QPushButton:hover { background:#1e40af; }")
-                         : QStringLiteral(
-        "QPushButton { background:white; color:#0f172a; font-weight:700; border:2px solid #93c5fd; border-radius:10px; }"
-        "QPushButton:hover { background:#dbeafe; }"));
-  };
-  paintCrs(btn5186, !use5187);
-  paintCrs(btn5187, use5187);
-  connect(btn5186, &QPushButton::clicked, &dlg, [btn5186, btn5187, paintCrs]() {
+  connect(btn5186, &QPushButton::clicked, &dlg, [btn5186, btn5187]() {
     btn5186->setChecked(true);
     btn5187->setChecked(false);
-    paintCrs(btn5186, true);
-    paintCrs(btn5187, false);
   });
-  connect(btn5187, &QPushButton::clicked, &dlg, [btn5186, btn5187, paintCrs]() {
+  connect(btn5187, &QPushButton::clicked, &dlg, [btn5186, btn5187]() {
     btn5187->setChecked(true);
     btn5186->setChecked(false);
-    paintCrs(btn5187, true);
-    paintCrs(btn5186, false);
   });
   crsRow->addWidget(btn5186, 1);
   crsRow->addWidget(btn5187, 1);
   auto* tip = new QLabel(QStringLiteral("나중에 「도면만들기」옆에서 업로드용으로 바꿀 수 있습니다."), &dlg);
   tip->setWordWrap(true);
-  tip->setStyleSheet(QStringLiteral("color:#475569;font-size:12px;"));
   form->addRow(QStringLiteral("조사명"), nameEdit);
   form->addRow(QStringLiteral("작업 좌표계"), crsRow);
   form->addRow(tip);
@@ -2035,12 +1860,7 @@ namespace {
 
 void kaPaintColorButton(QPushButton* b, const QColor& c, const QString& suffix) {
   if (!b) return;
-  const QString fg = c.lightness() > 150 ? QStringLiteral("#0f172a") : QStringLiteral("#ffffff");
-  b->setStyleSheet(QStringLiteral(
-      "QPushButton { background:%1; color:%2; font-weight:800; font-size:13px;"
-      " border:2px solid #0369a1; border-radius:10px; min-height:40px; padding:8px 12px; }"
-      "QPushButton:hover { border-color:#0c4a6e; }")
-                       .arg(c.name(QColor::HexRgb), fg));
+  b->setStyleSheet(KaTheme::colorSwatchStyle(c));
   b->setText(c.name(QColor::HexRgb).toUpper() + QStringLiteral("  ·  ") + suffix);
   b->setProperty("kaColor", c);
   b->setCursor(Qt::PointingHandCursor);
@@ -2069,7 +1889,6 @@ QWidget* kaWrapLabeled(QWidget* parent, const QString& caption, QWidget* inner) 
   v->setContentsMargins(0, 0, 0, 0);
   v->setSpacing(4);
   auto* lab = new QLabel(caption, box);
-  lab->setStyleSheet(QStringLiteral("font-weight:700;color:#0f172a;background:transparent;"));
   v->addWidget(lab);
   v->addWidget(inner);
   return box;
@@ -2095,10 +1914,10 @@ QDoubleSpinBox* kaMakeArrowSpin(QWidget* parent, QWidget** rowOut, double minV, 
   av->setContentsMargins(0, 0, 0, 0);
   av->setSpacing(2);
   const QString arrowQss = QStringLiteral(
-      "QPushButton { font-size:11px; font-weight:900; color:#0c4a6e; min-width:36px; max-width:36px;"
-      " background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #ffffff, stop:1 #7dd3fc);"
-      " border:1px solid #0284c7; border-top:1px solid #ffffff; border-bottom:2px solid #0284c7; }"
-      "QPushButton:pressed { background:#38bdf8; }");
+      "QPushButton { font-size:11px; font-weight:900; color:#0F172A; min-width:36px; max-width:36px;"
+      " background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #C5E8F8, stop:1 #1878B8);"
+      " border:1px solid #000000; border-top:1px solid #FFFFFF; border-bottom:2px solid #000000; }"
+      "QPushButton:pressed { background:#0F5F9A; }");
   auto* up = new QPushButton(QStringLiteral("▲"), arrows);
   auto* down = new QPushButton(QStringLiteral("▼"), arrows);
   up->setFixedSize(36, 19);
@@ -2158,10 +1977,8 @@ void MainWindow::editCurrentLayerStyle() {
   root->setSizeConstraint(QLayout::SetFixedSize);
 
   auto* title = new QLabel(QStringLiteral("도형 색"), &dlg);
-  title->setStyleSheet(QStringLiteral("font-weight:800;font-size:16px;color:#0f172a;"));
   auto* sub = new QLabel(layer->name(), &dlg);
   sub->setWordWrap(true);
-  sub->setStyleSheet(QStringLiteral("font-weight:600;font-size:13px;color:#334155;"));
   root->addWidget(title);
   root->addWidget(sub);
 
@@ -2283,27 +2100,13 @@ void MainWindow::addUserLayer() {
   const bool use5187 = m_workCrs.contains(QLatin1String("5187"));
   btn5186->setChecked(!use5187);
   btn5187->setChecked(use5187);
-  auto paintCrs = [](QPushButton* b, bool on) {
-    b->setStyleSheet(on ? QStringLiteral(
-        "QPushButton { background:#1d4ed8; color:white; font-weight:800; border:none; border-radius:10px; }"
-        "QPushButton:hover { background:#1e40af; }")
-                         : QStringLiteral(
-        "QPushButton { background:white; color:#0f172a; font-weight:700; border:2px solid #93c5fd; border-radius:10px; }"
-        "QPushButton:hover { background:#dbeafe; }"));
-  };
-  paintCrs(btn5186, btn5186->isChecked());
-  paintCrs(btn5187, btn5187->isChecked());
-  connect(btn5186, &QPushButton::clicked, &dlg, [btn5186, btn5187, paintCrs]() {
+  connect(btn5186, &QPushButton::clicked, &dlg, [btn5186, btn5187]() {
     btn5186->setChecked(true);
     btn5187->setChecked(false);
-    paintCrs(btn5186, true);
-    paintCrs(btn5187, false);
   });
-  connect(btn5187, &QPushButton::clicked, &dlg, [btn5186, btn5187, paintCrs]() {
+  connect(btn5187, &QPushButton::clicked, &dlg, [btn5186, btn5187]() {
     btn5187->setChecked(true);
     btn5186->setChecked(false);
-    paintCrs(btn5187, true);
-    paintCrs(btn5186, false);
   });
   crsRow->addWidget(btn5186, 1);
   crsRow->addWidget(btn5187, 1);
@@ -2400,7 +2203,6 @@ void MainWindow::editFeatureAttributes(QgsVectorLayer* layer, const QgsFeature& 
   auto* tip = new QLabel(
       QStringLiteral("그린 도형의 속성입니다. 종류·시대 등을 입력한 뒤 저장하세요."), &dlg);
   tip->setWordWrap(true);
-  tip->setStyleSheet(QStringLiteral("color:#334155;padding:4px 0 8px 0;"));
   form->addRow(tip);
 
   struct Row {
@@ -2700,13 +2502,13 @@ void MainWindow::startEditSurveyArea() {
 }
 void MainWindow::startEditFeaturePoly() {
 #if KA_HGIS_HAS_QGIS
-  QgsVectorLayer* cur = m_layerTree ? qobject_cast<QgsVectorLayer*>(m_layerTree->currentLayer()) : nullptr;
-  if (cur && cur->isValid() && !LayerOps::isReferenceLayer(cur) &&
-      cur->geometryType() == Qgis::GeometryType::Polygon) {
-    beginEdit(cur);
-    return;
-  }
-  beginEdit(ensureDomainLayerForEdit(QStringLiteral("feature_poly"), QStringLiteral("구역")));
+  QgsVectorLayer* cur =
+      m_layerTree ? qobject_cast<QgsVectorLayer*>(m_layerTree->currentLayer()) : nullptr;
+  QgsVectorLayer* target =
+      LayerOps::digitizeTargetLayer(QgsProject::instance(), cur, QStringLiteral("feature_poly"));
+  if (!target)
+    target = ensureDomainLayerForEdit(QStringLiteral("feature_poly"), QStringLiteral("유구면"));
+  beginEdit(target);
 #else
   m_stubFeatures++;
   statusBar()->showMessage(QStringLiteral("스텁: 유구 %1").arg(m_stubFeatures));
@@ -3222,22 +3024,6 @@ void MainWindow::setupFileBrowser() {
   m_fileBrowser->setIndentation(18);
   m_fileBrowser->setUniformRowHeights(true);
   m_fileBrowser->setTextElideMode(Qt::ElideMiddle);
-  m_fileBrowser->setStyleSheet(QStringLiteral(
-      "QTreeView { background: #f7fbff; color: #0f172a; border: none; border-radius: 8px;"
-      " font-size: 13px; outline: none; }"
-      "QTreeView::item { color: #0f172a; padding: 3px 4px; min-height: 22px; }"
-      "QTreeView::item:selected { background: #bfdbfe; color: #0f172a; }"
-      "QTreeView::item:hover { background: #e0f2fe; color: #0f172a; }"));
-  {
-    QPalette pal = m_fileBrowser->palette();
-    pal.setColor(QPalette::Base, QColor(0xf7, 0xfb, 0xff));
-    pal.setColor(QPalette::Text, QColor(0x0f, 0x17, 0x2a));
-    pal.setColor(QPalette::WindowText, QColor(0x0f, 0x17, 0x2a));
-    pal.setColor(QPalette::BrightText, QColor(0x0f, 0x17, 0x2a));
-    pal.setColor(QPalette::HighlightedText, QColor(0x0f, 0x17, 0x2a));
-    pal.setColor(QPalette::Highlight, QColor(0xbf, 0xdb, 0xfe));
-    m_fileBrowser->setPalette(pal);
-  }
   connect(m_fileBrowser, &QTreeView::doubleClicked, this, &MainWindow::onFileBrowserActivated);
 
   QString start = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);

@@ -1,6 +1,7 @@
 #pragma once
 #include <QImage>
 #include <QList>
+#include <QRectF>
 #include <QSize>
 #include <QString>
 #include <QStringList>
@@ -80,6 +81,23 @@ public:
   // 용지 mm × 축척 → 지도 범위(미터 CRS). 입력한 1:N이 그대로 유지되게 한다.
   static QgsRectangle extentForPaperScale(const QgsRectangle& currentExtent,
                                           double mapWidthMm, double scaleDenominator);
+
+  // 지도 칸 아래 흰 여백(축척자·축척글자·좌표계·방위). 지도 픽셀 위에 겹치지 않는다.
+  struct SheetChromeRects {
+    QRectF map;
+    QRectF scaleBar;
+    QRectF scaleLabel;
+    QRectF crs;
+    QRectF north;
+  };
+  static SheetChromeRects standardSheetChrome(const QRectF& page, const QRectF& requestedMap);
+
+  // 1:20 / 1:40 / 1:50 / 1:100 … 분모가 10으로 끝나는 도면 축척.
+  static int niceScaleDenominator(double rawScale);
+  // 축척자 한 칸(m). 1-2-4-5 계열.
+  static double niceScaleBarSegmentMeters(double mapWidthMm, double scaleDenominator,
+                                          int segments = 4);
+  static double scaleBarWidthMm(double segmentMeters, int segments, double scaleDenominator);
 
   static DrawingKind kindFromLayoutId(const QString& layoutId);
   static QString layoutId(DrawingKind kind);

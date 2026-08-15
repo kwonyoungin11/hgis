@@ -1,0 +1,3 @@
+description = "ka-hgis architect — read-only ADR/boundary"
+default_capability_mode = "read-only"
+reasoning_effort = "xhigh"

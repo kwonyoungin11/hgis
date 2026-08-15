@@ -1,0 +1,265 @@
+/* ka-hgis sky-blue 3D chrome. SSOT — hex only; do not use url functions; no bare QWidget/QGraphicsView/QFrame. */
+
+/* ---- GIS exclude (contract 1). No fill/border color here. ---- */
+QgsMapCanvas, QWidget#mapCanvas, QgsLayoutView, QWidget#layoutView {
+  background: none;
+  border: none;
+}
+
+/* ---- Window face. No top-level border (native frame). ---- */
+QMainWindow, QDialog, QMessageBox, QInputDialog, QColorDialog {
+  background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+    stop:0 #9ED4F2, stop:0.35 #5EB3E4, stop:0.7 #2E94D0, stop:1 #1878B8);
+  color: #0F172A;
+}
+
+/* ---- Push buttons ---- */
+QPushButton {
+  color: #0F172A;
+  font-weight: 700;
+  min-height: 36px;
+  padding: 8px 16px;
+  border-width: 2px;
+  border-style: solid;
+  border-top-color: #FFFFFF;
+  border-left-color: #FFFFFF;
+  border-right-color: #000000;
+  border-bottom-color: #000000;
+  border-radius: 4px;
+  background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+    stop:0 #C5E8F8, stop:0.35 #5EB3E4, stop:1 #1878B8);
+}
+QPushButton:hover {
+  background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+    stop:0 #9ED4F2, stop:0.4 #2E94D0, stop:1 #0F5F9A);
+}
+QPushButton:pressed {
+  background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+    stop:0 #0F5F9A, stop:0.55 #2E94D0, stop:1 #9ED4F2);
+  border-top-color: #000000;
+  border-left-color: #000000;
+  border-right-color: #FFFFFF;
+  border-bottom-color: #FFFFFF;
+  color: #0F172A;
+}
+QPushButton:checked {
+  background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+    stop:0 #1878B8, stop:1 #06325A);
+  color: #FFFFFF;
+  border-top-color: #000000;
+  border-left-color: #000000;
+  border-right-color: #FFFFFF;
+  border-bottom-color: #FFFFFF;
+}
+QPushButton:default, QPushButton#btnAdjustDone, QPushButton.primary {
+  background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+    stop:0 #1878B8, stop:1 #06325A);
+  color: #FFFFFF;
+}
+QPushButton:disabled {
+  background: #7EB6D4;
+  color: #334155;
+  border-color: #64748B;
+}
+
+/* ---- All tool buttons (not only #mainToolbar) ---- */
+QToolButton {
+  color: #0F172A;
+  font-weight: 700;
+  border-width: 1px;
+  border-style: solid;
+  border-top-color: #FFFFFF;
+  border-left-color: #FFFFFF;
+  border-right-color: #000000;
+  border-bottom-color: #000000;
+  border-radius: 4px;
+  background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+    stop:0 #C5E8F8, stop:0.4 #5EB3E4, stop:1 #1878B8);
+  padding: 4px 8px;
+}
+QToolButton:hover {
+  background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+    stop:0 #9ED4F2, stop:0.45 #2E94D0, stop:1 #0F5F9A);
+}
+QToolButton:pressed, QToolButton:checked {
+  background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+    stop:0 #1878B8, stop:1 #06325A);
+  color: #FFFFFF;
+  border-top-color: #000000;
+  border-left-color: #000000;
+  border-right-color: #FFFFFF;
+  border-bottom-color: #FFFFFF;
+}
+QToolButton:disabled { background: #7EB6D4; color: #334155; border-color: #64748B; }
+
+QToolBar {
+  background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+    stop:0 #9ED4F2, stop:0.45 #2E94D0, stop:1 #0F5F9A);
+  border: none;
+  spacing: 4px;
+  padding: 4px 8px;
+}
+QToolBar#mainToolbar, QToolBar#studioToolbar { border-bottom: 2px solid #000000; }
+QToolBar#subToolbar { border-top: 2px solid #000000; border-bottom: 2px solid #000000; }
+QToolBar#mainToolbar QToolButton {
+  min-width: 44px;
+  min-height: 48px;
+  font-size: 11px;
+}
+QLabel#subToolbarCaption { color: #0F172A; font-weight: 700; padding: 0 4px; background: transparent; }
+
+/* ---- Inset fields ---- */
+QLineEdit, QComboBox, QAbstractSpinBox, QTextEdit, QPlainTextEdit {
+  background: #FFFFFF;
+  color: #0F172A;
+  border-width: 2px;
+  border-style: solid;
+  border-top-color: #000000;
+  border-left-color: #000000;
+  border-right-color: #FFFFFF;
+  border-bottom-color: #FFFFFF;
+  border-radius: 4px;
+  min-height: 32px;
+  padding: 4px 8px;
+  selection-background-color: #0A4A7C;
+  selection-color: #FFFFFF;
+}
+QLineEdit:disabled, QComboBox:disabled, QAbstractSpinBox:disabled {
+  background: #B8DFF6;
+  color: #64748B;
+}
+QLineEdit#locationSearch { min-height: 32px; min-width: 200px; }
+
+QAbstractSpinBox { padding-right: 26px; }
+QAbstractSpinBox::up-button, QAbstractSpinBox::down-button {
+  subcontrol-origin: border;
+  width: 22px;
+  background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #C5E8F8, stop:1 #1878B8);
+  border-left: 1px solid #000000;
+}
+QAbstractSpinBox::up-button { subcontrol-position: top right; }
+QAbstractSpinBox::down-button { subcontrol-position: bottom right; }
+QAbstractSpinBox::up-arrow, QAbstractSpinBox::down-arrow {
+  width: 8px; height: 8px; background: #0F172A;
+}
+QComboBox::drop-down {
+  subcontrol-origin: border;
+  width: 28px;
+  border-left: 1px solid #000000;
+  background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #C5E8F8, stop:1 #1878B8);
+}
+QComboBox QAbstractItemView, QColorDialog QAbstractSpinBox {
+  background: #FFFFFF;
+  color: #0F172A;
+  selection-background-color: #0A4A7C;
+  selection-color: #FFFFFF;
+  min-height: 28px;
+  border: 2px solid #000000;
+}
+
+/* ---- Trees / layer list (inset) ---- */
+QTreeView, QgsLayerTreeView, QListWidget {
+  background: #FFFFFF;
+  color: #0F172A;
+  border-width: 2px;
+  border-style: solid;
+  border-top-color: #000000;
+  border-left-color: #000000;
+  border-right-color: #FFFFFF;
+  border-bottom-color: #FFFFFF;
+  border-radius: 4px;
+  outline: none;
+  font-size: 13px;
+}
+QTreeView::item, QgsLayerTreeView::item, QListWidget::item {
+  color: #0F172A;
+  padding: 3px 4px;
+  min-height: 22px;
+}
+QTreeView::item:selected, QgsLayerTreeView::item:selected, QListWidget::item:selected {
+  background: #5EB3E4;
+  color: #0F172A;
+}
+QTreeView::item:hover, QgsLayerTreeView::item:hover, QListWidget::item:hover {
+  background: #9ED4F2;
+  color: #0F172A;
+}
+QHeaderView::section {
+  background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #9ED4F2, stop:1 #2E94D0);
+  color: #0F172A;
+  border: 1px solid #000000;
+}
+
+/* ---- Region cards / docks / splitter ---- */
+QFrame#mapCard, QFrame#layersCard, QFrame#filesCard,
+QFrame#filesInner, QFrame#layersInner,
+QFrame#itemInspector, QFrame#mapAdjustBar, QFrame#drawerCard {
+  background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+    stop:0 #8EC8EA, stop:1 #4AA3D8);
+  border: 2px solid #000000;
+  border-radius: 4px;
+  color: #0F172A;
+}
+QWidget#sampleStrip {
+  background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+    stop:0 #9ED4F2, stop:0.5 #5EB3E4, stop:1 #1878B8);
+  border: none;
+  border-bottom: 2px solid #000000;
+}
+QToolButton.sampleTile {
+  min-width: 56px;
+  padding: 6px 8px;
+}
+QDockWidget { border: 2px solid #000000; color: #0F172A; titlebar-close-icon: none; }
+QDockWidget::title {
+  background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #9ED4F2, stop:1 #0F5F9A);
+  color: #0F172A;
+  padding: 4px;
+  border-bottom: 2px solid #000000;
+}
+QSplitter::handle {
+  background: #000000;
+  width: 2px;
+  height: 2px;
+}
+
+QLabel { color: #0F172A; background: transparent; }
+QLabel#cardCaption { color: #0F172A; font-weight: 800; font-size: 14px; padding: 8px 10px 6px 10px; }
+QCheckBox { color: #0F172A; spacing: 8px; font-weight: 700; background: transparent; }
+QCheckBox:disabled { color: #64748B; }
+
+QMenu {
+  background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #C5E8F8, stop:1 #5EB3E4);
+  color: #0F172A;
+  border: 2px solid #000000;
+  padding: 4px;
+}
+QMenu::item { color: #0F172A; padding: 8px 16px; min-height: 22px; }
+QMenu::item:selected { background: #0A4A7C; color: #FFFFFF; }
+QMenu::item:disabled { color: #64748B; }
+
+QStatusBar {
+  background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+    stop:0 #5EB3E4, stop:0.5 #1878B8, stop:1 #06325A);
+  color: #FFFFFF;
+  font-weight: 700;
+  border-top: 2px solid #000000;
+}
+QStatusBar QLabel { color: #FFFFFF; }
+
+QMenuBar { height: 0px; max-height: 0px; border: none; }
+
+QToolTip {
+  color: #0F172A;
+  background: #C5E8F8;
+  border: 2px solid #000000;
+  padding: 4px 8px;
+}
+
+QScrollBar:vertical, QScrollBar:horizontal { background: #9ED4F2; border: 1px solid #000000; }
+QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
+  background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #5EB3E4, stop:1 #0F5F9A);
+  border: 1px solid #000000;
+  min-height: 24px;
+  min-width: 24px;
+}

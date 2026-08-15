@@ -38,6 +38,7 @@ Desktop.ini
 .claude/
 .repowise/
 .mcp.json
+.grok/.state/
 
 # Logs & local DBs
 *.log

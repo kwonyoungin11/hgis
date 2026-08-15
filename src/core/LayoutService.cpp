@@ -456,6 +456,124 @@ static void fillLayout(QgsPrintLayout* layout, QgsProject* project,
   }
 }
 
+int LayoutService::niceScaleDenominator(double rawScale) {
+  if (!(rawScale > 0.0) || !std::isfinite(rawScale))
+    return 1000;
+  static const int kNice[] = {10,   20,    40,    50,    80,    100,   200,   400,
+                              500,  1000,  2000,  4000,  5000,  10000, 20000, 40000,
+                              50000, 100000, 200000, 500000};
+  // Smallest 10-ending cartographic scale that still contains the extent
+  // (do not snap down — that clips the dragged survey).
+  for (int n : kNice) {
+    if (static_cast<double>(n) + 1e-6 >= rawScale)
+      return n;
+  }
+  return kNice[sizeof(kNice) / sizeof(kNice[0]) - 1];
+}
+
+double LayoutService::niceScaleBarSegmentMeters(double mapWidthMm, double scaleDenominator,
+                                                int segments) {
+  if (segments < 1)
+    segments = 4;
+  if (!(mapWidthMm > 0.0) || !(scaleDenominator > 0.0))
+    return 1.0;
+  const double targetBarMm = std::clamp(mapWidthMm * 0.35, 40.0, 160.0);
+  const double rawSeg =
+      (targetBarMm / 1000.0 * scaleDenominator) / static_cast<double>(segments);
+  static const double kLen[] = {0.5, 1.0, 2.0, 4.0, 5.0, 10.0, 20.0, 40.0, 50.0,
+                                100.0, 200.0, 400.0, 500.0, 1000.0, 2000.0, 5000.0};
+  double best = kLen[0];
+  double bestRel = 1.0e99;
+  for (double n : kLen) {
+    const double rel = std::fabs(rawSeg - n) / n;
+    if (rel < bestRel) {
+      bestRel = rel;
+      best = n;
+    }
+  }
+  return best;
+}
+
+double LayoutService::scaleBarWidthMm(double segmentMeters, int segments, double scaleDenominator) {
+  if (!(segmentMeters > 0.0) || segments < 1 || !(scaleDenominator > 0.0))
+    return 80.0;
+  return segmentMeters * static_cast<double>(segments) / scaleDenominator * 1000.0;
+}
+
+LayoutService::SheetChromeRects LayoutService::standardSheetChrome(const QRectF& page,
+                                                                   const QRectF& requestedMap) {
+  constexpr double kChromeH = 22.0;
+  constexpr double kGap = 3.0;
+  constexpr double kMargin = 8.0;
+  constexpr double kMinMapH = 40.0;
+  constexpr double kBarH = 10.0;
+  constexpr double kLabelW = 72.0;
+  constexpr double kLabelH = 8.0;
+  constexpr double kLabelGap = 1.5;
+  constexpr double kNorthW = 28.0;
+  constexpr double kNorthH = 32.0;
+  constexpr double kCrsH = 8.0;
+  constexpr double kInner = 4.0;
+
+  SheetChromeRects out;
+  QRectF map = requestedMap;
+  if (!map.isValid() || map.width() < 8.0 || map.height() < 8.0) {
+    map = QRectF(kMargin, kMargin, std::max(40.0, page.width() - 2.0 * kMargin),
+                 std::max(kMinMapH, page.height() - 2.0 * kMargin - kChromeH));
+  }
+
+  if (map.bottom() + kChromeH > page.bottom() - kMargin) {
+    const double maxBottom = page.bottom() - kMargin - kChromeH;
+    double newH = maxBottom - map.top();
+    if (newH < kMinMapH)
+      newH = kMinMapH;
+    map.setHeight(newH);
+  }
+  out.map = map;
+
+  const double rowTop = map.bottom() + kGap;
+  const double barW = std::min(88.0, std::max(48.0, map.width() * 0.42));
+  out.scaleBar = QRectF(map.left(), rowTop, barW, kBarH);
+  out.scaleLabel = QRectF(map.left(), out.scaleBar.bottom() + kLabelGap, kLabelW, kLabelH);
+  out.north = QRectF(map.right() - kNorthW, rowTop, kNorthW, kNorthH);
+
+  const double crsLeft = out.scaleBar.right() + kInner;
+  const double crsRight = out.north.left() - kInner;
+  const double crsW = std::max(8.0, crsRight - crsLeft);
+  out.crs = QRectF(crsLeft, rowTop + (kBarH - kCrsH) * 0.5, crsW, kCrsH);
+
+  auto clampOnPage = [&](QRectF& r) {
+    if (r.top() < map.bottom())
+      r.moveTop(map.bottom());
+    if (r.bottom() > page.bottom())
+      r.setHeight(std::max(4.0, page.bottom() - r.top()));
+    if (r.left() < page.left())
+      r.moveLeft(page.left());
+    if (r.right() > page.right())
+      r.setWidth(std::max(4.0, page.right() - r.left()));
+  };
+  clampOnPage(out.scaleBar);
+  clampOnPage(out.scaleLabel);
+  clampOnPage(out.north);
+  clampOnPage(out.crs);
+
+  if (out.scaleLabel.right() > out.north.left() - 2.0)
+    out.scaleLabel.setWidth(std::max(8.0, out.north.left() - 2.0 - out.scaleLabel.left()));
+
+  if (out.crs.left() < out.scaleBar.right() + 2.0)
+    out.crs.setLeft(out.scaleBar.right() + 2.0);
+  if (out.crs.right() > out.north.left() - 2.0)
+    out.crs.setRight(out.north.left() - 2.0);
+  if (out.crs.width() < 4.0) {
+    out.crs = QRectF(out.north.left() - 36.0, rowTop + 1.0, 32.0, kCrsH);
+    if (out.crs.left() < out.scaleBar.right() + 2.0)
+      out.crs.setLeft(out.scaleBar.right() + 2.0);
+    clampOnPage(out.crs);
+  }
+
+  return out;
+}
+
 QgsRectangle LayoutService::extentForPaperScale(const QgsRectangle& currentExtent,
                                                 double mapWidthMm, double scaleDenominator) {
   if (mapWidthMm <= 0.0 || scaleDenominator <= 0.0)

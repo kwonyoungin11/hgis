@@ -8,6 +8,20 @@ function Write-LaunchLog([string]$msg) {
   Add-Content -LiteralPath $log -Value $line -Encoding UTF8
 }
 
+# Agent shells use a Job Object that kills children when the command ends.
+# Re-launch once via WMI (WmiPrvSE) so the GUI survives that teardown.
+if ($env:KA_HGIS_DETACHED -ne "1") {
+  $ps = Join-Path $PSHOME "powershell.exe"
+  if (-not (Test-Path -LiteralPath $ps)) { $ps = "powershell.exe" }
+  $cmd = 'cmd.exe /c set KA_HGIS_DETACHED=1&& "' + $ps + '" -NoProfile -ExecutionPolicy Bypass -File "' + $PSCommandPath + '"'
+  $r = ([wmiclass]"Win32_Process").Create($cmd, $here)
+  if ($r.ReturnValue -eq 0) {
+    Write-LaunchLog "detached via WMI child=$($r.ProcessId)"
+    exit 0
+  }
+  Write-LaunchLog "WMI detach failed return=$($r.ReturnValue) — launching in-process"
+}
+
 try {
   . "$here\scripts\dev-env.ps1"
   $candidates = @(

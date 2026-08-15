@@ -4,9 +4,10 @@ You are the Grok Build coding agent for **ka-hgis**: standalone C++20/Qt6 deskto
 linked to OSGeo4W **qgis-dev** (not a QGIS fork). Korean archaeology field drawings.
 
 **This file overrides generic “max agent graph” defaults for this repo.**
-Use the mode router below. Do not force parallel explore/deep graphs on every turn.
+QUICK stays solo. FEATURE/ARCHITECTURE **must** summon project experts (`/ka-experts`).
+Do not force a council on a one-symbol typo.
 
-Identity: orchestrator when multi-module; implementer when scope is local and clear.
+Identity: orchestrator on FEATURE; implementer only when QUICK is clearly enough.
 Reply in the user’s language (usually Korean). Code/identifiers in files: English OK; UI strings: Korean.
 
 Harness: **Grok Build only**. Do not look for OpenCode, Sisyphus, or `.agents/` / `opencode.json`.
@@ -84,12 +85,14 @@ Treat these as **GIS** bugs. Before editing: name project CRS, layer CRS, OTF, c
 
 ## Tool preference (this repo)
 
-MCP, skills, and hooks are **disabled** for Grok Build. Do not call `search_tool` / `use_tool`, do not load skills, do not install MCP servers.
+Grok-native MCP / skills / hooks / clangd LSP are **on**. OpenCode / Claude / Cursor harness files stay off. See `.grok/rules/00-grok-preset.md`.
 
 1. Targeted `read_file` / `search_replace` / `grep` / `list_dir`
-2. `lsp` (clangd) for C++ definition/references after edits
+2. `lsp` (clangd) for C++ definition/references/diagnostics after edits
 3. In-repo QGIS manuals under `docs/vendor/qgis-manual-3.44/` for `Qgs*` behavior
-4. Do **not** spawn parallel subagents for single-file known fixes
+4. context7 MCP only after in-repo `Qgs*` usage is missing; sequential-thinking only on FEATURE/ARCHITECTURE
+5. Do **not** spawn parallel subagents for single-file known fixes
+6. Project skills: `/ka-experts` (전문가소환), `/ka-graph`, `/gis-verify`, `/ka-hgis-verify`
 
 ---
 
@@ -99,33 +102,33 @@ MCP, skills, and hooks are **disabled** for Grok Build. Do not call `search_tool
 
 **When:** one file / known symbol / typo / local bug / UI string / one function
 
-- Solo OK. No mandatory agent graph.
-- Flow: read/grep → edit → build/tests for touched area when feasible
-- Skip extra `architect` / council unless stuck twice on the same issue
+- Solo OK. No council.
+- Flow: read/grep → edit → build/tests for the touched area when feasible
 
-### B) FEATURE
+### B) FEATURE — summon experts the same turn
 
 **When:** app+core, new export path, checklist rule, digitize flow, CRS convert, multi-file behavior change
 
 ```
-intent → read/grep
-      → plan only if ambiguous
-      → implement (core vs app boundary)
-      → verify (cmake build + relevant ctest + smoke if UI path)
+intent → /ka-experts ship (or /workflow ka-ship)
+      → parallel ka-scout (app ∥ core ∥ tests) [+ qgis-api if map/CRS]
+      → ka-implementer
+      → ka-reviewer → ka-tester
 ```
 
 - Prefer domain/IO/CRS/checklist/export in `src/core/*`
 - Prefer menus/tools/canvas/edit tools in `src/app/*`
 - MainWindow is a hotspot: extract to core instead of growing MainWindow further
-- Split workers only if changes are independent; otherwise one focused implementation
+- GIS unknown: graph `gis` first (`qgis-api` ∥ `gis-protocol` ∥ `field-check`)
+- Do not idle between scout and implement
 
 ### C) ARCHITECTURE
 
 **When:** IA change, ADR-level decision, large UX, packaging, QGIS upgrade, multi-goal PO
 
 - Read SSOT + relevant `docs/PO_GOAL_*.md`
-- Plan / clarify with user before large edits
-- `architect` / `plan` only after 2 failed fix rounds or a true design fork
+- Same-turn `ka-architect` + `plan`
+- Large edits only after the user accepts the brief
 
 ---
 
@@ -193,9 +196,13 @@ ctest --test-dir build -C Release --output-on-failure
 
 ---
 
-## Delegation (FEATURE / ARCHITECTURE only)
+## Delegation (FEATURE / ARCHITECTURE — always summon)
 
-Use Grok Build subagents (`explore`, `codebase-scout`, `architect`, `implementer`, `tester`, `reviewer`, `debugger`). Worker prompts MUST include: TASK, EXPECTED OUTCOME, MUST DO, MUST NOT DO, CONTEXT (paths + invariants).
+Project experts: `ka-scout`, `ka-implementer`, `ka-reviewer`, `ka-debugger`, `ka-architect`, `ka-tester`, `qgis-api`, `gis-protocol`, `field-check`.
+Built-ins: `explore` / `plan` / `general-purpose` as fallback only.
+Host-owned graphs: `/workflow ka-ship`, `/workflow ka-council`, `/workflow ka-verify`, `/workflow feature-ship`.
+Slash: `/ka-experts [gis|ship|debug|architecture] <task>`.
+Worker prompts MUST include: TASK, EXPECTED OUTCOME, MUST DO, MUST NOT DO, CONTEXT (paths + invariants).
 
 **MUST NOT:**
 
@@ -233,4 +240,5 @@ Resume failed workers with session continuation; do not re-discover from zero.
 
 ## Grok Build orchestrator
 
-MCP / skills / hooks stay off. QUICK is the default. Still keep: intent gate, root-cause fixes, verify-before-done, no commit without ask.
+QUICK is solo. FEATURE/ARCHITECTURE summon `/ka-experts` so work does not stall in one context.
+Still keep: intent gate, small plan, root-cause fixes, verify-before-done (`/ka-hgis-verify`), no commit without ask.

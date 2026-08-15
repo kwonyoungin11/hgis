@@ -53,10 +53,20 @@ target_link_directories(ka_core PUBLIC ${KA_LIBDIRS})
 target_link_libraries(ka_core PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml Qt6::PrintSupport Qt6::Network Qt6::Svg qgis_core qgis_gui)
 target_compile_definitions(ka_core PUBLIC KA_HGIS_HAS_QGIS=1 "CORE_EXPORT=__declspec(dllimport)" "GUI_EXPORT=__declspec(dllimport)")
 
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  "${CMAKE_SOURCE_DIR}/data/theme/ka-hgis.qss")
+file(READ "${CMAKE_SOURCE_DIR}/data/theme/ka-hgis.qss" KA_QSS_CONTENT)
+configure_file(
+  "${CMAKE_SOURCE_DIR}/src/app/ka-hgis.qss.inc.in"
+  "${CMAKE_BINARY_DIR}/generated/ka-hgis.qss.inc"
+  @ONLY
+)
+
 add_executable(ka-hgis
   src/app/main.cpp
   src/app/MainWindow.cpp
   src/app/KaApplication.cpp
+  src/app/KaTheme.cpp
   src/app/KaIcons.cpp
   src/app/KaCaptureMapTool.cpp
   src/app/KaAttributeMapTool.cpp
@@ -64,13 +74,14 @@ add_executable(ka-hgis
   src/app/KaDrawingStudio.cpp
   src/app/MainWindow.h
   src/app/KaApplication.h
+  src/app/KaTheme.h
   src/app/KaIcons.h
   src/app/KaCaptureMapTool.h
   src/app/KaAttributeMapTool.h
   src/app/KaLayoutWindow.h
   src/app/KaDrawingStudio.h
 )
-target_include_directories(ka-hgis PRIVATE ${KA_INCLUDES})
+target_include_directories(ka-hgis PRIVATE ${KA_INCLUDES} ${CMAKE_BINARY_DIR}/generated)
 target_link_directories(ka-hgis PRIVATE ${KA_LIBDIRS})
 target_link_libraries(ka-hgis PRIVATE ka_core Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml Qt6::PrintSupport Qt6::Network Qt6::Svg qgis_core qgis_gui)
 target_compile_definitions(ka-hgis PRIVATE KA_HGIS_HAS_QGIS=1 "CORE_EXPORT=__declspec(dllimport)" "GUI_EXPORT=__declspec(dllimport)")
@@ -80,6 +91,10 @@ add_custom_command(TARGET ka-hgis POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${CMAKE_SOURCE_DIR}/data/rules/drawing_checklist.v1.json"
     "$<TARGET_FILE_DIR:ka-hgis>/data/rules/drawing_checklist.v1.json"
+  COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:ka-hgis>/data/theme"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_SOURCE_DIR}/data/theme/ka-hgis.qss"
+    "$<TARGET_FILE_DIR:ka-hgis>/data/theme/ka-hgis.qss"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${CMAKE_SOURCE_DIR}/ka-hgis-실행.bat"
     "$<TARGET_FILE_DIR:ka-hgis>/ka-hgis-실행.bat"
@@ -104,6 +119,18 @@ if(KA_HGIS_BUILD_TESTS)
   target_compile_definitions(ka_workflow_tests PRIVATE ${KA_TEST_DEFS})
   add_test(NAME workflow_engine COMMAND ka_workflow_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+  add_executable(ka_theme_tests
+    tests/test_theme.cpp
+    src/app/KaTheme.cpp
+  )
+  set_target_properties(ka_theme_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  target_link_libraries(ka_theme_tests PRIVATE Qt6::Test Qt6::Core Qt6::Gui Qt6::Widgets)
+  target_include_directories(ka_theme_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}/generated
+  )
+  add_test(NAME theme_qss COMMAND ka_theme_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
   # Windows: ctest without OSGeo4W PATH → 0xc0000135 (DLL not found)
   if(WIN32)
     set(_ka_osgeo_bin "")
@@ -112,7 +139,7 @@ if(KA_HGIS_BUILD_TESTS)
         "${OSGEO4W_ROOT}/apps/qgis-dev/bin;${OSGEO4W_ROOT}/apps/Qt6/bin;${OSGEO4W_ROOT}/apps/gdal-dev/bin;${OSGEO4W_ROOT}/apps/pdal-dev/bin;${OSGEO4W_ROOT}/bin")
     endif()
     if(_ka_osgeo_bin)
-      set_tests_properties(checklist_engine workflow_engine PROPERTIES
+      set_tests_properties(checklist_engine workflow_engine theme_qss PROPERTIES
         ENVIRONMENT "PATH=${_ka_osgeo_bin};$ENV{PATH};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
     endif()
   endif()

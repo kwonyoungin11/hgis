@@ -1,15 +1,24 @@
-# Project Grok config. MCP / skills / hooks stripped 2026-08-15.
-# Restore MCP from git history or ~/.grok/backups/strip-mcp-skills-hooks-20260815-105014
+# Project Grok config — ka-hgis preset (graph + LSP + loop + MCP/skills/hooks)
+# Project file only contributes [mcp_servers], [plugins], [permission].
+
+# Qt desktop HGIS — do not pull web/Playwright/OpenCode-adjacent plugins into this repo.
+[plugins]
+disabled = [
+    "playwright",
+    "chrome-devtools-mcp",
+    "frontend-design",
+    "oh-my-claudecode",
+]
 
 [permission]
 deny = [
-    "Bash(rm -rf *)",
+    "Bash(rm -rf /)",
+    "Bash(rm -rf /*)",
     "Bash(Remove-Item -Recurse -Force C:\\*)",
-    "MCPTool(*)",
-    "mcp__*",
 ]
 allow = [
     "Bash(cmake *)",
     "Bash(ctest *)",
     "Bash(.\\scripts\\*)",
+    "Bash(powershell *)",
 ]

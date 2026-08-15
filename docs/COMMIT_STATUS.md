@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-15 15:31:08 +09:00 |
+| Updated (local) | 2026-08-15 23:42:39 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `f4c1901` |
-| HEAD full | `f4c1901cabd7950a66fc47f6f65f9c089db8895c` |
-| HEAD date | 2026-08-15 15:29:21 +0900 |
+| HEAD short | `17ac917` |
+| HEAD full | `17ac917784429bc17ea8c44a064f979d1ff42e74` |
+| HEAD date | 2026-08-15 15:31:08 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Sync COMMIT_STATUS to tip after field HGIS push. |
-| Total commits | 16 |
+| HEAD subject | Save resume handoff so reconnect/clone can continue field HGIS work. |
+| Total commits | 17 |
 | Upstream | `origin/main` |
 | Sync | up to date with origin/main |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (4 paths) |
+| Working tree dirty | **yes** (61 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Sync COMMIT_STATUS to tip after field HGIS push. (`f4c1901` @ 2026-08-15 15:29:21 +0900)
+- **Recorded tip when this file was written:** Save resume handoff so reconnect/clone can continue field HGIS work. (`17ac917` @ 2026-08-15 15:31:08 +0900)
 - **Remote sync at write time:** up to date with origin/main
-- **Uncommitted local changes at write time:** yes (4 paths)
+- **Uncommitted local changes at write time:** yes (61 paths)
 
 ### Read this correctly
 
@@ -49,6 +49,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `17ac917` | 2026-08-15T15:31:08+09:00 | Save resume handoff so reconnect/clone can continue field HGIS work. |
 | `f4c1901` | 2026-08-15T15:29:21+09:00 | Sync COMMIT_STATUS to tip after field HGIS push. |
 | `1f5e990` | 2026-08-15T15:29:07+09:00 | Ship field HGIS: layout studio, keyed VWorld basemap, icon chrome, Ctrl+Z undo. |
 | `3a5a87a` | 2026-08-09T18:57:37+09:00 | Sync COMMIT_STATUS to tip after bootstrap push. |
@@ -69,9 +70,66 @@
 ## Staged in this commit
 
 ```
+M	.gitignore
+A	.grok/agents/field-check.md
+A	.grok/agents/gis-protocol.md
+A	.grok/agents/ka-architect.md
+A	.grok/agents/ka-debugger.md
+A	.grok/agents/ka-implementer.md
+A	.grok/agents/ka-reviewer.md
+A	.grok/agents/ka-scout.md
+A	.grok/agents/ka-tester.md
+A	.grok/agents/qgis-api.md
+M	.grok/config.toml
+A	.grok/hooks/bin/post-tool.ps1
+A	.grok/hooks/bin/pre-tool.ps1
+A	.grok/hooks/bin/session-start.ps1
+A	.grok/hooks/bin/stop-gate.ps1
+A	.grok/hooks/ka-hgis.json
+A	.grok/hooks/run.cmd
+A	.grok/lsp.json
+A	.grok/roles/field-check.toml
+A	.grok/roles/gis-protocol.toml
+A	.grok/roles/ka-architect.toml
+A	.grok/roles/ka-debugger.toml
+A	.grok/roles/ka-implementer.toml
+A	.grok/roles/ka-reviewer.toml
+A	.grok/roles/ka-scout.toml
+A	.grok/roles/ka-tester.toml
+A	.grok/roles/qgis-api.toml
+A	.grok/rules/00-grok-preset.md
+A	.grok/skills/gis-verify/SKILL.md
+A	.grok/skills/ka-experts/SKILL.md
+A	.grok/skills/ka-graph/SKILL.md
+A	.grok/skills/ka-hgis-verify/SKILL.md
+A	.grok/workflows/ka-council.rhai
+A	.grok/workflows/ka-ship.rhai
+A	.grok/workflows/ka-verify.rhai
+M	AGENTS.md
+M	CMakeLists.txt
 M	HANDOFF.md
+A	data/theme/ka-hgis.qss
+M	dist/ka-hgis-portable/ka-hgis.exe
 M	docs/COMMIT_STATUS.md
 M	docs/HANDOFF.md
+A	docs/design/2026-08-15-sky-blue-3d-chrome.md
+M	launch.ps1
+A	scripts/gen-compile-commands.ps1
+M	scripts/run-ka-hgis.ps1
+M	src/app/KaApplication.cpp
+M	src/app/KaDrawingStudio.cpp
+M	src/app/KaDrawingStudio.h
+A	src/app/KaTheme.cpp
+A	src/app/KaTheme.h
+M	src/app/MainWindow.cpp
+M	src/app/MainWindow.h
+A	src/app/ka-hgis.qss.inc.in
+M	src/core/LayerOps.cpp
+M	src/core/LayerOps.h
+M	src/core/LayoutService.cpp
+M	src/core/LayoutService.h
+A	tests/test_theme.cpp
+M	tests/test_workflow.cpp
 ```
 ## Other PC checklist
 

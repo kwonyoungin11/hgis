@@ -1,0 +1,3 @@
+description = "ka-hgis tester — cmake/ctest/smoke evidence"
+default_capability_mode = "execute"
+reasoning_effort = "xhigh"

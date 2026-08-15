@@ -111,7 +111,6 @@ private:
   void buildUi();
   void buildMenus();
   void setupWorkPanel();
-  void applyPhase1Theme();
   void updateNextActionStatus();
   void setupFileBrowser();
   void clearSubToolbar();

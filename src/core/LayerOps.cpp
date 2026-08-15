@@ -591,6 +591,15 @@ QgsVectorLayer* LayerOps::findByLayerKey(QgsProject* project, const QString& lay
   return nullptr;
 }
 
+QgsVectorLayer* LayerOps::digitizeTargetLayer(QgsProject* project, QgsVectorLayer* current,
+                                              const QString& requiredKey) {
+  if (requiredKey.isEmpty())
+    return nullptr;
+  if (current && current->isValid() && layerKeyOf(current) == requiredKey)
+    return current;
+  return findByLayerKey(project, requiredKey);
+}
+
 QStringList LayerOps::domainLayerKeys() {
   return {QStringLiteral("survey_area"), QStringLiteral("feature_poly"), QStringLiteral("feature_line"),
           QStringLiteral("section_line"), QStringLiteral("control_points")};

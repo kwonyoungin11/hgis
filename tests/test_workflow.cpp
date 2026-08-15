@@ -1,7 +1,10 @@
+#include <cmath>
+
 #include <QtTest>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QRectF>
 #include <QJsonObject>
 #include <QTextStream>
 #include <QDateTime>
@@ -79,8 +82,12 @@ private slots:
   void syncMapCanvas_cadastralAboveSatellite();
   void layoutBlankSheetMapItemKeepsFrameAndNonEmptyLayers();
   void layoutStudio_checkedLayersScaleBarLegendSize();
+  void layoutStandardSheetChrome_sitsBelowMap();
   void layoutExtentForPaperScale_keepsTypedDenominator();
+  void layoutNiceScaleDenominator_endsOnTen();
   void legendTitlesHideEpsgAndUseShortKorean();
+  void drawSubToolbarWiresEachDomainSlot();
+  void digitizeTargetLayer_featurePolyIgnoresSurveyAreaCurrent();
 };
 
 static bool projectHasLayerNamedLike(QgsProject* proj, const QString& base) {
@@ -1184,6 +1191,23 @@ void TestWorkflow::layoutStudio_checkedLayersScaleBarLegendSize() {
   QVERIFY2(qAbs(legend->rect().height() - 74.0) < 2.0, "legend height must keep user size");
 }
 
+void TestWorkflow::layoutStandardSheetChrome_sitsBelowMap() {
+  const QRectF page(0.0, 0.0, 210.0, 297.0);
+  const QRectF drag(12.0, 12.0, 186.0, 273.0);
+  const auto c = LayoutService::standardSheetChrome(page, drag);
+  QVERIFY2(c.map.bottom() <= c.scaleBar.top() + 1e-6, "scale bar must sit below the map");
+  QVERIFY2(c.map.bottom() <= c.north.top() + 1e-6, "north must sit below the map");
+  QVERIFY2(c.map.bottom() <= c.crs.top() + 1e-6, "crs must sit below the map");
+  QVERIFY2(c.map.bottom() <= c.scaleLabel.top() + 1e-6, "scale label must sit below the map");
+  QVERIFY2(c.scaleBar.bottom() <= page.bottom() + 1e-6, "scale bar stays on page");
+  QVERIFY2(c.scaleLabel.bottom() <= page.bottom() + 1e-6, "scale label stays on page");
+  QVERIFY2(c.crs.bottom() <= page.bottom() + 1e-6, "crs stays on page");
+  QVERIFY2(c.north.bottom() <= page.bottom() + 1e-6, "north stays on page");
+  QVERIFY2(c.map.height() < drag.height() - 0.5, "map height shrinks so chrome fits");
+  QVERIFY2(qAbs(c.scaleBar.left() - c.map.left()) < 0.5, "scale bar left-aligned with map");
+  QVERIFY2(qAbs(c.north.right() - c.map.right()) < 0.5, "north right-aligned with map");
+}
+
 void TestWorkflow::layoutExtentForPaperScale_keepsTypedDenominator() {
   const QgsRectangle cur(200000.0, 450000.0, 200200.0, 450160.0);
   const QgsRectangle next = LayoutService::extentForPaperScale(cur, 100.0, 1000.0);
@@ -1200,6 +1224,29 @@ void TestWorkflow::layoutExtentForPaperScale_keepsTypedDenominator() {
     QVERIFY2(qAbs(e.width() - den / 10.0) < 0.001,
              qPrintable(QStringLiteral("chip 1:%1 on 100mm paper must stay typed").arg(den)));
   }
+}
+
+void TestWorkflow::layoutNiceScaleDenominator_endsOnTen() {
+  QCOMPARE(LayoutService::niceScaleDenominator(20.0), 20);
+  QCOMPARE(LayoutService::niceScaleDenominator(23.0), 40);
+  QCOMPARE(LayoutService::niceScaleDenominator(37.0), 40);
+  QCOMPARE(LayoutService::niceScaleDenominator(40.0), 40);
+  QCOMPARE(LayoutService::niceScaleDenominator(487.0), 500);
+  QCOMPARE(LayoutService::niceScaleDenominator(1000.0), 1000);
+  QVERIFY2(LayoutService::niceScaleDenominator(35.0) % 10 == 0, "denominator must end on 10");
+  QVERIFY2(LayoutService::niceScaleDenominator(23.0) >= 23, "must not snap down and clip extent");
+  const QgsRectangle cur(200000.0, 450000.0, 200007.0, 450005.0);
+  const int nice = LayoutService::niceScaleDenominator(35.0);
+  QCOMPARE(nice, 40);
+  const QgsRectangle next = LayoutService::extentForPaperScale(cur, 200.0, static_cast<double>(nice));
+  QVERIFY2(qAbs(next.width() - 8.0) < 0.001, "1:40 on 200mm paper is 8m on ground");
+  const double seg = LayoutService::niceScaleBarSegmentMeters(200.0, 500.0, 4);
+  QVERIFY(seg > 0.0);
+  const int rounded = static_cast<int>(std::lround(seg * 10.0));
+  QVERIFY2(rounded % 5 == 0, "scale-bar segment is 0.5/1/2/4/5 series");
+  const double barMm = LayoutService::scaleBarWidthMm(seg, 4, 500.0);
+  QVERIFY(barMm >= 32.0);
+  QVERIFY(barMm <= 200.0);
 }
 
 void TestWorkflow::legendTitlesHideEpsgAndUseShortKorean() {
@@ -1228,6 +1275,65 @@ void TestWorkflow::legendTitlesHideEpsgAndUseShortKorean() {
   QCOMPARE(zone->name(), QStringLiteral("구역"));
   QVERIFY(!zone->name().contains(QStringLiteral("EPSG")));
   delete zone;
+}
+
+void TestWorkflow::drawSubToolbarWiresEachDomainSlot() {
+  QFile f(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text),
+           "run from source tree (ctest WORKING_DIRECTORY)");
+  const QString src = QString::fromUtf8(f.readAll());
+  const int fn = src.indexOf(QLatin1String("void MainWindow::showSubToolsDraw"));
+  QVERIFY2(fn >= 0, "showSubToolsDraw must exist");
+  const int next = src.indexOf(QLatin1String("void MainWindow::showSubToolsBasemap"), fn + 1);
+  QVERIFY2(next > fn, "showSubToolsDraw body must end before showSubToolsBasemap");
+  const QString body = src.mid(fn, next - fn);
+  auto wired = [&](const char* iconId, const char* slot) {
+    const int ic = body.indexOf(QLatin1String(iconId));
+    const int sl = body.indexOf(QLatin1String(slot));
+    return ic >= 0 && sl > ic;
+  };
+  QVERIFY2(wired("draw_area", "startEditSurveyArea"),
+           "draw_area (조사구역) must call startEditSurveyArea");
+  QVERIFY2(wired("draw_poly", "startEditFeaturePoly"),
+           "draw_poly (유구면) must call startEditFeaturePoly");
+  QVERIFY2(wired("draw_line", "startEditFeatureLine"),
+           "draw_line (유구선) must call startEditFeatureLine");
+  QVERIFY2(wired("\"line\"", "startEditSectionLine"),
+           "line (단면선) must call startEditSectionLine");
+  QVERIFY2(wired("gps", "addControlPoint"),
+           "gps (기준점) must call addControlPoint");
+  QVERIFY2(!body.contains(QLatin1String("draw_area")) ||
+               body.indexOf(QLatin1String("startEditFeaturePoly")) >
+                   body.indexOf(QLatin1String("startEditSurveyArea")),
+           "draw_area must not be the feature_poly button");
+}
+
+void TestWorkflow::digitizeTargetLayer_featurePolyIgnoresSurveyAreaCurrent() {
+  const QString dir = QDir::temp().filePath(
+      QStringLiteral("ka_dig_") + QString::number(QDateTime::currentMSecsSinceEpoch()));
+  QVERIFY(QDir().mkpath(dir));
+  QString err;
+  const QString gpkg =
+      SurveyProjectFactory::createNewSurvey(dir, QStringLiteral("digtgt"), &err);
+  QVERIFY2(!gpkg.isEmpty(), qPrintable(err));
+
+  QgsProject proj;
+  auto* area = LayerOps::ensureDomainLayer(&proj, gpkg, QStringLiteral("survey_area"),
+                                           QStringLiteral("조사구역"), &err);
+  QVERIFY2(area, qPrintable(err));
+  auto* feat = LayerOps::ensureDomainLayer(&proj, gpkg, QStringLiteral("feature_poly"),
+                                           QStringLiteral("유구면"), &err);
+  QVERIFY2(feat, qPrintable(err));
+  QVERIFY(area != feat);
+  QCOMPARE(LayerOps::layerKeyOf(area), QStringLiteral("survey_area"));
+  QCOMPARE(LayerOps::layerKeyOf(feat), QStringLiteral("feature_poly"));
+
+  QgsVectorLayer* got =
+      LayerOps::digitizeTargetLayer(&proj, area, QStringLiteral("feature_poly"));
+  QCOMPARE(got, feat);
+  QCOMPARE(LayerOps::layerKeyOf(got), QStringLiteral("feature_poly"));
+  QCOMPARE(LayerOps::digitizeTargetLayer(&proj, feat, QStringLiteral("feature_poly")), feat);
+  QCOMPARE(LayerOps::digitizeTargetLayer(&proj, nullptr, QStringLiteral("feature_poly")), feat);
 }
 
 #include "test_workflow.moc"

@@ -1,0 +1,3 @@
+description = "ka-hgis debugger — isolate one failure"
+default_capability_mode = "all"
+reasoning_effort = "xhigh"

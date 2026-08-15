@@ -1,0 +1,3 @@
+description = "ka-hgis implementer — full tools, product invariants in agent prompt"
+default_capability_mode = "all"
+reasoning_effort = "xhigh"

@@ -49,9 +49,10 @@ Korean field archaeology HGIS (C++20/Qt6 + OSGeo4W `qgis-dev`, Architecture B, n
 | --- | --- |
 | VWorld 위성 | Stored API key → `api.vworld.kr` WMTS **first**; xdworld only if no key |
 | VWorld 지적 | Frozen tiled WMS `crs=EPSG:3857` + KEY/DOMAIN. Do not put 5186/5187/5179 in WMS CRS list |
-| Digitize / attrs | `KaCaptureMapTool`, `KaAttributeMapTool`, `ensureDomainLayer` |
+| Digitize / attrs | `KaCaptureMapTool`, `KaAttributeMapTool`, `ensureDomainLayer`. 그리기: 조사구역/유구면/유구선/단면선/기준점 |
 | Layout studio | `src/app/KaDrawingStudio.*` — 160 mm scale bar, PNG north = sample, CRS label |
 | Launch | `scripts/start-ka-hgis.vbs` + `launch.ps1` (Job Object safe) |
+| Chrome theme | `KaTheme` + `data/theme/ka-hgis.qss` sky 3D / black 2px regions |
 | Tests | `tests/test_workflow.cpp` (satellite key-first, undo feature, scale bar width, …) |
 
 ---
@@ -95,5 +96,8 @@ This machine: OSGeo `D:\OSGeo4W` (also `C:\OSGeo4W` in docs). CMake `C:\CMake\bi
 | --- | --- |
 | Agent rules | `AGENTS.md` |
 | Product SSOT | `HANDOFF.md` + `docs/HANDOFF.md` |
-| No MCP/skills/hooks | `.grok/rules/00-no-mcp-skills-hooks.md` |
-| clangd | `.clangd` |
+| Preset (MCP/skills/hooks/LSP/graph) | `.grok/rules/00-grok-preset.md` |
+| clangd | `.clangd` + `.grok/lsp.json` |
+| Skills | `/ka-experts` `/ka-graph` `/gis-verify` `/ka-hgis-verify` |
+| Experts | `ka-scout` `ka-implementer` `ka-reviewer` `ka-debugger` `ka-architect` `ka-tester` `qgis-api` `gis-protocol` `field-check` |
+| Workflows | `/workflow ka-ship` `/workflow ka-council` `/workflow ka-verify` |

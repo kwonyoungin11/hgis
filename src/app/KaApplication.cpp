@@ -1,4 +1,5 @@
 ﻿#include "KaApplication.h"
+#include "KaTheme.h"
 #include "MainWindow.h"
 #include <QApplication>
 #include <QPalette>
@@ -436,22 +437,7 @@ int KaApplication::run(int argc, char** argv) {
   app.setOrganizationName(QStringLiteral("ka-hgis"));
   app.setApplicationVersion(QStringLiteral("0.3.0"));
   app.setStyle(QStringLiteral("Fusion"));
-  {
-    QPalette light;
-    light.setColor(QPalette::Window, QColor(232, 241, 251));
-    light.setColor(QPalette::WindowText, QColor(15, 23, 42));
-    light.setColor(QPalette::Base, Qt::white);
-    light.setColor(QPalette::AlternateBase, QColor(247, 251, 255));
-    light.setColor(QPalette::Text, QColor(15, 23, 42));
-    light.setColor(QPalette::Button, QColor(232, 241, 251));
-    light.setColor(QPalette::ButtonText, QColor(15, 23, 42));
-    light.setColor(QPalette::BrightText, QColor(15, 23, 42));
-    light.setColor(QPalette::ToolTipBase, QColor(255, 251, 235));
-    light.setColor(QPalette::ToolTipText, QColor(15, 23, 42));
-    light.setColor(QPalette::Highlight, QColor(43, 108, 176));
-    light.setColor(QPalette::HighlightedText, Qt::white);
-    app.setPalette(light);
-  }
+  KaTheme::apply(&app);
 
   if (VworldSettings::loadApiKey().isEmpty()) {
     const QByteArray envKey = qgetenv("VWORLD_API_KEY");

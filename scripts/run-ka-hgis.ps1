@@ -22,5 +22,7 @@ $candidates = @(
 )
 $exe = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $exe) { throw "ka-hgis.exe not found. Build first." }
+# Qgs* writes plugin-miss warnings to stderr; do not treat that as a script failure.
+$ErrorActionPreference = "Continue"
 & $exe @args
 exit $LASTEXITCODE
