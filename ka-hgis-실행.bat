@@ -1,8 +1,5 @@
 @echo off
-title ka-hgis
+REM Console-free launch. Do not run ka-hgis.exe directly (OSGeo DLL path missing).
 cd /d "%~dp0"
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\run-ka-hgis.ps1" %*
-if errorlevel 1 (
-  echo FAILED exit %ERRORLEVEL%
-  pause
-)
+start "" wscript.exe //nologo "%~dp0scripts\start-ka-hgis.vbs"
+exit /b 0

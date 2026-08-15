@@ -59,12 +59,16 @@ add_executable(ka-hgis
   src/app/KaApplication.cpp
   src/app/KaIcons.cpp
   src/app/KaCaptureMapTool.cpp
+  src/app/KaAttributeMapTool.cpp
   src/app/KaLayoutWindow.cpp
+  src/app/KaDrawingStudio.cpp
   src/app/MainWindow.h
   src/app/KaApplication.h
   src/app/KaIcons.h
   src/app/KaCaptureMapTool.h
+  src/app/KaAttributeMapTool.h
   src/app/KaLayoutWindow.h
+  src/app/KaDrawingStudio.h
 )
 target_include_directories(ka-hgis PRIVATE ${KA_INCLUDES})
 target_link_directories(ka-hgis PRIVATE ${KA_LIBDIRS})
@@ -76,6 +80,9 @@ add_custom_command(TARGET ka-hgis POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${CMAKE_SOURCE_DIR}/data/rules/drawing_checklist.v1.json"
     "$<TARGET_FILE_DIR:ka-hgis>/data/rules/drawing_checklist.v1.json"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_SOURCE_DIR}/ka-hgis-실행.bat"
+    "$<TARGET_FILE_DIR:ka-hgis>/ka-hgis-실행.bat"
 )
 
 if(KA_HGIS_BUILD_TESTS)
@@ -96,4 +103,17 @@ if(KA_HGIS_BUILD_TESTS)
   target_link_directories(ka_workflow_tests PRIVATE ${KA_LIBDIRS})
   target_compile_definitions(ka_workflow_tests PRIVATE ${KA_TEST_DEFS})
   add_test(NAME workflow_engine COMMAND ka_workflow_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+  # Windows: ctest without OSGeo4W PATH → 0xc0000135 (DLL not found)
+  if(WIN32)
+    set(_ka_osgeo_bin "")
+    if(EXISTS "${OSGEO4W_ROOT}/apps/qgis-dev/bin")
+      set(_ka_osgeo_bin
+        "${OSGEO4W_ROOT}/apps/qgis-dev/bin;${OSGEO4W_ROOT}/apps/Qt6/bin;${OSGEO4W_ROOT}/apps/gdal-dev/bin;${OSGEO4W_ROOT}/apps/pdal-dev/bin;${OSGEO4W_ROOT}/bin")
+    endif()
+    if(_ka_osgeo_bin)
+      set_tests_properties(checklist_engine workflow_engine PROPERTIES
+        ENVIRONMENT "PATH=${_ka_osgeo_bin};$ENV{PATH};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
+    endif()
+  endif()
 endif()

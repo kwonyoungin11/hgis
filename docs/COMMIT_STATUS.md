@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-09 18:57:38 +09:00 |
+| Updated (local) | 2026-08-15 15:29:07 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `6b9f373` |
-| HEAD full | `6b9f373c74fcacead496ab931cadc8862b941dd3` |
-| HEAD date | 2026-08-09 18:57:28 +0900 |
+| HEAD short | `3a5a87a` |
+| HEAD full | `3a5a87ae0b670b0a82f4020662010862b22a0538` |
+| HEAD date | 2026-08-09 18:57:37 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Refresh COMMIT_STATUS after bootstrap docs commit. |
-| Total commits | 13 |
+| HEAD subject | Sync COMMIT_STATUS to tip after bootstrap push. |
+| Total commits | 14 |
 | Upstream | `origin/main` |
 | Sync | up to date with origin/main |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (1 paths) |
+| Working tree dirty | **yes** (52 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Refresh COMMIT_STATUS after bootstrap docs commit. (`6b9f373` @ 2026-08-09 18:57:28 +0900)
+- **Recorded tip when this file was written:** Sync COMMIT_STATUS to tip after bootstrap push. (`3a5a87a` @ 2026-08-09 18:57:37 +0900)
 - **Remote sync at write time:** up to date with origin/main
-- **Uncommitted local changes at write time:** yes (1 paths)
+- **Uncommitted local changes at write time:** yes (52 paths)
 
 ### Read this correctly
 
@@ -42,11 +42,13 @@
 - `c1a3c12` commit progress ledger ??Refresh COMMIT_STATUS ledger after feature commits.
 - `31e51be` commit progress ledger ??Sync COMMIT_STATUS to HEAD after push ledger update.
 - `6b9f373` commit progress ledger ??Refresh COMMIT_STATUS after bootstrap docs commit.
+- `3a5a87a` commit progress ledger ??Sync COMMIT_STATUS to tip after bootstrap push.
 
 ## Recent commits (newest first, max 30)
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `3a5a87a` | 2026-08-09T18:57:37+09:00 | Sync COMMIT_STATUS to tip after bootstrap push. |
 | `6b9f373` | 2026-08-09T18:57:28+09:00 | Refresh COMMIT_STATUS after bootstrap docs commit. |
 | `30c1a6d` | 2026-08-09T18:57:26+09:00 | Add bootstrap-dev-pc so a fresh clone can build and develop immediately. |
 | `31e51be` | 2026-08-09T18:54:02+09:00 | Sync COMMIT_STATUS to HEAD after push ledger update. |
@@ -64,7 +66,57 @@
 ## Staged in this commit
 
 ```
+D	.agents/mcp_config.json
+D	.agents/skills/context7/SKILL.md
+D	.agents/skills/exa_search/SKILL.md
+D	.agents/skills/sequential_thinking/SKILL.md
+M	.clangd
+M	.gitignore
+A	.grok/config.toml
+A	.grok/rules/00-no-mcp-skills-hooks.md
+A	.grok/rules/10-gis-verify.md
+A	.grok/rules/20-small-plan.md
+M	AGENTS.md
+M	CMakeLists.txt
+R053	OPENCODE_HANDOFF.md	HANDOFF.md
+M	README.md
+M	dist/ka-hgis-portable/ka-hgis.exe
 M	docs/COMMIT_STATUS.md
+A	docs/ERROR_REGRESSION.md
+A	docs/HANDOFF.md
+D	docs/OPENCODE_HANDOFF.md
+M	docs/PO_GOAL_0.md
+M	docs/PO_GOAL_0_REPORT.md
+M	docs/PO_GOAL_1.md
+M	docs/PO_GOAL_1_REPORT.md
+M	docs/PO_GOAL_ORIG_1.md
+M	docs/PO_GOAL_ORIG_1_REPORT.md
+M	docs/other-pc-setup.md
+M	"ka-hgis-\354\213\244\355\226\211.bat"
+M	launch.ps1
+D	opencode.json
+M	scripts/bootstrap-dev-pc.ps1
+M	scripts/commit.ps1
+M	scripts/run-ka-hgis.ps1
+A	scripts/start-ka-hgis.vbs
+M	src/app/KaApplication.cpp
+A	src/app/KaAttributeMapTool.cpp
+A	src/app/KaAttributeMapTool.h
+M	src/app/KaCaptureMapTool.cpp
+M	src/app/KaCaptureMapTool.h
+A	src/app/KaDrawingStudio.cpp
+A	src/app/KaDrawingStudio.h
+M	src/app/KaIcons.cpp
+M	src/app/MainWindow.cpp
+M	src/app/MainWindow.h
+M	src/core/ExportService.cpp
+M	src/core/LayerOps.cpp
+M	src/core/LayerOps.h
+M	src/core/LayoutService.cpp
+M	src/core/LayoutService.h
+M	src/core/VworldSettings.cpp
+M	src/core/WorkflowGuide.cpp
+M	tests/test_workflow.cpp
 ```
 ## Other PC checklist
 

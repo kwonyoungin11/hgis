@@ -436,6 +436,216 @@ QIcon drawDarkMode() {
   return fromPixmap(pm);
 }
 
+QIcon drawSelectArrow() {
+  auto pm = base();
+  QPainter p(&pm);
+  roundBg(p, QRectF(4, 4, 56, 56), QColor(51, 65, 85));
+  QPainterPath arrow;
+  arrow.moveTo(18, 14);
+  arrow.lineTo(18, 46);
+  arrow.lineTo(28, 36);
+  arrow.lineTo(36, 50);
+  arrow.lineTo(42, 46);
+  arrow.lineTo(34, 32);
+  arrow.lineTo(46, 32);
+  arrow.closeSubpath();
+  p.setPen(Qt::NoPen);
+  p.setBrush(Qt::white);
+  p.drawPath(arrow);
+  return fromPixmap(pm);
+}
+
+QIcon drawLayoutMapFrame() {
+  auto pm = base();
+  QPainter p(&pm);
+  roundBg(p, QRectF(4, 4, 56, 56), QColor(14, 116, 144));
+  p.setBrush(QColor(236, 254, 255));
+  p.setPen(QPen(QColor(21, 94, 117), 2));
+  p.drawRoundedRect(QRectF(16, 14, 32, 36), 3, 3);
+  p.setPen(QPen(QColor(8, 145, 178), 2, Qt::DashLine));
+  p.setBrush(QColor(165, 243, 252, 160));
+  p.drawRect(QRectF(20, 20, 24, 20));
+  p.setPen(QPen(Qt::white, 3, Qt::SolidLine, Qt::RoundCap));
+  p.drawLine(32, 44, 32, 52);
+  p.drawLine(28, 48, 36, 48);
+  return fromPixmap(pm);
+}
+
+QIcon drawLayoutSelect() {
+  auto pm = base();
+  QPainter p(&pm);
+  roundBg(p, QRectF(4, 4, 56, 56), QColor(67, 56, 202));
+  p.setPen(QPen(QColor(199, 210, 254), 2, Qt::DashLine));
+  p.setBrush(Qt::NoBrush);
+  p.drawRect(QRectF(16, 16, 28, 24));
+  p.setBrush(Qt::white);
+  p.setPen(QPen(QColor(67, 56, 202), 1));
+  p.drawRect(QRectF(14, 14, 6, 6));
+  p.drawRect(QRectF(40, 14, 6, 6));
+  p.drawRect(QRectF(14, 36, 6, 6));
+  p.drawRect(QRectF(40, 36, 6, 6));
+  QPainterPath cur;
+  cur.moveTo(28, 28);
+  cur.lineTo(28, 50);
+  cur.lineTo(34, 44);
+  cur.lineTo(40, 54);
+  cur.lineTo(44, 52);
+  cur.lineTo(38, 42);
+  cur.lineTo(46, 42);
+  cur.closeSubpath();
+  p.setPen(QPen(QColor(49, 46, 129), 1));
+  p.setBrush(Qt::white);
+  p.drawPath(cur);
+  return fromPixmap(pm);
+}
+
+QIcon drawLayoutPan() {
+  auto pm = base();
+  QPainter p(&pm);
+  roundBg(p, QRectF(4, 4, 56, 56), QColor(180, 83, 9));
+  p.setPen(QPen(Qt::white, 3.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+  p.setBrush(QColor(255, 237, 213));
+  QPainterPath hand;
+  hand.moveTo(22, 36);
+  hand.cubicTo(20, 22, 28, 18, 30, 26);
+  hand.cubicTo(31, 16, 38, 16, 38, 26);
+  hand.cubicTo(40, 18, 46, 20, 44, 30);
+  hand.lineTo(44, 40);
+  hand.cubicTo(44, 48, 36, 52, 30, 48);
+  hand.lineTo(22, 40);
+  hand.closeSubpath();
+  p.drawPath(hand);
+  return fromPixmap(pm);
+}
+
+QIcon drawLayoutZoomFull() {
+  auto pm = base();
+  QPainter p(&pm);
+  roundBg(p, QRectF(4, 4, 56, 56), QColor(15, 118, 110));
+  p.setBrush(QColor(204, 251, 241));
+  p.setPen(QPen(QColor(19, 78, 74), 2));
+  p.drawRoundedRect(QRectF(18, 16, 28, 32), 3, 3);
+  p.setPen(QPen(QColor(13, 148, 136), 2.4, Qt::SolidLine, Qt::RoundCap));
+  p.drawLine(14, 14, 22, 14);
+  p.drawLine(14, 14, 14, 22);
+  p.drawLine(50, 14, 42, 14);
+  p.drawLine(50, 14, 50, 22);
+  p.drawLine(14, 50, 14, 42);
+  p.drawLine(14, 50, 22, 50);
+  p.drawLine(50, 50, 50, 42);
+  p.drawLine(50, 50, 42, 50);
+  return fromPixmap(pm);
+}
+
+QIcon drawLayoutNorth() {
+  auto pm = base();
+  QPainter p(&pm);
+  roundBg(p, QRectF(4, 4, 56, 56), QColor(185, 28, 28));
+  p.setPen(Qt::NoPen);
+  p.setBrush(Qt::white);
+  QPolygonF up;
+  up << QPointF(32, 12) << QPointF(42, 36) << QPointF(32, 30) << QPointF(22, 36);
+  p.drawPolygon(up);
+  p.setPen(QPen(QColor(185, 28, 28), 2));
+  p.setFont(QFont(QStringLiteral("Malgun Gothic"), 11, QFont::Bold));
+  p.drawText(QRectF(20, 38, 24, 16), Qt::AlignCenter, QStringLiteral("N"));
+  return fromPixmap(pm);
+}
+
+QIcon drawLayoutScaleBar() {
+  auto pm = base();
+  QPainter p(&pm);
+  roundBg(p, QRectF(4, 4, 56, 56), QColor(21, 128, 61));
+  p.setPen(Qt::NoPen);
+  p.setBrush(Qt::white);
+  p.drawRect(QRectF(12, 28, 10, 10));
+  p.setBrush(QColor(20, 83, 45));
+  p.drawRect(QRectF(22, 28, 10, 10));
+  p.setBrush(Qt::white);
+  p.drawRect(QRectF(32, 28, 10, 10));
+  p.setBrush(QColor(20, 83, 45));
+  p.drawRect(QRectF(42, 28, 10, 10));
+  p.setPen(QPen(Qt::white, 2));
+  p.drawRect(QRectF(12, 28, 40, 10));
+  return fromPixmap(pm);
+}
+
+QIcon drawLayoutScale() {
+  auto pm = base();
+  QPainter p(&pm);
+  roundBg(p, QRectF(4, 4, 56, 56), QColor(30, 64, 175));
+  p.setPen(QPen(Qt::white, 2));
+  p.setFont(QFont(QStringLiteral("Malgun Gothic"), 10, QFont::Bold));
+  p.drawText(QRectF(8, 16, 48, 32), Qt::AlignCenter, QStringLiteral("1:n"));
+  return fromPixmap(pm);
+}
+
+QIcon drawLayoutLegend() {
+  auto pm = base();
+  QPainter p(&pm);
+  roundBg(p, QRectF(4, 4, 56, 56), QColor(109, 40, 217));
+  p.setPen(Qt::NoPen);
+  p.setBrush(QColor(74, 222, 128));
+  p.drawRoundedRect(QRectF(14, 16, 10, 10), 2, 2);
+  p.setBrush(QColor(56, 189, 248));
+  p.drawRoundedRect(QRectF(14, 30, 10, 10), 2, 2);
+  p.setBrush(QColor(251, 191, 36));
+  p.drawRoundedRect(QRectF(14, 44, 10, 8), 2, 2);
+  p.setBrush(Qt::white);
+  p.drawRect(QRectF(28, 18, 22, 5));
+  p.drawRect(QRectF(28, 32, 22, 5));
+  p.drawRect(QRectF(28, 45, 18, 5));
+  return fromPixmap(pm);
+}
+
+QIcon drawLayoutActivate() {
+  auto pm = base();
+  QPainter p(&pm);
+  roundBg(p, QRectF(4, 4, 56, 56), QColor(202, 138, 4));
+  p.setBrush(QColor(254, 243, 199));
+  p.setPen(QPen(QColor(146, 64, 14), 2));
+  p.drawRoundedRect(QRectF(14, 14, 36, 36), 4, 4);
+  p.setBrush(QColor(34, 197, 94));
+  p.setPen(Qt::NoPen);
+  QPolygonF poly;
+  poly << QPointF(20, 38) << QPointF(26, 24) << QPointF(38, 22) << QPointF(44, 34);
+  p.drawPolygon(poly);
+  p.setPen(QPen(QColor(180, 83, 9), 2.5, Qt::SolidLine, Qt::RoundCap));
+  p.drawLine(28, 40, 40, 28);
+  p.setBrush(QColor(180, 83, 9));
+  p.setPen(Qt::NoPen);
+  p.drawEllipse(QPointF(40, 28), 3.5, 3.5);
+  return fromPixmap(pm);
+}
+
+QIcon drawLayoutActivateDone() {
+  auto pm = base();
+  QPainter p(&pm);
+  roundBg(p, QRectF(4, 4, 56, 56), QColor(22, 163, 74));
+  p.setPen(QPen(Qt::white, 5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+  p.drawLine(18, 34, 28, 44);
+  p.drawLine(28, 44, 48, 20);
+  return fromPixmap(pm);
+}
+
+QIcon drawLayoutCenter() {
+  auto pm = base();
+  QPainter p(&pm);
+  roundBg(p, QRectF(4, 4, 56, 56), QColor(8, 145, 178));
+  p.setBrush(QColor(165, 243, 252));
+  p.setPen(QPen(Qt::white, 2));
+  QPolygonF poly;
+  poly << QPointF(18, 40) << QPointF(24, 20) << QPointF(44, 18) << QPointF(48, 36) << QPointF(32, 46);
+  p.drawPolygon(poly);
+  p.setPen(QPen(QColor(185, 28, 28), 2.4));
+  p.setBrush(Qt::NoBrush);
+  p.drawEllipse(QPointF(32, 32), 8, 8);
+  p.setBrush(QColor(185, 28, 28));
+  p.setPen(Qt::NoPen);
+  p.drawEllipse(QPointF(32, 32), 3, 3);
+  return fromPixmap(pm);
+}
+
 }
 
 namespace KaIcons {
@@ -475,7 +685,19 @@ QIcon icon(const QString& id) {
   else if (id == QLatin1String("draw_poly")) ic = drawToolPolygon();
   else if (id == QLatin1String("draw_line")) ic = drawToolLine();
   else if (id == QLatin1String("draw_area")) ic = drawToolArea();
+  else if (id == QLatin1String("select") || id == QLatin1String("arrow")) ic = drawSelectArrow();
   else if (id == QLatin1String("import")) ic = drawFolderOpen();
+  else if (id == QLatin1String("layout_map_frame")) ic = drawLayoutMapFrame();
+  else if (id == QLatin1String("layout_select")) ic = drawLayoutSelect();
+  else if (id == QLatin1String("layout_pan")) ic = drawLayoutPan();
+  else if (id == QLatin1String("layout_zoom_full")) ic = drawLayoutZoomFull();
+  else if (id == QLatin1String("layout_north")) ic = drawLayoutNorth();
+  else if (id == QLatin1String("layout_scalebar")) ic = drawLayoutScaleBar();
+  else if (id == QLatin1String("layout_scale")) ic = drawLayoutScale();
+  else if (id == QLatin1String("layout_legend")) ic = drawLayoutLegend();
+  else if (id == QLatin1String("layout_activate")) ic = drawLayoutActivate();
+  else if (id == QLatin1String("layout_activate_done")) ic = drawLayoutActivateDone();
+  else if (id == QLatin1String("layout_center")) ic = drawLayoutCenter();
   else ic = styleIcon(QStyle::SP_FileIcon);
 
   cache.insert(id, ic);

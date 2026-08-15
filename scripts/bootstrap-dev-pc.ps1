@@ -108,7 +108,7 @@ Write-Host @"
 
 Next:
   .\scripts\run-ka-hgis.ps1
-  # agent rules: AGENTS.md , OPENCODE_HANDOFF.md
+  # agent rules: AGENTS.md , HANDOFF.md  (Grok Build)
   # daily sync:
   git pull origin main
   .\scripts\build-all.ps1

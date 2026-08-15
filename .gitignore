@@ -34,6 +34,10 @@ Desktop.ini
 .codegraph/
 .omo/
 .opencode/
+.agents/
+.claude/
+.repowise/
+.mcp.json
 
 # Logs & local DBs
 *.log

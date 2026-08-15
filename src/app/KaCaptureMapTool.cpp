@@ -7,6 +7,7 @@
 #include <qgsproject.h>
 #include <qgsmapsettings.h>
 #include <QKeyEvent>
+#include <QKeySequence>
 #include <QColor>
 #include <cmath>
 
@@ -153,6 +154,18 @@ void KaCaptureMapTool::canvasMoveEvent(QgsMapMouseEvent* e) {
   rebuildRubber(&mapPt);
 }
 
+bool KaCaptureMapTool::undoLastVertex() {
+  if (m_finishing || m_points.isEmpty()) return false;
+  m_points.removeLast();
+  if (m_points.isEmpty())
+    destroyRubber();
+  else if (canvas()) {
+    const QgsPointXY cur = toMapCoordinates(canvas()->mouseLastXY());
+    rebuildRubber(&cur);
+  }
+  return true;
+}
+
 void KaCaptureMapTool::keyPressEvent(QKeyEvent* e) {
   if (!e || m_finishing) return;
   if (e->key() == Qt::Key_Escape) {
@@ -165,17 +178,15 @@ void KaCaptureMapTool::keyPressEvent(QKeyEvent* e) {
     e->accept();
     return;
   }
+  if (e->matches(QKeySequence::Undo) ||
+      ((e->modifiers() & Qt::ControlModifier) && e->key() == Qt::Key_Z)) {
+    if (undoLastVertex())
+      e->accept();
+    return;
+  }
   if (e->key() == Qt::Key_Backspace || e->key() == Qt::Key_Delete) {
-    if (!m_points.isEmpty()) {
-      m_points.removeLast();
-      if (m_points.isEmpty())
-        destroyRubber();
-      else if (canvas()) {
-        const QgsPointXY cur = toMapCoordinates(canvas()->mouseLastXY());
-        rebuildRubber(&cur);
-      }
-    }
-    e->accept();
+    if (undoLastVertex())
+      e->accept();
   }
 }
 

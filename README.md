@@ -23,7 +23,7 @@ cd hgis
 - **개발:** 클론 + OSGeo4W(`qgis-dev`) + VS2022 + CMake → `bootstrap-dev-pc.ps1` 또는 `build-all.ps1`
 - **실행만:** `dist\ka-hgis-portable\` + OSGeo4W 런타임 → `run.bat`
 - 조사 GPKG/SHP는 git에 없음 → 별도 복사
-- 규칙: `AGENTS.md` (QGIS 매뉴얼 연동) · `OPENCODE_HANDOFF.md`
+- 규칙: `AGENTS.md` (Grok Build + QGIS 매뉴얼 연동) · `HANDOFF.md`
 
 ## 환경 (검증된 구성)
 - CMake 4.4+ (`C:\CMake\bin` 권장)
@@ -88,7 +88,7 @@ cd dist\ka-hgis-portable
 - UX: `docs/ux/ia-beginner.md`
 - 데이터 흐름: `docs/architecture/data-flow.md`
 - 잡카드: `docs/user/job-cards/`
-- 에이전트: `AGENTS.md`, `OPENCODE_HANDOFF.md`
+- 에이전트: `AGENTS.md`, `HANDOFF.md`, `.grok/skills/ka-hgis/`
 
 ## 런타임 주의
 `PATH`에 `qgis-dev\bin`, `Qt6\bin`, `gdal-dev\bin`, **`pdal-dev\bin`** 필요 (`pdal-devcpp210.dll`).  

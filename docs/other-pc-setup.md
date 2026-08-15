@@ -30,6 +30,7 @@ cd hgis
 | CMake | 4.x (`C:\CMake\bin` 또는 PATH) |
 | 컴파일러 | **VS 2022** (MSVC C++ 워크로드 / Build Tools) |
 | GIS SDK | **OSGeo4W** `C:\OSGeo4W` (또는 `D:\OSGeo4W` / `$env:OSGEO4W_ROOT`) |
+| Grok LSP (선택) | clangd — `%USERPROFILE%\.grok\tools\clangd\clangd.exe` + 레포 `.clangd` |
 
 OSGeo4W 패키지:
 
@@ -108,7 +109,7 @@ git push origin main
 | 파일 | 내용 |
 |------|------|
 | `AGENTS.md` | 에이전트 라우팅 + **QGIS 매뉴얼 연동 규칙** + 불변식 |
-| `OPENCODE_HANDOFF.md` | 제품 SSOT 요약 |
+| `HANDOFF.md` | 제품 SSOT 요약 (Grok Build) |
 | `docs/vendor/qgis-manual-3.44/` | PyQGIS Cookbook PDF (git) + User Guide 다운로드 스크립트 |
 | `docs/domain/data-model.md` | 도메인 레이어/필드 |
 | `docs/COMMIT_STATUS.md` | 최근 커밋 장부 |

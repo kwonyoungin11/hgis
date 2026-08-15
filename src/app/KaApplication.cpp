@@ -117,9 +117,8 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
       if (!t.isEmpty()) toolbarTexts << t;
     }
     const QStringList need = {
-      QStringLiteral("새조사"), QStringLiteral("그리기"), QStringLiteral("배경"),
-      QStringLiteral("제출"), QStringLiteral("편집저장"), QStringLiteral("삭제"),
-      QStringLiteral("열기"), QStringLiteral("저장")
+      QStringLiteral("새조사"), QStringLiteral("열기"), QStringLiteral("저장"),
+      QStringLiteral("그리기"), QStringLiteral("배경"), QStringLiteral("도면만들기")
     };
     QStringList missing;
     for (const QString& n : need) {
@@ -208,10 +207,10 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
   runBasemap(QStringLiteral("btn_vworld_base"), QStringLiteral("VWorld"), [&](QString* e) {
     return LayerOps::addVworldBaseMap(QgsProject::instance(), canvas, key, e);
   });
-  runBasemap(QStringLiteral("btn_vworld_sat"), QStringLiteral("VWorld"), [&](QString* e) {
+  runBasemap(QStringLiteral("btn_vworld_sat"), QStringLiteral("위성"), [&](QString* e) {
     return LayerOps::addVworldSatelliteMap(QgsProject::instance(), canvas, key, e);
   });
-  runBasemap(QStringLiteral("btn_vworld_cad"), QStringLiteral("VWorld"), [&](QString* e) {
+  runBasemap(QStringLiteral("btn_vworld_cad"), QStringLiteral("지적"), [&](QString* e) {
     return LayerOps::addVworldCadastralMap(QgsProject::instance(), canvas, key, e);
   });
 
@@ -290,9 +289,24 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
     all = step(QStringLiteral("toolbar_new_action"), hasText(QStringLiteral("새조사"))) && all;
     all = step(QStringLiteral("toolbar_draw_toggle"), hasText(QStringLiteral("그리기"))) && all;
     all = step(QStringLiteral("toolbar_basemap_toggle"), hasText(QStringLiteral("배경"))) && all;
-    all = step(QStringLiteral("toolbar_submit_toggle"), hasText(QStringLiteral("제출"))) && all;
-    all = step(QStringLiteral("toolbar_del_action"), hasText(QStringLiteral("삭제"))) && all;
-    all = step(QStringLiteral("toolbar_saveedit_action"), hasText(QStringLiteral("편집저장"))) && all;
+    all = step(QStringLiteral("toolbar_submit_toggle"), hasText(QStringLiteral("도면만들기"))) && all;
+    all = step(QStringLiteral("toolbar_no_crs_peer"),
+               !hasText(QStringLiteral("5186→")) && !hasText(QStringLiteral("5187→")) &&
+                   !hasText(QStringLiteral("5186→5179")) && !hasText(QStringLiteral("5187→5179")),
+               toolbarTexts.join(QLatin1Char(','))) &&
+          all;
+    bool sendInSubmitMenu = false;
+    if (auto* btnSubmit = w->findChild<QToolButton*>(QStringLiteral("btnSubmit"))) {
+      if (QMenu* sm = btnSubmit->menu()) {
+        for (QAction* a : sm->actions()) {
+          if (a && a->text().contains(QStringLiteral("보내기"))) {
+            sendInSubmitMenu = true;
+            break;
+          }
+        }
+      }
+    }
+    all = step(QStringLiteral("submit_menu_send"), sendInSubmitMenu) && all;
 
     if (auto* btnDraw = w->findChild<QToolButton*>(QStringLiteral("btnDraw"))) {
       btnDraw->click();
@@ -306,17 +320,10 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
       }
       return false;
     };
-    all = step(QStringLiteral("sub_draw_poly"), subHas(QStringLiteral("면")) || subHas(QStringLiteral("폴리곤"))) && all;
-    all = step(QStringLiteral("sub_draw_line"), subHas(QStringLiteral("선"))) && all;
+    all = step(QStringLiteral("sub_draw_select"), subHas(QStringLiteral("선택"))) && all;
     all = step(QStringLiteral("sub_draw_area"), subHas(QStringLiteral("구역"))) && all;
-    all = step(QStringLiteral("sub_draw_gps"), subHas(QStringLiteral("GPS"))) && all;
-    if (auto* btnSubmit = w->findChild<QToolButton*>(QStringLiteral("btnSubmit"))) {
-      btnSubmit->click();
-      QCoreApplication::processEvents();
-    }
-    all = step(QStringLiteral("sub_submit_check"), subHas(QStringLiteral("검수"))) && all;
-    all = step(QStringLiteral("sub_submit_shp"), subHas(QStringLiteral("SHP"))) && all;
-    all = step(QStringLiteral("sub_submit_pdf"), subHas(QStringLiteral("PDF")) || subHas(QStringLiteral("조판"))) && all;
+    all = step(QStringLiteral("sub_draw_attr"), subHas(QStringLiteral("속성"))) && all;
+    all = step(QStringLiteral("sub_draw_merge"), subHas(QStringLiteral("묶기"))) && all;
   }
 #else
   all = step(QStringLiteral("layerTree"), false, QStringLiteral("no qgis")) && all;
@@ -409,7 +416,10 @@ int KaApplication::run(int argc, char** argv) {
   QgsNetworkAccessManager::setRequestPreprocessor([](QNetworkRequest* req) {
     if (!req) return;
     req->setHeader(QNetworkRequest::UserAgentHeader,
-                   QStringLiteral("ka-hgis/0.3 (QGIS-based archaeology field HGIS)"));
+                   QStringLiteral("Mozilla/5.0 (Windows NT 10.0; Win64; x64) ka-hgis/0.3 QGIS"));
+    const QString host = req->url().host();
+    if (host.contains(QLatin1String("vworld.kr"), Qt::CaseInsensitive))
+      req->setRawHeader("Referer", "https://localhost");
   });
   qInfo() << "QGIS prefix:" << prefix;
   qInfo() << "Providers:" << QgsProviderRegistry::instance()->providerList();

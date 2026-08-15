@@ -44,7 +44,7 @@ QList<WorkflowStepState> WorkflowGuide::evaluate(
   steps.append({
       WorkflowStep::Features,
       QStringLiteral("4. 유구·단면선"),
-      QStringLiteral("발굴 유구 폴리곤 및 단면선을 그﻿려넣으세요."),
+      QStringLiteral("발굴 유구 폴리곤 및 단면선을 그려 넣으세요."),
       QStringLiteral("action_digitize_feature"),
       featuresDone
   });

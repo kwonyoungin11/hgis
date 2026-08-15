@@ -3,13 +3,32 @@
 #include <QByteArray>
 #include <QStandardPaths>
 #include <QDir>
+#include <QFile>
+#include <QCoreApplication>
 
 static QString orgName() { return QStringLiteral("ka-hgis"); }
 static QString appName() { return QStringLiteral("ka-hgis"); }
-// Single SSOT path. Do not also use "vworld/apiKey" on write paths:
-// Windows QSettings (Native + Ini) is case-insensitive, so VWorld/ApiKey == vworld/apiKey.
 static QString ssotKey() { return QStringLiteral("VWorld/ApiKey"); }
 static QString legacyKey() { return QStringLiteral("vworld/apiKey"); }
+
+static QString readRepoSecretsIni() {
+  const QStringList cands = {
+    QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../config/secrets.ini")),
+    QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../../config/secrets.ini")),
+    QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("config/secrets.ini")),
+    QDir::current().filePath(QStringLiteral("config/secrets.ini")),
+    QStringLiteral("D:/qgis/config/secrets.ini"),
+  };
+  for (const QString& p : cands) {
+    if (!QFile::exists(p)) continue;
+    QSettings ini(p, QSettings::IniFormat);
+    QString k = ini.value(QStringLiteral("VWorld/ApiKey")).toString().trimmed();
+    if (k.isEmpty()) k = ini.value(QStringLiteral("vworld/apiKey")).toString().trimmed();
+    if (k.isEmpty()) k = ini.value(QStringLiteral("apiKey")).toString().trimmed();
+    if (!k.isEmpty()) return k;
+  }
+  return {};
+}
 
 static QSettings makeSettings() {
   const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
@@ -62,6 +81,8 @@ QString VworldSettings::loadApiKey() {
     QSettings bare;
     key = bare.value(legacyKey()).toString().trimmed();
   }
+  if (key.isEmpty())
+    key = readRepoSecretsIni();
   if (!key.isEmpty()) {
     writeKey(settings, key);
     return key;

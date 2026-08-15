@@ -1,5 +1,6 @@
 #include "LayerOps.h"
 #include "VworldSettings.h"
+#include <QDateTime>
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
@@ -10,6 +11,9 @@
 #include <algorithm>
 #include <QPainter>
 #include <QUrl>
+#include <QColor>
+#include <QDir>
+#include <QTemporaryFile>
 
 #include <qgis.h>
 #include <qgsproject.h>
@@ -23,6 +27,7 @@
 #include <qgsfield.h>
 #include <qgsfields.h>
 #include <qgsfeature.h>
+#include <qgsfeaturerequest.h>
 #include <qgsfeatureiterator.h>
 #include <qgsgeometry.h>
 #include <qgspointxy.h>
@@ -164,8 +169,152 @@ bool LayerOps::applyDomainDrawStyle(QgsVectorLayer* layer, const QString& layerK
       sym->setColor(stroke);
   }
   if (!sym) return false;
+  layer->setCustomProperty(QStringLiteral("ka_hgis/style_fill"), fill.name(QColor::HexArgb));
+  layer->setCustomProperty(QStringLiteral("ka_hgis/style_stroke"), stroke.name(QColor::HexArgb));
+  layer->setCustomProperty(QStringLiteral("ka_hgis/style_width_mm"), strokeW);
+  layer->setCustomProperty(QStringLiteral("ka_hgis/style_marker_mm"), markerSize);
   layer->setRenderer(new QgsSingleSymbolRenderer(sym));
   layer->triggerRepaint();
+  return true;
+}
+
+bool LayerOps::applySimpleVectorStyle(QgsVectorLayer* layer, const QColor& fillIn, const QColor& strokeIn,
+                                      double strokeWidthMm, double markerSizeMm, bool noFill,
+                                      bool noStroke) {
+  if (!layer || !layer->isValid()) return false;
+  QColor fill = fillIn.isValid() ? fillIn : QColor(37, 99, 235, 90);
+  QColor stroke = strokeIn.isValid() ? strokeIn : QColor(37, 99, 235, 255);
+  if (strokeWidthMm <= 0.0) strokeWidthMm = 1.0;
+  if (markerSizeMm <= 0.0) markerSizeMm = 3.5;
+  if (noFill) fill = QColor(0, 0, 0, 0);
+  if (noStroke) stroke = QColor(0, 0, 0, 0);
+  if (noFill && noStroke) {
+    noStroke = false;
+    stroke = QColor(100, 100, 100, 255);
+    strokeWidthMm = 0.4;
+  }
+
+  const Qgis::GeometryType gt = layer->geometryType();
+  QgsSymbol* sym = nullptr;
+  if (gt == Qgis::GeometryType::Polygon) {
+    QVariantMap props{
+        {QStringLiteral("color"), fill.name(QColor::HexArgb)},
+        {QStringLiteral("style"), noFill ? QStringLiteral("no") : QStringLiteral("solid")},
+        {QStringLiteral("outline_color"), stroke.name(QColor::HexArgb)},
+        {QStringLiteral("outline_width"), QString::number(noStroke ? 0.0 : strokeWidthMm)},
+        {QStringLiteral("outline_width_unit"), QStringLiteral("MM")},
+        {QStringLiteral("outline_style"), noStroke ? QStringLiteral("no") : QStringLiteral("solid")},
+    };
+    auto fs = QgsFillSymbol::createSimple(props);
+    sym = fs.release();
+  } else if (gt == Qgis::GeometryType::Line) {
+    auto ls = QgsLineSymbol::createSimple({
+        {QStringLiteral("line_color"), stroke.name(QColor::HexArgb)},
+        {QStringLiteral("line_width"), QString::number(noStroke ? 0.0 : strokeWidthMm)},
+        {QStringLiteral("line_width_unit"), QStringLiteral("MM")},
+        {QStringLiteral("line_style"), noStroke ? QStringLiteral("no") : QStringLiteral("solid")},
+    });
+    sym = ls.release();
+  } else if (gt == Qgis::GeometryType::Point) {
+    auto ms = QgsMarkerSymbol::createSimple({
+        {QStringLiteral("name"), QStringLiteral("circle")},
+        {QStringLiteral("color"), noFill ? QStringLiteral("#00000000") : fill.name(QColor::HexArgb)},
+        {QStringLiteral("outline_color"), stroke.name(QColor::HexArgb)},
+        {QStringLiteral("outline_width"), noStroke ? QStringLiteral("0") : QStringLiteral("0.6")},
+        {QStringLiteral("outline_style"), noStroke ? QStringLiteral("no") : QStringLiteral("solid")},
+        {QStringLiteral("size"), QString::number(markerSizeMm)},
+        {QStringLiteral("size_unit"), QStringLiteral("MM")},
+    });
+    sym = ms.release();
+  } else {
+    return false;
+  }
+  if (!sym) return false;
+
+  layer->setCustomProperty(QStringLiteral("ka_hgis/style_fill"), fill.name(QColor::HexArgb));
+  layer->setCustomProperty(QStringLiteral("ka_hgis/style_stroke"), stroke.name(QColor::HexArgb));
+  layer->setCustomProperty(QStringLiteral("ka_hgis/style_width_mm"), strokeWidthMm);
+  layer->setCustomProperty(QStringLiteral("ka_hgis/style_marker_mm"), markerSizeMm);
+  layer->setCustomProperty(QStringLiteral("ka_hgis/style_no_fill"), noFill);
+  layer->setCustomProperty(QStringLiteral("ka_hgis/style_no_stroke"), noStroke);
+  layer->setRenderer(new QgsSingleSymbolRenderer(sym));
+  layer->triggerRepaint();
+  return true;
+}
+
+bool LayerOps::readSimpleVectorStyle(const QgsVectorLayer* layer, QColor* fill, QColor* stroke,
+                                     double* strokeWidthMm, double* markerSizeMm, bool* noFill,
+                                     bool* noStroke) {
+  if (!layer) return false;
+
+  QColor f(37, 99, 235, 90);
+  QColor s(37, 99, 235, 255);
+  double w = 1.2;
+  double m = 3.5;
+  bool nf = false;
+  bool ns = false;
+
+  const QString key = layerKeyOf(layer);
+  if (key == QLatin1String("survey_area")) {
+    f = QColor(180, 83, 9, 70);
+    s = QColor(146, 64, 14, 255);
+    w = 1.6;
+  } else if (key == QLatin1String("feature_poly")) {
+    f = QColor(22, 163, 74, 90);
+    s = QColor(21, 128, 61, 255);
+    w = 1.4;
+  } else if (key == QLatin1String("feature_line")) {
+    s = QColor(202, 138, 4, 255);
+    w = 1.8;
+  } else if (key == QLatin1String("section_line")) {
+    s = QColor(190, 24, 93, 255);
+    w = 1.8;
+  } else if (key == QLatin1String("control_points")) {
+    f = QColor(234, 179, 8, 255);
+    s = QColor(161, 98, 7, 255);
+    m = 4.0;
+  }
+
+  const QVariant cf = layer->customProperty(QStringLiteral("ka_hgis/style_fill"));
+  const QVariant cs = layer->customProperty(QStringLiteral("ka_hgis/style_stroke"));
+  const QVariant cw = layer->customProperty(QStringLiteral("ka_hgis/style_width_mm"));
+  const QVariant cm = layer->customProperty(QStringLiteral("ka_hgis/style_marker_mm"));
+  const QVariant cnf = layer->customProperty(QStringLiteral("ka_hgis/style_no_fill"));
+  const QVariant cns = layer->customProperty(QStringLiteral("ka_hgis/style_no_stroke"));
+  if (cf.isValid()) {
+    const QColor parsed(cf.toString());
+    if (parsed.isValid()) f = parsed;
+  }
+  if (cs.isValid()) {
+    const QColor parsed(cs.toString());
+    if (parsed.isValid()) s = parsed;
+  }
+  if (cw.isValid()) w = cw.toDouble();
+  if (cm.isValid()) m = cm.toDouble();
+  if (cnf.isValid()) nf = cnf.toBool();
+  if (cns.isValid()) ns = cns.toBool();
+  if (f.alpha() == 0) nf = true;
+  if (s.alpha() == 0) ns = true;
+
+  if (const QgsFeatureRenderer* ren = layer->renderer()) {
+    if (const auto* single = dynamic_cast<const QgsSingleSymbolRenderer*>(ren)) {
+      if (const QgsSymbol* sym = single->symbol()) {
+        if (sym->color().isValid()) {
+          if (layer->geometryType() == Qgis::GeometryType::Line)
+            s = sym->color();
+          else if (!nf)
+            f = sym->color();
+        }
+      }
+    }
+  }
+
+  if (fill) *fill = f;
+  if (stroke) *stroke = s;
+  if (strokeWidthMm) *strokeWidthMm = w;
+  if (markerSizeMm) *markerSizeMm = m;
+  if (noFill) *noFill = nf;
+  if (noStroke) *noStroke = ns;
   return true;
 }
 
@@ -277,23 +426,38 @@ bool LayerOps::mergePolygonFeatures(QgsVectorLayer* layer, QString* errorOut) {
   return true;
 }
 
+static void applyKaNetworkHeaders(QNetworkRequest* req) {
+  if (!req) return;
+  req->setHeader(QNetworkRequest::UserAgentHeader,
+                 QStringLiteral("Mozilla/5.0 (Windows NT 10.0; Win64; x64) ka-hgis/0.3 QGIS"));
+  const QString host = req->url().host();
+  if (host.contains(QLatin1String("vworld.kr"), Qt::CaseInsensitive))
+    req->setRawHeader("Referer", "https://localhost");
+}
+
 static void ensureTileNetworkIdentity() {
   static bool once = false;
   if (once) return;
   once = true;
   QgsNetworkAccessManager::instance()->setCacheDisabled(false);
-  QgsNetworkAccessManager::setRequestPreprocessor([](QNetworkRequest* req) {
-    if (!req) return;
-    req->setHeader(QNetworkRequest::UserAgentHeader,
-                   QStringLiteral("ka-hgis/0.3 (QGIS-based archaeology field HGIS)"));
-    req->setRawHeader("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8");
-  });
+  QgsNetworkAccessManager::setRequestPreprocessor(&applyKaNetworkHeaders);
+}
+
+static bool uriLooksLikeXyz(const QString& source) {
+  return source.contains(QLatin1String("type=xyz"), Qt::CaseInsensitive);
 }
 
 static void tuneBasemapLayer(QgsRasterLayer* rl, bool crispText = false) {
   if (!rl || !rl->isValid()) return;
   rl->setBlendMode(QPainter::CompositionMode_SourceOver);
-  if (!rl->crs().isValid() || rl->crs().authid().isEmpty()) {
+  const QString src = rl->source();
+  if (src.contains(QLatin1String("crs=EPSG:4326"), Qt::CaseInsensitive)) {
+    rl->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:4326")));
+  } else if (uriLooksLikeXyz(src) || src.contains(QLatin1String("ka-hgis-vworld-cadastral"), Qt::CaseInsensitive) ||
+             src.contains(QLatin1String("crs=EPSG:3857"), Qt::CaseInsensitive) ||
+             src.contains(QLatin1String("crs=EPSG:900913"), Qt::CaseInsensitive)) {
+    rl->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:3857")));
+  } else if (!rl->crs().isValid()) {
     rl->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:3857")));
   }
   if (QgsRasterResampleFilter* rf = rl->resampleFilter()) {
@@ -312,6 +476,20 @@ static void tuneBasemapLayer(QgsRasterLayer* rl, bool crispText = false) {
       dp->setZoomedOutResamplingMethod(Qgis::RasterResamplingMethod::Nearest);
     }
   }
+}
+
+static void zoomCanvasToWorkingScale(QgsMapCanvas* canvas, const QString& crsAuthId,
+                                     double targetScale = 50000.0) {
+  if (!canvas) return;
+  const QString auth = crsAuthId.trimmed().isEmpty() ? QStringLiteral("EPSG:5186") : crsAuthId;
+  const QgsRectangle cur = canvas->extent();
+  const bool hasLocalView = !cur.isEmpty() && cur.isFinite() && cur.width() > 0 && cur.height() > 0 &&
+                            canvas->scale() > 50.0 && canvas->scale() < 500000.0;
+  if (!hasLocalView)
+    LayerOps::zoomToKorea(canvas, auth);
+  if (targetScale > 0.0)
+    canvas->zoomScale(targetScale, true);
+  LayerOps::clampCanvasToKorea(canvas);
 }
 
 QgsLayerTreeGroup* LayerOps::ensureLegendGroup(QgsProject* project, const QString& groupName) {
@@ -349,15 +527,44 @@ QString LayerOps::layerKeyOf(const QgsMapLayer* layer) {
   return layer->customProperty(QString::fromUtf8(kPropLayerKey)).toString();
 }
 
+static QString stripLegendCrsSuffix(QString name) {
+  int bracket = name.lastIndexOf(QStringLiteral(" [EPSG:"));
+  if (bracket < 0) bracket = name.lastIndexOf(QStringLiteral(" [CRS"));
+  if (bracket >= 0) name = name.left(bracket).trimmed();
+  return name;
+}
+
+static QString friendlyLegendName(const QString& name) {
+  const QString base = stripLegendCrsSuffix(name);
+  if (base.contains(QStringLiteral("지적"))) {
+    const bool bon = base.contains(QStringLiteral("본번"));
+    const bool bu = base.contains(QStringLiteral("부번"));
+    if (bon && !bu) return QStringLiteral("지적 본번");
+    if (bu && !bon) return QStringLiteral("지적 부번");
+    return QStringLiteral("지적");
+  }
+  if (base.contains(QStringLiteral("위성")))
+    return QStringLiteral("위성");
+  return base;
+}
+
+static bool legendTitlesMatch(const QString& a, const QString& b) {
+  if (a == b) return true;
+  if (a.startsWith(b + QLatin1String(" [")) || b.startsWith(a + QLatin1String(" [")))
+    return true;
+  return friendlyLegendName(a) == friendlyLegendName(b);
+}
+
 void LayerOps::applyLegendCrsLabel(QgsMapLayer* layer) {
   if (!layer) return;
-  QString base = layer->name();
-  int bracket = base.lastIndexOf(QStringLiteral(" [EPSG:"));
-  if (bracket < 0) bracket = base.lastIndexOf(QStringLiteral(" [CRS"));
-  if (bracket >= 0) base = base.left(bracket).trimmed();
-  if (base.isEmpty()) base = layer->name();
+  const QString shown = friendlyLegendName(layer->name());
+  if (!shown.isEmpty() && layer->name() != shown)
+    layer->setName(shown);
   const QString auth = layer->crs().isValid() ? layer->crs().authid() : QString();
-  layer->setName(base + QStringLiteral(" [%1]").arg(auth.isEmpty() ? QStringLiteral("CRS?") : auth));
+  if (!auth.isEmpty()) {
+    layer->setAbstract(QStringLiteral("좌표계 %1").arg(auth));
+    layer->setCustomProperty(QStringLiteral("ka_hgis/crs_label"), auth);
+  }
 }
 
 bool LayerOps::isReferenceLayer(const QgsMapLayer* layer) {
@@ -367,7 +574,8 @@ bool LayerOps::isReferenceLayer(const QgsMapLayer* layer) {
     return true;
   const QString n = layer->name();
   return n.contains(QStringLiteral("OSM")) || n.contains(QStringLiteral("VWorld")) ||
-         n.contains(QStringLiteral("Carto")) || n.contains(QStringLiteral("Google"));
+         n.contains(QStringLiteral("Carto")) || n.contains(QStringLiteral("Google")) ||
+         n == QLatin1String("위성") || n.startsWith(QLatin1String("지적"));
 }
 
 QgsVectorLayer* LayerOps::findByLayerKey(QgsProject* project, const QString& layerKey) {
@@ -447,6 +655,129 @@ QgsVectorLayer* LayerOps::ensureDomainLayer(QgsProject* project, const QString& 
   return vl;
 }
 
+QgsVectorLayer* LayerOps::createUserPolygonLayer(QgsProject* project, const QString& gpkgPath,
+                                                 const QString& titleKo, const QString& crsAuthId,
+                                                 QString* errorOut) {
+  if (!project) {
+    if (errorOut) *errorOut = QStringLiteral("프로젝트가 없습니다.");
+    return nullptr;
+  }
+  QString crsId = crsAuthId.trimmed();
+  if (crsId.isEmpty()) crsId = QStringLiteral("EPSG:5186");
+  QgsCoordinateReferenceSystem crs(crsId);
+  if (!crs.isValid()) {
+    if (errorOut) *errorOut = QStringLiteral("좌표계가 올바르지 않습니다.");
+    return nullptr;
+  }
+
+  const QString key = QStringLiteral("user_poly_%1").arg(QDateTime::currentMSecsSinceEpoch());
+  QgsVectorLayer mem(QStringLiteral("Polygon?crs=%1").arg(crs.authid()), titleKo, QStringLiteral("memory"));
+  if (!mem.isValid()) {
+    if (errorOut) *errorOut = QStringLiteral("면 레이어를 만들 수 없습니다.");
+    return nullptr;
+  }
+  QgsFields fields;
+  fields.append(QgsField(QStringLiteral("kind"), QMetaType::Type::QString));
+  fields.append(QgsField(QStringLiteral("period"), QMetaType::Type::QString));
+  fields.append(QgsField(QStringLiteral("note"), QMetaType::Type::QString));
+  mem.dataProvider()->addAttributes(fields.toList());
+  mem.updateFields();
+  mem.setCrs(crs);
+
+  QString loadPath;
+  if (!gpkgPath.isEmpty() && QFile::exists(gpkgPath)) {
+    QgsVectorFileWriter::SaveVectorOptions opts;
+    opts.driverName = QStringLiteral("GPKG");
+    opts.layerName = key;
+    opts.fileEncoding = QStringLiteral("UTF-8");
+    opts.actionOnExistingFile = QgsVectorFileWriter::CreateOrOverwriteLayer;
+    QString errMsg, newFn, newLayer;
+    const auto we = QgsVectorFileWriter::writeAsVectorFormatV3(
+        &mem, gpkgPath, QgsCoordinateTransformContext(), opts, &errMsg, &newFn, &newLayer);
+    if (we != QgsVectorFileWriter::NoError) {
+      if (errorOut) *errorOut = errMsg.isEmpty() ? QStringLiteral("GPKG에 레이어를 쓰지 못했습니다.") : errMsg;
+      return nullptr;
+    }
+    loadPath = QStringLiteral("%1|layername=%2").arg(gpkgPath, key);
+  } else {
+    loadPath = QStringLiteral("Polygon?crs=%1").arg(crs.authid());
+  }
+
+  auto* vl = new QgsVectorLayer(loadPath, titleKo, gpkgPath.isEmpty() ? QStringLiteral("memory")
+                                                                      : QStringLiteral("ogr"));
+  if (!vl->isValid()) {
+    if (errorOut) *errorOut = vl->error().message();
+    delete vl;
+    return nullptr;
+  }
+  if (gpkgPath.isEmpty()) {
+    vl->dataProvider()->addAttributes(fields.toList());
+    vl->updateFields();
+    vl->setCrs(crs);
+  }
+  vl->setName(titleKo);
+  markSurveyLayer(vl, key);
+  applyLegendCrsLabel(vl);
+  project->addMapLayer(vl, true);
+  placeInLegendGroup(project, vl, QString::fromUtf8(kGroupSurveyData));
+  pruneEmptyLegendGroups(project);
+  return vl;
+}
+
+QList<QgsMapLayer*> LayerOps::visibleLayersPaintOrder(QgsProject* project) {
+  QList<QgsMapLayer*> visible;
+  if (!project) return visible;
+  QgsLayerTree* root = project->layerTreeRoot();
+  QList<QgsMapLayer*> ordered = root ? root->layerOrder() : QList<QgsMapLayer*>();
+  if (ordered.isEmpty()) {
+    const QMap<QString, QgsMapLayer*> all = project->mapLayers();
+    for (auto it = all.constBegin(); it != all.constEnd(); ++it) {
+      if (it.value() && it.value()->isValid())
+        ordered.append(it.value());
+    }
+  }
+
+  QList<QgsMapLayer*> surveyTop;
+  QList<QgsMapLayer*> otherVec;
+  QList<QgsMapLayer*> overlayMid;
+  QList<QgsMapLayer*> imageryBottom;
+  auto isImagery = [](const QgsMapLayer* l) {
+    if (!l) return false;
+    const QString n = l->name();
+    return n.contains(QStringLiteral("위성")) || n.contains(QStringLiteral("Satellite")) ||
+           n.contains(QStringLiteral("OSM")) || n.contains(QStringLiteral("Google")) ||
+           n.contains(QStringLiteral("Carto")) || n.contains(QStringLiteral("VWorld 배경"));
+  };
+  auto pushVisible = [&](QgsMapLayer* l) {
+    if (!l || !l->isValid()) return;
+    if (root) {
+      if (QgsLayerTreeLayer* n = root->findLayer(l->id())) {
+        if (!n->itemVisibilityChecked()) return;
+      }
+    }
+    if (isImagery(l))
+      imageryBottom.append(l);
+    else if (LayerOps::isReferenceLayer(l) || qobject_cast<QgsRasterLayer*>(l))
+      overlayMid.append(l);
+    else if (!LayerOps::layerKeyOf(l).isEmpty())
+      surveyTop.append(l);
+    else
+      otherVec.append(l);
+  };
+  for (QgsMapLayer* l : ordered)
+    pushVisible(l);
+  if (surveyTop.isEmpty() && otherVec.isEmpty() && overlayMid.isEmpty() && imageryBottom.isEmpty()) {
+    for (QgsMapLayer* l : project->mapLayers())
+      pushVisible(l);
+  }
+  // First in setLayers is drawn on top: survey → 지적 → 위성.
+  visible.append(surveyTop);
+  visible.append(otherVec);
+  visible.append(overlayMid);
+  visible.append(imageryBottom);
+  return visible;
+}
+
 void LayerOps::syncMapCanvas(QgsProject* project, QgsMapCanvas* canvas, bool zoomKorea) {
   if (!project || !canvas) return;
   QgsLayerTree* root = project->layerTreeRoot();
@@ -459,28 +790,7 @@ void LayerOps::syncMapCanvas(QgsProject* project, QgsMapCanvas* canvas, bool zoo
     }
   }
 
-  QList<QgsMapLayer*> ordered = root->layerOrder();
-  if (ordered.isEmpty()) {
-    const QMap<QString, QgsMapLayer*> all = project->mapLayers();
-    for (auto it = all.constBegin(); it != all.constEnd(); ++it) {
-      if (it.value() && it.value()->isValid())
-        ordered.append(it.value());
-    }
-  }
-
-  QList<QgsMapLayer*> visible;
-  for (QgsMapLayer* l : ordered) {
-    if (!l || !l->isValid()) continue;
-    if (QgsLayerTreeLayer* n = root->findLayer(l->id())) {
-      if (!n->itemVisibilityChecked()) continue;
-    }
-    visible.append(l);
-  }
-  if (visible.isEmpty()) {
-    for (QgsMapLayer* l : project->mapLayers()) {
-      if (l && l->isValid()) visible.append(l);
-    }
-  }
+  QList<QgsMapLayer*> visible = visibleLayersPaintOrder(project);
 
   if (project->crs().isValid())
     canvas->setDestinationCrs(project->crs());
@@ -516,16 +826,51 @@ void LayerOps::syncMapCanvas(QgsProject* project, QgsMapCanvas* canvas, bool zoo
   canvas->refresh();
 }
 
-void LayerOps::zoomToLayerMax(QgsMapCanvas* canvas, QgsMapLayer* layer) {
-  if (!canvas || !layer || !layer->isValid()) return;
-  QgsRectangle ext = layer->extent();
-  if (ext.isEmpty() || !ext.isFinite()) {
-    zoomToKorea(canvas, canvas->mapSettings().destinationCrs().authid());
-    return;
+static bool extentUsable(const QgsRectangle& ext) {
+  return !ext.isNull() && ext.isFinite();
+}
+
+static QgsRectangle vectorFeatureExtent(QgsVectorLayer* vl) {
+  if (!vl) return {};
+  vl->updateExtents();
+  QgsRectangle ext = vl->extent();
+  if (extentUsable(ext)) return ext;
+  QgsRectangle acc;
+  bool any = false;
+  QgsFeatureIterator it = vl->getFeatures(QgsFeatureRequest().setNoAttributes());
+  QgsFeature f;
+  while (it.nextFeature(f)) {
+    if (!f.hasGeometry() || f.geometry().isEmpty()) continue;
+    const QgsRectangle b = f.geometry().boundingBox();
+    if (!extentUsable(b)) continue;
+    if (!any) {
+      acc = b;
+      any = true;
+    } else {
+      acc.combineExtentWith(b);
+    }
   }
+  return any ? acc : QgsRectangle();
+}
+
+bool LayerOps::zoomToLayerMax(QgsMapCanvas* canvas, QgsMapLayer* layer) {
+  if (!canvas || !layer || !layer->isValid()) return false;
+
+  QgsRectangle ext;
+  if (auto* vl = qobject_cast<QgsVectorLayer*>(layer))
+    ext = vectorFeatureExtent(vl);
+  else
+    ext = layer->extent();
+
   const QgsCoordinateReferenceSystem layerCrs = layer->crs();
-  const QgsCoordinateReferenceSystem mapCrs = canvas->mapSettings().destinationCrs();
-  if (layerCrs.isValid() && mapCrs.isValid() && layerCrs.authid() != mapCrs.authid()) {
+  const QgsCoordinateReferenceSystem mapCrs = canvas->mapSettings().destinationCrs().isValid()
+                                                  ? canvas->mapSettings().destinationCrs()
+                                                  : QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186"));
+  const QString mapAuth = mapCrs.isValid() ? mapCrs.authid() : QStringLiteral("EPSG:5186");
+  const QgsRectangle kr = koreaExtentForCrs(mapAuth);
+
+  if (layerCrs.isValid() && mapCrs.isValid() && extentUsable(ext) &&
+      layerCrs.authid() != mapCrs.authid()) {
     try {
       QgsCoordinateTransform xf(layerCrs, mapCrs, QgsProject::instance()
                                                       ? QgsProject::instance()->transformContext()
@@ -533,20 +878,87 @@ void LayerOps::zoomToLayerMax(QgsMapCanvas* canvas, QgsMapLayer* layer) {
       xf.setBallparkTransformsAreAppropriate(true);
       ext = xf.transformBoundingBox(ext);
     } catch (...) {
-      zoomToKorea(canvas, mapCrs.isValid() ? mapCrs.authid() : QStringLiteral("EPSG:5186"));
-      return;
+      if (qobject_cast<QgsRasterLayer*>(layer)) {
+        zoomCanvasToWorkingScale(canvas, mapAuth, 50000.0);
+        canvas->refreshAllLayers();
+        canvas->refresh();
+        return true;
+      }
+      return false;
     }
   }
-  if (ext.isEmpty() || !ext.isFinite()) {
-    zoomToKorea(canvas, mapCrs.isValid() ? mapCrs.authid() : QStringLiteral("EPSG:5186"));
-    return;
+
+  const bool worldLike = !extentUsable(ext) ||
+                         (!kr.isNull() && kr.isFinite() &&
+                          (ext.width() > kr.width() * 1.2 || ext.height() > kr.height() * 1.2));
+  if (qobject_cast<QgsRasterLayer*>(layer) && worldLike) {
+    zoomCanvasToWorkingScale(canvas, mapAuth, 50000.0);
+    canvas->refreshAllLayers();
+    canvas->refresh();
+    return true;
   }
-  ext.scale(1.02);
+
+  if (!extentUsable(ext))
+    return false;
+
+  if (!kr.isEmpty() && kr.isFinite() && (ext.width() > kr.width() * 1.2 || ext.height() > kr.height() * 1.2)) {
+    zoomCanvasToWorkingScale(canvas, mapAuth, 50000.0);
+    canvas->refreshAllLayers();
+    canvas->refresh();
+    return true;
+  }
+
+  const double minW = mapCrs.isGeographic() ? 0.004 : 80.0;
+  if (ext.width() < minW || ext.height() < minW) {
+    const QgsPointXY c = ext.center();
+    const double pad = minW * 0.5;
+    ext = QgsRectangle(c.x() - pad, c.y() - pad, c.x() + pad, c.y() + pad);
+  }
+  ext.scale(1.15);
   canvas->setExtent(ext);
   canvas->zoomToFeatureExtent(ext);
-  clampCanvasToKorea(canvas);
+  const QgsRectangle after = canvas->extent();
+  if (!kr.isEmpty() && kr.isFinite() &&
+      (after.width() > kr.width() * 1.12 || after.height() > kr.height() * 1.12))
+    clampCanvasToKorea(canvas);
   canvas->refreshAllLayers();
   canvas->refresh();
+  return true;
+}
+
+bool LayerOps::isolateAndZoomToLayer(QgsProject* project, QgsMapCanvas* canvas, QgsMapLayer* layer,
+                                     bool keepReference) {
+  if (!layer || !layer->isValid()) return false;
+  if (canvas && !zoomToLayerMax(canvas, layer))
+    return false;
+
+  if (project) {
+    if (QgsLayerTree* root = project->layerTreeRoot()) {
+      for (QgsMapLayer* l : project->mapLayers()) {
+        if (!l) continue;
+        QgsLayerTreeLayer* n = root->findLayer(l->id());
+        if (!n) continue;
+        const bool show =
+            (l == layer) ||
+            (keepReference && !isReferenceLayer(layer) && isReferenceLayer(l));
+        n->setItemVisibilityChecked(show);
+      }
+    }
+  }
+  if (canvas) {
+    QList<QgsMapLayer*> vis;
+    vis.append(layer);
+    if (project && keepReference && !isReferenceLayer(layer)) {
+      for (QgsMapLayer* l : project->mapLayers()) {
+        if (l && l != layer && l->isValid() && isReferenceLayer(l))
+          vis.append(l);
+      }
+    }
+    canvas->setLayers(vis);
+    canvas->refreshAllLayers();
+    canvas->refresh();
+  }
+  return true;
 }
 
 void LayerOps::zoomToFullMax(QgsMapCanvas* canvas) {
@@ -559,15 +971,20 @@ void LayerOps::zoomToFullMax(QgsMapCanvas* canvas) {
 }
 
 static void syncCanvasToProject(QgsProject* project, QgsMapCanvas* canvas) {
-  LayerOps::syncMapCanvas(project, canvas, true);
+  LayerOps::syncMapCanvas(project, canvas, false);
+}
+
+static bool isFatalVworldAuthError(const QString& raw) {
+  return raw.contains(QStringLiteral("INVALID_KEY"), Qt::CaseInsensitive) ||
+         raw.contains(QStringLiteral("등록되지 않은")) ||
+         raw.contains(QStringLiteral("인증키")) ||
+         raw.contains(QStringLiteral("인증URL 불일치"));
 }
 
 static QString friendlyBasemapError(const QString& raw) {
   const QString r = raw;
-  if (r.contains(QStringLiteral("INVALID_KEY"), Qt::CaseInsensitive) ||
-      r.contains(QStringLiteral("InvalidParameterValue"), Qt::CaseInsensitive) ||
-      r.contains(QStringLiteral("등록되지 않은")) ||
-      r.contains(QStringLiteral("인증키"))) {
+  if (isFatalVworldAuthError(r) ||
+      r.contains(QStringLiteral("InvalidParameterValue"), Qt::CaseInsensitive)) {
     return QStringLiteral(
         "등록되지 않은 VWorld 키입니다. 도움말 → VWorld API 키 설정에서 확인하세요.");
   }
@@ -595,7 +1012,7 @@ static bool addXyzBasemap(QgsProject* project, QgsMapCanvas* canvas, const QStri
     for (QgsMapLayer* old : project->mapLayers()) {
       if (!old) continue;
       const QString n = old->name();
-      if (n == name || n.startsWith(name + QLatin1String(" [")))
+      if (legendTitlesMatch(n, name))
         removeIds.append(old->id());
     }
     for (const QString& id : removeIds)
@@ -633,10 +1050,26 @@ static bool addXyzBasemap(QgsProject* project, QgsMapCanvas* canvas, const QStri
     return false;
   }
   if (canvas) {
+    const QString workAuth = project && project->crs().isValid()
+                                 ? project->crs().authid()
+                                 : QStringLiteral("EPSG:5186");
+    LayerOps::ensureOtfEnabled(project, canvas, workAuth);
+    const QgsRectangle before = canvas->extent();
+    const QgsPointXY centerBefore = before.center();
+    const bool keepCenter = !before.isEmpty() && before.isFinite() && before.width() > 0 &&
+                            canvas->scale() > 50.0 && canvas->scale() < 500000.0;
+    const bool needScaleOnly = canvas->extent().isEmpty() || !canvas->extent().isFinite() ||
+                               canvas->scale() > 400000.0 || canvas->scale() < 100.0;
     syncCanvasToProject(project, canvas);
-    LayerOps::zoomToKorea(canvas, project && project->crs().isValid()
-                                      ? project->crs().authid()
-                                      : QStringLiteral("EPSG:5186"));
+    if (keepCenter) {
+      canvas->setCenter(centerBefore);
+      if (canvas->scale() > 80000.0)
+        canvas->zoomScale(10000.0, true);
+    } else if (needScaleOnly) {
+      zoomCanvasToWorkingScale(canvas, workAuth, 50000.0);
+    }
+    canvas->refreshAllLayers();
+    canvas->refresh();
   }
   return project->mapLayer(added->id()) != nullptr;
 }
@@ -700,38 +1133,66 @@ static bool addBasemapWithFallbacks(QgsProject* project, QgsMapCanvas* canvas,
 bool LayerOps::addVworldBaseMap(QgsProject* project, QgsMapCanvas* canvas, const QString& apiKey, QString* errorOut) {
   if (!requireVworldKey(apiKey, errorOut)) return false;
   const QString key = apiKey.trimmed();
-  // Official WMTS GetTile: /{key}/{layer}/{tileMatrix}/{tileRow}/{tileCol}.ext  => XYZ {z}/{y}/{x}
-  // https://www.vworld.kr/dev/v4dv_wmtsguide_s001.do
   const QStringList uris = {
       QStringLiteral(
           "type=xyz&url=https://api.vworld.kr/req/wmts/1.0.0/%1/Base/%7Bz%7D/%7By%7D/%7Bx%7D.png"
-          "&zmax=19&zmin=0&crs=EPSG:3857")
+          "&zmax=19&zmin=6&crs=EPSG:3857")
           .arg(key),
       QStringLiteral(
           "type=xyz&url=https://xdworld.vworld.kr/2d/Base/service/%7Bz%7D/%7Bx%7D/%7By%7D.png"
-          "&zmax=19&zmin=0&crs=EPSG:3857"),
+          "&zmax=19&zmin=6&crs=EPSG:3857"),
   };
-  return addBasemapWithFallbacks(project, canvas, uris, QStringLiteral("VWorld 배경"), errorOut);
+  const bool ok =
+      addBasemapWithFallbacks(project, canvas, uris, QStringLiteral("VWorld 배경"), errorOut);
+  if (ok && canvas) {
+    const QString workAuth = project && project->crs().isValid()
+                                 ? project->crs().authid()
+                                 : QStringLiteral("EPSG:5186");
+    if (canvas->scale() > 200000.0)
+      zoomCanvasToWorkingScale(canvas, workAuth, 50000.0);
+  }
+  return ok;
 }
 
 bool LayerOps::addVworldSatelliteMap(QgsProject* project, QgsMapCanvas* canvas, const QString& apiKey, QString* errorOut) {
-  if (!requireVworldKey(apiKey, errorOut)) return false;
   const QString key = apiKey.trimmed();
-  const QStringList uris = {
-      QStringLiteral(
-          "type=xyz&url=https://api.vworld.kr/req/wmts/1.0.0/%1/Satellite/%7Bz%7D/%7By%7D/%7Bx%7D.jpeg"
-          "&zmax=19&zmin=0&crs=EPSG:3857")
-          .arg(key),
-      QStringLiteral(
-          "type=xyz&url=https://xdworld.vworld.kr/2d/Satellite/service/%7Bz%7D/%7Bx%7D/%7By%7D.jpeg"
-          "&zmax=19&zmin=0&crs=EPSG:3857"),
-  };
-  return addBasemapWithFallbacks(project, canvas, uris, QStringLiteral("VWorld 위성"), errorOut);
+  QStringList uris;
+  if (!key.isEmpty()) {
+    uris << QStringLiteral(
+                "type=xyz&url=https://api.vworld.kr/req/wmts/1.0.0/%1/Satellite/%7Bz%7D/%7By%7D/%7Bx%7D.jpeg"
+                "&zmax=19&zmin=6&crs=EPSG:3857&http-header:referer=https://localhost")
+                .arg(key);
+    uris << QStringLiteral(
+                "type=xyz&url=https://api.vworld.kr/req/wmts/1.0.0/%1/Satellite/%7Bz%7D/%7By%7D/%7Bx%7D.jpeg"
+                "&zmax=19&zmin=6&crs=EPSG:3857")
+                .arg(key);
+  }
+  uris << QStringLiteral(
+      "type=xyz&url=https://xdworld.vworld.kr/2d/Satellite/service/%7Bz%7D/%7Bx%7D/%7By%7D.jpeg"
+      "&zmax=19&zmin=6&crs=EPSG:3857&http-header:referer=https://localhost");
+  uris << QStringLiteral(
+      "type=xyz&url=https://xdworld.vworld.kr/2d/Satellite/service/%7Bz%7D/%7Bx%7D/%7By%7D.jpeg"
+      "&zmax=19&zmin=6&crs=EPSG:3857");
+  const bool ok =
+      addBasemapWithFallbacks(project, canvas, uris, QStringLiteral("VWorld 위성"), errorOut);
+  if (ok && canvas) {
+    const QString workAuth = project && project->crs().isValid()
+                                 ? project->crs().authid()
+                                 : QStringLiteral("EPSG:5186");
+    LayerOps::ensureOtfEnabled(project, canvas, workAuth);
+    zoomCanvasToWorkingScale(canvas, workAuth, 50000.0);
+    canvas->clearCache();
+    canvas->refreshAllLayers();
+    canvas->refresh();
+  }
+  return ok;
 }
 
 static QString makeVworldWmsUri(const QString& apiKey, const QString& layers, const QString& styles,
                                 const QString& crsAuthId) {
   const QString key = apiKey.trimmed();
+  const QString crs = crsAuthId.trimmed().isEmpty() ? QStringLiteral("EPSG:3857") : crsAuthId.trimmed();
+  // GitHub baseline (eac6c9c): KEY/DOMAIN + tiled WMS (tilePixelRatio=2). That path drew parcels.
   const QString baseUrl =
       QStringLiteral("https://api.vworld.kr/req/wms?KEY=%1&DOMAIN=localhost").arg(key);
   const QString encUrl = QString::fromLatin1(QUrl::toPercentEncoding(baseUrl));
@@ -742,17 +1203,119 @@ static QString makeVworldWmsUri(const QString& apiKey, const QString& layers, co
              "&crs=%1&dpiMode=7&format=image/png&transparent=true&featureCount=10"
              "&tilePixelRatio=2&stepWidth=512&stepHeight=512"
              "&layers=%2&%3&url=%4")
-      .arg(crsAuthId, layers, stylePart, encUrl);
+      .arg(crs, layers, stylePart, encUrl);
+}
+
+static bool addGdalVworldCadastral(QgsProject* project, QgsMapCanvas* canvas, const QString& apiKey,
+                                   const QString& layers, QString* errorOut) {
+  if (!project) {
+    if (errorOut) *errorOut = QStringLiteral("No project");
+    return false;
+  }
+  const QString xml = QStringLiteral(
+                          "<GDAL_WMS>"
+                          "<Service name=\"WMS\">"
+                          "<Version>1.3.0</Version>"
+                          "<ServerUrl>https://api.vworld.kr/req/wms?key=%1&amp;domain=localhost&amp;</ServerUrl>"
+                          "<Layers>%2</Layers>"
+                          "<Styles>lp_pa_cbnd_bonbun,lp_pa_cbnd_bubun</Styles>"
+                          "<CRS>EPSG:3857</CRS>"
+                          "<ImageFormat>image/png</ImageFormat>"
+                          "<Transparent>TRUE</Transparent>"
+                          "<BBoxOrder>xyXY</BBoxOrder>"
+                          "</Service>"
+                          "<DataWindow>"
+                          "<UpperLeftX>13500000</UpperLeftX>"
+                          "<UpperLeftY>4800000</UpperLeftY>"
+                          "<LowerRightX>14800000</LowerRightX>"
+                          "<LowerRightY>3800000</LowerRightY>"
+                          "<SizeX>16384</SizeX>"
+                          "<SizeY>16384</SizeY>"
+                          "</DataWindow>"
+                          "<Projection>EPSG:3857</Projection>"
+                          "<BandsCount>4</BandsCount>"
+                          "<BlockSizeX>512</BlockSizeX>"
+                          "<BlockSizeY>512</BlockSizeY>"
+                          "<UserAgent>Mozilla/5.0 ka-hgis/0.3</UserAgent>"
+                          "<Referer>https://localhost</Referer>"
+                          "</GDAL_WMS>")
+                          .arg(apiKey.trimmed(), layers);
+  const QString xmlPath = QDir::temp().filePath(QStringLiteral("ka-hgis-vworld-cadastral.xml"));
+  {
+    QFile f(xmlPath);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+      if (errorOut) *errorOut = QStringLiteral("지적 설정 파일을 쓰지 못했습니다.");
+      return false;
+    }
+    f.write(xml.toUtf8());
+  }
+
+  const QString name = QStringLiteral("VWorld 지적(본번·부번)");
+  QStringList removeIds;
+  for (QgsMapLayer* old : project->mapLayers()) {
+    if (!old) continue;
+    const QString n = old->name();
+    if (n == name || n.startsWith(name + QLatin1String(" [")))
+      removeIds.append(old->id());
+  }
+  for (const QString& id : removeIds)
+    project->removeMapLayer(id);
+
+  auto* rl = new QgsRasterLayer(xmlPath, name, QStringLiteral("gdal"));
+  if (!rl->isValid()) {
+    if (errorOut)
+      *errorOut = friendlyBasemapError(rl->error().message());
+    delete rl;
+    return false;
+  }
+  // OTF only works if the layer CRS is the server CRS (3857), not the work CRS.
+  rl->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:3857")));
+  LayerOps::markReferenceLayer(rl);
+  rl->setOpacity(1.0);
+  QgsMapLayer* added = project->addMapLayer(rl, true);
+  if (!added) {
+    delete rl;
+    if (errorOut) *errorOut = QStringLiteral("지적 레이어를 프로젝트에 넣지 못했습니다.");
+    return false;
+  }
+  LayerOps::applyLegendCrsLabel(added);
+  if (canvas) {
+    const QString workAuth = project->crs().isValid() ? project->crs().authid()
+                                                      : QStringLiteral("EPSG:5186");
+    LayerOps::ensureOtfEnabled(project, canvas, workAuth);
+    syncCanvasToProject(project, canvas);
+    if (canvas->scale() > 8000.0 || canvas->scale() < 200.0)
+      zoomCanvasToWorkingScale(canvas, workAuth, 3000.0);
+    canvas->clearCache();
+    canvas->refreshAllLayers();
+    canvas->refresh();
+  }
+  return true;
+}
+
+QStringList LayerOps::cadastralWmsCrsCandidates(const QString& workCrsAuthId) {
+  Q_UNUSED(workCrsAuthId);
+  // Do not put 5186/5187/5179 here. Caps only list 4326 bbox; QGIS then
+  // reports "Cannot calculate extent" and the layer never draws.
+  return {
+      QStringLiteral("EPSG:4326"),
+      QStringLiteral("EPSG:3857"),
+      QStringLiteral("EPSG:900913"),
+  };
 }
 
 bool LayerOps::addVworldCadastralMap(QgsProject* project, QgsMapCanvas* canvas, const QString& apiKey, QString* errorOut) {
   if (!requireVworldKey(apiKey, errorOut)) return false;
+  const QString workCrs = (project && project->crs().isValid())
+                              ? project->crs().authid()
+                              : QStringLiteral("EPSG:5186");
+  // Restore GitHub baseline path that drew parcels: EPSG:3857 tiled WMS, empty styles.
   const QString uriBoth = makeVworldWmsUri(
       apiKey, QStringLiteral("lp_pa_cbnd_bonbun,lp_pa_cbnd_bubun"), QString(), QStringLiteral("EPSG:3857"));
-  const QString uriBon = makeVworldWmsUri(apiKey, QStringLiteral("lp_pa_cbnd_bonbun"), QString(),
-                                          QStringLiteral("EPSG:3857"));
-  const QString uriBu = makeVworldWmsUri(apiKey, QStringLiteral("lp_pa_cbnd_bubun"), QString(),
-                                         QStringLiteral("EPSG:3857"));
+  const QString uriBon =
+      makeVworldWmsUri(apiKey, QStringLiteral("lp_pa_cbnd_bonbun"), QString(), QStringLiteral("EPSG:3857"));
+  const QString uriBu =
+      makeVworldWmsUri(apiKey, QStringLiteral("lp_pa_cbnd_bubun"), QString(), QStringLiteral("EPSG:3857"));
 
   QString err;
   bool ok = addXyzBasemap(project, canvas, uriBoth, QStringLiteral("VWorld 지적(본번·부번)"), &err, true);
@@ -761,19 +1324,97 @@ bool LayerOps::addVworldCadastralMap(QgsProject* project, QgsMapCanvas* canvas, 
     const bool okBu = addXyzBasemap(project, canvas, uriBu, QStringLiteral("VWorld 지적 부번"), &err, true);
     ok = okBon || okBu;
   }
+  if (!ok)
+    ok = addGdalVworldCadastral(project, canvas, apiKey,
+                                QStringLiteral("lp_pa_cbnd_bonbun,lp_pa_cbnd_bubun"), &err);
   if (!ok) {
-    if (errorOut) *errorOut = err.isEmpty() ? QStringLiteral("지적도 WMS 추가 실패") : err;
+    if (errorOut)
+      *errorOut = err.isEmpty() ? QStringLiteral("지적도 WMS 추가 실패") : err;
     return false;
   }
   if (canvas) {
+    LayerOps::ensureOtfEnabled(project, canvas, workCrs);
+    for (QgsMapLayer* l : project->mapLayers()) {
+      if (l && l->name().contains(QStringLiteral("지적")))
+        l->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:3857")));
+    }
     LayerOps::syncMapCanvas(project, canvas, false);
     const double s = canvas->scale();
     if (s > 6000.0 || s < 500.0)
       canvas->zoomScale(3000.0, true);
+    canvas->clearCache();
     canvas->refreshAllLayers();
     canvas->refresh();
   }
   return true;
+}
+
+double LayerOps::suggestCadastralScale(double currentScale, double target, double maxOk) {
+  if (currentScale <= 0.0) return target;
+  if (currentScale > maxOk) return target;
+  return currentScale;
+}
+
+LayerOps::FieldBasemapPackResult LayerOps::prepareFieldBasemapPack(
+    QgsProject* project, QgsMapCanvas* canvas, const QString& apiKey,
+    const QString& workCrsAuthId, QString* errorOut) {
+  FieldBasemapPackResult r;
+  if (!requireVworldKey(apiKey, errorOut)) return r;
+
+  const QString work = workCrsAuthId.trimmed().isEmpty() ? QStringLiteral("EPSG:5186")
+                                                         : workCrsAuthId.trimmed();
+  ensureOtfEnabled(project, canvas, work);
+
+  QgsPointXY keepCenter;
+  bool hadLocal = false;
+  double keepScale = 10000.0;
+  if (canvas) {
+    const QgsRectangle e = canvas->extent();
+    if (!e.isEmpty() && e.isFinite() && e.width() > 0 && canvas->scale() > 50.0 &&
+        canvas->scale() < 500000.0) {
+      keepCenter = e.center();
+      hadLocal = true;
+      keepScale = canvas->scale();
+    }
+  }
+
+  QString satErr;
+  r.satelliteOk = addVworldSatelliteMap(project, canvas, apiKey, &satErr);
+  QString cadErr;
+  r.cadastralOk = addVworldCadastralMap(project, canvas, apiKey, &cadErr);
+
+  if (!r.satelliteOk && !r.cadastralOk) {
+    if (errorOut) {
+      *errorOut = satErr.isEmpty() ? cadErr : satErr;
+      if (errorOut->isEmpty())
+        *errorOut = QStringLiteral("현장 배경(위성·지적) 추가 실패");
+    }
+    return r;
+  }
+
+  if (canvas) {
+    ensureOtfEnabled(project, canvas, work);
+    syncMapCanvas(project, canvas, false);
+    if (hadLocal) {
+      canvas->setCenter(keepCenter);
+      const double next = suggestCadastralScale(keepScale, 5000.0, 15000.0);
+      canvas->zoomScale(next, true);
+    } else {
+      const double next = suggestCadastralScale(canvas->scale(), 4000.0, 5000.0);
+      if (qAbs(next - canvas->scale()) > 1.0)
+        canvas->zoomScale(next, true);
+    }
+    clampCanvasToKorea(canvas);
+    canvas->refreshAllLayers();
+    canvas->refresh();
+  }
+  if (errorOut && (!r.satelliteOk || !r.cadastralOk)) {
+    QStringList parts;
+    if (!r.satelliteOk && !satErr.isEmpty()) parts << satErr;
+    if (!r.cadastralOk && !cadErr.isEmpty()) parts << cadErr;
+    *errorOut = parts.join(QStringLiteral(" / "));
+  }
+  return r;
 }
 
 bool LayerOps::addVworldHybridMap(QgsProject* project, QgsMapCanvas* canvas, const QString& apiKey, QString* errorOut) {
@@ -807,7 +1448,7 @@ static QList<QgsMapLayer*> layersMatchingBaseName(QgsProject* project, const QSt
   for (QgsMapLayer* l : project->mapLayers()) {
     if (!l) continue;
     const QString n = l->name();
-    if (n == name || n.startsWith(name + QLatin1String(" [")))
+    if (legendTitlesMatch(n, name))
       out.append(l);
   }
   return out;
@@ -1228,6 +1869,43 @@ QString LayerOps::georeferenceImageSimple(const QString& imagePath, QgsVectorLay
     canvas->refresh();
   }
   return wfPath;
+}
+
+bool LayerOps::undoCommittedFeature(QgsVectorLayer* layer, qint64 featureId, QString* errorOut) {
+  if (!layer || !layer->isValid()) {
+    if (errorOut) *errorOut = QStringLiteral("레이어가 없습니다.");
+    return false;
+  }
+  if (isReferenceLayer(layer)) {
+    if (errorOut) *errorOut = QStringLiteral("참조 지도는 되돌릴 수 없습니다.");
+    return false;
+  }
+  const QgsFeatureId fid = static_cast<QgsFeatureId>(featureId);
+  QgsFeature existing = layer->getFeature(fid);
+  if (!existing.isValid()) {
+    if (errorOut) *errorOut = QStringLiteral("되돌릴 도형을 찾지 못했습니다.");
+    return false;
+  }
+  const bool startedHere = !layer->isEditable();
+  if (startedHere && !layer->startEditing()) {
+    if (errorOut) *errorOut = QStringLiteral("편집을 열 수 없습니다.");
+    return false;
+  }
+  if (!layer->deleteFeature(fid)) {
+    if (errorOut) *errorOut = QStringLiteral("도형을 지우지 못했습니다.");
+    if (startedHere) layer->rollBack();
+    return false;
+  }
+  if (!layer->commitChanges(false)) {
+    if (errorOut) *errorOut = layer->commitErrors().join(QLatin1Char('\n'));
+    layer->rollBack();
+    return false;
+  }
+  if (startedHere)
+    layer->startEditing();
+  layer->updateExtents();
+  layer->triggerRepaint();
+  return true;
 }
 
 bool LayerOps::hasVisibleReferenceLayer(QgsProject* project) {

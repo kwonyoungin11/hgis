@@ -119,6 +119,12 @@ QString ExportService::exportSubmissionPackage(QgsProject* project,
     encf.write("\n");
   }
 
+  if (project) {
+    QString pdfErr;
+    LayoutService::exportDrawingPdfs(project, outDir, &pdfErr);
+    Q_UNUSED(pdfErr);
+  }
+
   QString merr;
   if (!writeSha256Manifest(outDir, &merr)) {
     if (errorOut) *errorOut = merr;

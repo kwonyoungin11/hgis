@@ -1,7 +1,8 @@
 ﻿# GOAL-1 — Field UX blockers after GOAL-0 (PO order)
 
 **From:** PO terminal (verified GOAL-0 independently)
-**To:** Implementer OpenCode
+**To:** Implementer
+**Harness now:** Grok Build (`AGENTS.md`, `HANDOFF.md`) — this brief was written before OpenCode was removed.
 **Repo:** C:\Users\권을\Documents\hgis
 **OSGeo:** C:\OSGeo4W | **CMake:** C:\CMake\bin
 **Rules:** No git commit/push. No destructive git reset.

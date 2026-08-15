@@ -1,0 +1,15 @@
+# Project Grok config. MCP / skills / hooks stripped 2026-08-15.
+# Restore MCP from git history or ~/.grok/backups/strip-mcp-skills-hooks-20260815-105014
+
+[permission]
+deny = [
+    "Bash(rm -rf *)",
+    "Bash(Remove-Item -Recurse -Force C:\\*)",
+    "MCPTool(*)",
+    "mcp__*",
+]
+allow = [
+    "Bash(cmake *)",
+    "Bash(ctest *)",
+    "Bash(.\\scripts\\*)",
+]

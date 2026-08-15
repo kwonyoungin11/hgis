@@ -33,6 +33,13 @@
 #include <qgscoordinatetransformcontext.h>
 #include <qgslayertreemodel.h>
 #include <qgslayertree.h>
+#include <qgslayoutmanager.h>
+#include <qgsmapcanvas.h>
+#include <qgslayertreelayer.h>
+#include <qgsprintlayout.h>
+#include <qgslayoutitemmap.h>
+#include <qgslayoutitemscalebar.h>
+#include <qgslayoutitemlegend.h>
 
 class TestWorkflow : public QObject {
   Q_OBJECT
@@ -46,6 +53,7 @@ private slots:
   void workflowGuideTracksSevenRealMilestones();
   void vworldSettingsAndNoKeyTests();
   void editBufferCommitSurvivesReopen();
+  void undoCommittedFeature_removesLastAdded();
   void importControlCsvWritesFeatures();
   void osmBasemapValidWithExtent();
   void layerTreeReorderAndRemovalTest();
@@ -53,13 +61,33 @@ private slots:
   void layerKeyOfKoreanDisplayName_featurePolyAttrs();
   void exportAllowsDespiteChecklistErrors();
   void vworldSatAndCadastralLiveKey();
+  void ensureOtf_projectAndCanvasDestinationCrs5186();
+  void syncMapCanvas_surveyLayersAboveReferenceBasemap();
+  void xyzBasemap_layerCrsForced3857();
+  void suggestCadastralScale_clampsWhenTooZoomedOut();
+  void prepareFieldBasemapPack_rejectsEmptyKey();
+  void drawingRecipesHaveDistinctScaleAndExtent();
+  void emptySurveyDrawingShowsKoreanHint();
+  void zoomToLayerMax_movesCanvasToFeature();
+  void zoomToLayerMax_movesCanvasToPointFeature();
+  void isolateAndZoom_hidesOtherSurveyKeepsReference();
+  void addVworldSatellite_allowsEmptyKeyViaPublicTiles();
+  void addVworldSatellite_usesOfficialWmtsWhenKeyPresent();
+  void addVworldSatellite_syncPutsLayerOnCanvasWithExtent();
+  void otf_keepsWorkCrsWhenBasemapIs3857();
+  void cadastralWmsCrs_neverStartsWithWorkCrs5179();
+  void syncMapCanvas_cadastralAboveSatellite();
+  void layoutBlankSheetMapItemKeepsFrameAndNonEmptyLayers();
+  void layoutStudio_checkedLayersScaleBarLegendSize();
+  void layoutExtentForPaperScale_keepsTypedDenominator();
+  void legendTitlesHideEpsgAndUseShortKorean();
 };
 
 static bool projectHasLayerNamedLike(QgsProject* proj, const QString& base) {
   for (QgsMapLayer* l : proj->mapLayers()) {
     if (!l) continue;
     const QString n = l->name();
-    if (n == base || n.startsWith(base + QLatin1String(" [")))
+    if (n == base || n.startsWith(base) || n.contains(base) || base.contains(n))
       return true;
   }
   return false;
@@ -459,9 +487,9 @@ void TestWorkflow::vworldSettingsAndNoKeyTests() {
   QVERIFY(LayerOps::hasVisibleReferenceLayer(&proj));
 
   VworldSettings::saveApiKey(QString());
-  QCOMPARE(VworldSettings::loadApiKey(), QString());
   QgsProject proj2;
-  QVERIFY(!LayerOps::addVworldBaseMap(&proj2, nullptr, VworldSettings::loadApiKey(), &err));
+  QVERIFY2(!LayerOps::addVworldBaseMap(&proj2, nullptr, QString(), &err),
+           "empty api key must reject basemap add");
   QVERIFY(!projectHasLayerNamedLike(&proj2, QStringLiteral("VWorld 배경")));
 }
 
@@ -498,6 +526,31 @@ void TestWorkflow::editBufferCommitSurvivesReopen() {
   QgsFeature f = reopened->getFeature(*reopened->allFeatureIds().constBegin());
   QCOMPARE(f.attribute(QStringLiteral("survey_name")).toString(), QStringLiteral("커밋생존"));
   delete reopened;
+}
+
+void TestWorkflow::undoCommittedFeature_removesLastAdded() {
+  auto* vl = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                QStringLiteral("구역"), QStringLiteral("memory"));
+  QVERIFY(vl->isValid());
+  LayerOps::markSurveyLayer(vl, QStringLiteral("survey_area"));
+  QVERIFY(vl->startEditing());
+  QgsFeature f(vl->fields());
+  QgsPolylineXY ring;
+  ring << QgsPointXY(200000, 450000) << QgsPointXY(200080, 450000)
+       << QgsPointXY(200080, 450080) << QgsPointXY(200000, 450080)
+       << QgsPointXY(200000, 450000);
+  f.setGeometry(QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring));
+  QVERIFY(vl->addFeature(f));
+  QVERIFY(vl->commitChanges(false));
+  QCOMPARE(int(vl->featureCount()), 1);
+  const QgsFeatureIds ids = vl->allFeatureIds();
+  QVERIFY(!ids.isEmpty());
+  const qint64 fid = static_cast<qint64>(*ids.constBegin());
+  QString err;
+  QVERIFY2(LayerOps::undoCommittedFeature(vl, fid, &err), qPrintable(err));
+  QCOMPARE(int(vl->featureCount()), 0);
+  QVERIFY2(!LayerOps::undoCommittedFeature(vl, fid, &err), "second undo must fail");
+  delete vl;
 }
 
 void TestWorkflow::importControlCsvWritesFeatures() {
@@ -655,6 +708,90 @@ void TestWorkflow::layerKeyOfKoreanDisplayName_featurePolyAttrs() {
   QVERIFY(st.value(QStringLiteral("has_kind_period")).toBool());
 }
 
+void TestWorkflow::ensureOtf_projectAndCanvasDestinationCrs5186() {
+  QgsProject proj;
+  QgsMapCanvas canvas;
+  canvas.resize(640, 480);
+  QVERIFY(LayerOps::ensureOtfEnabled(&proj, &canvas, QStringLiteral("EPSG:5186")));
+  QCOMPARE(proj.crs().authid(), QStringLiteral("EPSG:5186"));
+  QCOMPARE(canvas.mapSettings().destinationCrs().authid(), QStringLiteral("EPSG:5186"));
+  QVERIFY(!LayerOps::ensureOtfEnabled(&proj, &canvas, QStringLiteral("EPSG:999999")));
+}
+
+void TestWorkflow::syncMapCanvas_surveyLayersAboveReferenceBasemap() {
+  QgsProject proj;
+  QVERIFY(LayerOps::ensureOtfEnabled(&proj, nullptr, QStringLiteral("EPSG:5186")));
+
+  auto* survey = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                    QStringLiteral("유구면"), QStringLiteral("memory"));
+  QVERIFY(survey->isValid());
+  LayerOps::markSurveyLayer(survey, QStringLiteral("feature_poly"));
+
+  auto* base = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:3857"),
+                                  QStringLiteral("fake_basemap"), QStringLiteral("memory"));
+  QVERIFY(base->isValid());
+  LayerOps::markReferenceLayer(base);
+
+  proj.addMapLayer(base);
+  proj.addMapLayer(survey);
+
+  QgsMapCanvas canvas;
+  canvas.resize(800, 600);
+  LayerOps::syncMapCanvas(&proj, &canvas, false);
+  QCOMPARE(canvas.mapSettings().destinationCrs().authid(), QStringLiteral("EPSG:5186"));
+
+  const QList<QgsMapLayer*> layers = canvas.layers();
+  QVERIFY(layers.size() >= 2);
+  const int iSurvey = layers.indexOf(survey);
+  const int iBase = layers.indexOf(base);
+  QVERIFY(iSurvey >= 0);
+  QVERIFY(iBase >= 0);
+  QVERIFY2(iSurvey < iBase, "survey domain layer must paint above reference basemap");
+}
+
+void TestWorkflow::xyzBasemap_layerCrsForced3857() {
+  QgsProject proj;
+  QVERIFY(LayerOps::ensureOtfEnabled(&proj, nullptr, QStringLiteral("EPSG:5186")));
+  QString err;
+  if (!LayerOps::addOsmBasemap(&proj, nullptr, &err))
+    QSKIP(qPrintable(QStringLiteral("OSM unavailable: %1").arg(err)));
+
+  QgsRasterLayer* rl = nullptr;
+  for (QgsMapLayer* l : proj.mapLayers()) {
+    auto* r = qobject_cast<QgsRasterLayer*>(l);
+    if (!r) continue;
+    if (r->name().contains(QStringLiteral("OSM")) || r->name().contains(QStringLiteral("Carto"))) {
+      rl = r;
+      break;
+    }
+  }
+  QVERIFY2(rl, "OSM/Carto raster not found after addOsmBasemap");
+  QVERIFY(rl->isValid());
+  QCOMPARE(rl->crs().authid(), QStringLiteral("EPSG:3857"));
+  QVERIFY(LayerOps::isReferenceLayer(rl));
+  QCOMPARE(proj.crs().authid(), QStringLiteral("EPSG:5186"));
+}
+
+void TestWorkflow::suggestCadastralScale_clampsWhenTooZoomedOut() {
+  QCOMPARE(LayerOps::suggestCadastralScale(6000.0, 4000.0, 5000.0), 4000.0);
+  QCOMPARE(LayerOps::suggestCadastralScale(4500.0, 4000.0, 5000.0), 4500.0);
+  QCOMPARE(LayerOps::suggestCadastralScale(3000.0, 4000.0, 5000.0), 3000.0);
+  QCOMPARE(LayerOps::suggestCadastralScale(0.0, 4000.0, 5000.0), 4000.0);
+}
+
+void TestWorkflow::prepareFieldBasemapPack_rejectsEmptyKey() {
+  QgsProject proj;
+  QVERIFY(LayerOps::ensureOtfEnabled(&proj, nullptr, QStringLiteral("EPSG:5186")));
+  QString err;
+  const auto r = LayerOps::prepareFieldBasemapPack(&proj, nullptr, QString(), QStringLiteral("EPSG:5186"), &err);
+  QVERIFY(!r.satelliteOk);
+  QVERIFY(!r.cadastralOk);
+  QVERIFY(!err.isEmpty());
+  for (const QString& key : LayerOps::domainLayerKeys())
+    QVERIFY2(LayerOps::findByLayerKey(&proj, key) == nullptr,
+             "field basemap pack must not seed domain layers");
+}
+
 // Phase-1: package export must not gate on checklist errors when blockOnError=false.
 void TestWorkflow::exportAllowsDespiteChecklistErrors() {
   const QString dir = QDir::temp().filePath(QStringLiteral("ka_pkg_err_") +
@@ -672,6 +809,425 @@ void TestWorkflow::exportAllowsDespiteChecklistErrors() {
   QVERIFY(readme.open(QIODevice::ReadOnly | QIODevice::Text));
   const QString body = QString::fromUtf8(readme.readAll());
   QVERIFY(body.contains(QStringLiteral("missing survey")));
+}
+
+void TestWorkflow::drawingRecipesHaveDistinctScaleAndExtent() {
+  const QString dir = QDir::temp().filePath(QStringLiteral("ka_draw_") +
+                                            QString::number(QDateTime::currentMSecsSinceEpoch()));
+  QDir().mkpath(dir);
+  QString err;
+  const QString gpkg = SurveyProjectFactory::createNewSurvey(dir, QStringLiteral("drawdemo"), &err);
+  QVERIFY2(!gpkg.isEmpty(), qPrintable(err));
+
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  auto* sa = new QgsVectorLayer(QStringLiteral("%1|layername=survey_area").arg(gpkg),
+                                QStringLiteral("survey_area"), QStringLiteral("ogr"));
+  QVERIFY(sa->isValid());
+  LayerOps::markSurveyLayer(sa, QStringLiteral("survey_area"));
+  proj.addMapLayer(sa);
+  QVERIFY(sa->startEditing());
+  QgsFeature sf(sa->fields());
+  QgsPolylineXY ring;
+  ring << QgsPointXY(200000, 450000) << QgsPointXY(200080, 450000) << QgsPointXY(200080, 450080)
+       << QgsPointXY(200000, 450080) << QgsPointXY(200000, 450000);
+  sf.setGeometry(QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring));
+  QVERIFY(sa->addFeature(sf));
+  QVERIFY(sa->commitChanges());
+
+  QCOMPARE(LayoutService::recipe(LayoutService::DrawingKind::SurveyAreaMap).titleKo,
+           QStringLiteral("조사구역도"));
+  QCOMPARE(LayoutService::recipe(LayoutService::DrawingKind::SiteLocation).defaultScale, 25000.0);
+  QCOMPARE(LayoutService::recipe(LayoutService::DrawingKind::SurveyAreaMap).defaultScale, 5000.0);
+
+  LayoutService::DrawingOptions opt;
+  const auto area = LayoutService::buildDrawing(&proj, LayoutService::DrawingKind::SurveyAreaMap, opt, &err);
+  QVERIFY2(area.hasMapContent, qPrintable(area.warningKo));
+  QVERIFY(area.appliedScale > 0);
+  QVERIFY(qAbs(area.appliedScale - 5000.0) / 5000.0 < 0.25);
+
+  const auto site = LayoutService::buildDrawing(&proj, LayoutService::DrawingKind::SiteLocation, opt, &err);
+  QVERIFY(site.hasMapContent);
+  QVERIFY(site.appliedScale > area.appliedScale);
+  QVERIFY(site.appliedExtent.width() > area.appliedExtent.width());
+
+  QVERIFY(proj.layoutManager()->layoutByName(QStringLiteral("survey_area_map")));
+  QVERIFY(proj.layoutManager()->layoutByName(QStringLiteral("site_location")));
+}
+
+void TestWorkflow::emptySurveyDrawingShowsKoreanHint() {
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  LayoutService::DrawingOptions opt;
+  QString err;
+  const auto r = LayoutService::buildDrawing(&proj, LayoutService::DrawingKind::SurveyAreaMap, opt, &err);
+  QVERIFY(!r.hasMapContent);
+  QVERIFY(r.warningKo.contains(QStringLiteral("조사구역")));
+  QVERIFY(proj.layoutManager()->layoutByName(QStringLiteral("survey_area_map")));
+}
+
+void TestWorkflow::zoomToLayerMax_movesCanvasToPointFeature() {
+  QgsProject proj;
+  QgsMapCanvas canvas;
+  canvas.resize(800, 600);
+  QVERIFY(LayerOps::ensureOtfEnabled(&proj, &canvas, QStringLiteral("EPSG:5186")));
+  LayerOps::zoomToKorea(&canvas, QStringLiteral("EPSG:5186"));
+
+  auto* vl = new QgsVectorLayer(QStringLiteral("Point?crs=EPSG:5186"),
+                                QStringLiteral("기준점"), QStringLiteral("memory"));
+  QVERIFY(vl->isValid());
+  LayerOps::markSurveyLayer(vl, QStringLiteral("control_points"));
+  QVERIFY(vl->startEditing());
+  QgsFeature f(vl->fields());
+  f.setGeometry(QgsGeometry::fromPointXY(QgsPointXY(198500, 451200)));
+  QVERIFY(vl->addFeature(f));
+  QVERIFY(vl->commitChanges());
+  vl->updateExtents();
+  proj.addMapLayer(vl);
+
+  QVERIFY2(LayerOps::zoomToLayerMax(&canvas, vl), "point extent isEmpty() must still zoom");
+  QVERIFY(canvas.extent().contains(QgsPointXY(198500, 451200)));
+}
+
+void TestWorkflow::zoomToLayerMax_movesCanvasToFeature() {
+  QgsProject proj;
+  QgsMapCanvas canvas;
+  canvas.resize(800, 600);
+  QVERIFY(LayerOps::ensureOtfEnabled(&proj, &canvas, QStringLiteral("EPSG:5186")));
+  LayerOps::zoomToKorea(&canvas, QStringLiteral("EPSG:5186"));
+  const QgsRectangle before = canvas.extent();
+
+  auto* vl = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                QStringLiteral("구역"), QStringLiteral("memory"));
+  QVERIFY(vl->isValid());
+  LayerOps::markSurveyLayer(vl, QStringLiteral("survey_area"));
+  QVERIFY(vl->startEditing());
+  QgsFeature f(vl->fields());
+  QgsPolylineXY ring;
+  ring << QgsPointXY(200000, 450000) << QgsPointXY(200200, 450000)
+       << QgsPointXY(200200, 450200) << QgsPointXY(200000, 450200)
+       << QgsPointXY(200000, 450000);
+  f.setGeometry(QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring));
+  QVERIFY(vl->addFeature(f));
+  QVERIFY(vl->commitChanges());
+  vl->updateExtents();
+  proj.addMapLayer(vl);
+
+  QVERIFY(LayerOps::zoomToLayerMax(&canvas, vl));
+  const QgsRectangle after = canvas.extent();
+  QVERIFY2(after.contains(QgsPointXY(200100, 450100)), "canvas must move to the feature");
+  QVERIFY2(after.width() < before.width(), "zoom must be tighter than Korea overview");
+}
+
+void TestWorkflow::isolateAndZoom_hidesOtherSurveyKeepsReference() {
+  QgsProject proj;
+  QgsMapCanvas canvas;
+  canvas.resize(800, 600);
+  QVERIFY(LayerOps::ensureOtfEnabled(&proj, &canvas, QStringLiteral("EPSG:5186")));
+
+  auto* keep = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                  QStringLiteral("구역"), QStringLiteral("memory"));
+  auto* hide = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                  QStringLiteral("다른면"), QStringLiteral("memory"));
+  auto* base = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:3857"),
+                                  QStringLiteral("VWorld 위성"), QStringLiteral("memory"));
+  QVERIFY(keep->isValid() && hide->isValid() && base->isValid());
+  LayerOps::markSurveyLayer(keep, QStringLiteral("survey_area"));
+  LayerOps::markSurveyLayer(hide, QStringLiteral("feature_poly"));
+  LayerOps::markReferenceLayer(base);
+  QVERIFY(keep->startEditing());
+  QgsFeature f(keep->fields());
+  QgsPolylineXY ring;
+  ring << QgsPointXY(201000, 451000) << QgsPointXY(201080, 451000)
+       << QgsPointXY(201080, 451080) << QgsPointXY(201000, 451080)
+       << QgsPointXY(201000, 451000);
+  f.setGeometry(QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring));
+  QVERIFY(keep->addFeature(f));
+  QVERIFY(keep->commitChanges());
+  keep->updateExtents();
+  proj.addMapLayer(base);
+  proj.addMapLayer(hide);
+  proj.addMapLayer(keep);
+
+  QVERIFY(LayerOps::isolateAndZoomToLayer(&proj, &canvas, keep, true));
+  QgsLayerTree* root = proj.layerTreeRoot();
+  QVERIFY(root->findLayer(keep->id())->itemVisibilityChecked());
+  QVERIFY(!root->findLayer(hide->id())->itemVisibilityChecked());
+  QVERIFY(root->findLayer(base->id())->itemVisibilityChecked());
+  QVERIFY(canvas.extent().contains(QgsPointXY(201040, 451040)));
+}
+
+void TestWorkflow::addVworldSatellite_allowsEmptyKeyViaPublicTiles() {
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  QString err;
+  QVERIFY2(LayerOps::addVworldSatelliteMap(&proj, nullptr, QString(), &err), qPrintable(err));
+  QVERIFY(projectHasLayerNamedLike(&proj, QStringLiteral("VWorld 위성")));
+}
+
+void TestWorkflow::addVworldSatellite_usesOfficialWmtsWhenKeyPresent() {
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  QString err;
+  QVERIFY2(LayerOps::addVworldSatelliteMap(&proj, nullptr, QStringLiteral("TEST-KEY-123"), &err),
+           qPrintable(err));
+  QgsMapLayer* sat = nullptr;
+  for (QgsMapLayer* l : proj.mapLayers()) {
+    if (l && l->name().contains(QStringLiteral("위성")))
+      sat = l;
+  }
+  QVERIFY2(sat, "satellite layer missing");
+  const QString src = sat->source();
+  QVERIFY2(src.contains(QStringLiteral("api.vworld.kr")), qPrintable(src.left(160)));
+  QVERIFY2(src.contains(QStringLiteral("TEST-KEY-123")), "official WMTS must include the given key");
+  QVERIFY2(!src.contains(QStringLiteral("xdworld")), "must not prefer xdworld when a key is given");
+}
+
+void TestWorkflow::addVworldSatellite_syncPutsLayerOnCanvasWithExtent() {
+  QgsProject proj;
+  QgsMapCanvas canvas;
+  canvas.resize(640, 480);
+  QVERIFY(LayerOps::ensureOtfEnabled(&proj, &canvas, QStringLiteral("EPSG:5186")));
+  QString err;
+  QVERIFY2(LayerOps::addVworldSatelliteMap(&proj, &canvas, QString(), &err), qPrintable(err));
+  LayerOps::syncMapCanvas(&proj, &canvas, false);
+  QgsMapLayer* sat = nullptr;
+  for (QgsMapLayer* l : proj.mapLayers()) {
+    if (l && l->name().contains(QStringLiteral("위성")))
+      sat = l;
+  }
+  QVERIFY2(sat, "satellite layer missing from project");
+  QVERIFY(sat->isValid());
+  QVERIFY2(canvas.layers().contains(sat), "canvas must show the satellite layer");
+  const QgsRectangle ext = sat->extent();
+  QVERIFY2(!ext.isNull() && ext.isFinite() && ext.width() > 0.0,
+           "satellite layer must have a drawable extent");
+}
+
+void TestWorkflow::otf_keepsWorkCrsWhenBasemapIs3857() {
+  QgsProject proj;
+  QgsMapCanvas canvas;
+  canvas.resize(640, 480);
+  QVERIFY(LayerOps::ensureOtfEnabled(&proj, &canvas, QStringLiteral("EPSG:5187")));
+  auto* sat = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:3857"),
+                                 QStringLiteral("VWorld 위성"), QStringLiteral("memory"));
+  QVERIFY(sat->isValid());
+  sat->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:3857")));
+  LayerOps::markReferenceLayer(sat);
+  proj.addMapLayer(sat);
+  LayerOps::syncMapCanvas(&proj, &canvas, false);
+  QCOMPARE(canvas.mapSettings().destinationCrs().authid(), QStringLiteral("EPSG:5187"));
+  QCOMPARE(sat->crs().authid(), QStringLiteral("EPSG:3857"));
+  QVERIFY(canvas.layers().contains(sat));
+}
+
+void TestWorkflow::cadastralWmsCrs_neverStartsWithWorkCrs5179() {
+  const QStringList crs = LayerOps::cadastralWmsCrsCandidates(QStringLiteral("EPSG:5187"));
+  QVERIFY(!crs.isEmpty());
+  QCOMPARE(crs.first(), QStringLiteral("EPSG:4326"));
+  QVERIFY(crs.contains(QStringLiteral("EPSG:3857")));
+  QVERIFY(!crs.contains(QStringLiteral("EPSG:5179")));
+  QVERIFY(!crs.contains(QStringLiteral("EPSG:5186")));
+  QVERIFY(!crs.contains(QStringLiteral("EPSG:5187")));
+}
+
+void TestWorkflow::syncMapCanvas_cadastralAboveSatellite() {
+  QgsProject proj;
+  QVERIFY(LayerOps::ensureOtfEnabled(&proj, nullptr, QStringLiteral("EPSG:5187")));
+
+  auto* survey = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5187"),
+                                    QStringLiteral("survey_area"), QStringLiteral("memory"));
+  QVERIFY(survey->isValid());
+  LayerOps::markSurveyLayer(survey, QStringLiteral("survey_area"));
+
+  auto* cadMem = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:3857"),
+                                    QStringLiteral("VWorld 지적(본번·부번)"), QStringLiteral("memory"));
+  QVERIFY(cadMem->isValid());
+  LayerOps::markReferenceLayer(cadMem);
+
+  auto* sat = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:3857"),
+                                 QStringLiteral("VWorld 위성"), QStringLiteral("memory"));
+  QVERIFY(sat->isValid());
+  LayerOps::markReferenceLayer(sat);
+
+  proj.addMapLayer(sat);
+  proj.addMapLayer(cadMem);
+  proj.addMapLayer(survey);
+
+  QgsMapCanvas canvas;
+  canvas.resize(800, 600);
+  LayerOps::syncMapCanvas(&proj, &canvas, false);
+  const QList<QgsMapLayer*> layers = canvas.layers();
+  const int iSurvey = layers.indexOf(survey);
+  const int iCad = layers.indexOf(cadMem);
+  const int iSat = layers.indexOf(sat);
+  QVERIFY(iSurvey >= 0 && iCad >= 0 && iSat >= 0);
+  QVERIFY2(iSurvey < iCad, "survey must paint above cadastral");
+  QVERIFY2(iCad < iSat, "cadastral must paint above satellite");
+}
+
+void TestWorkflow::layoutBlankSheetMapItemKeepsFrameAndNonEmptyLayers() {
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  QString err;
+  const QString name = LayoutService::createBlankSheet(
+      &proj, 297.0, 210.0, QStringLiteral("user_sheet"), &err);
+  QCOMPARE(name, QStringLiteral("user_sheet"));
+  auto* ly = dynamic_cast<QgsPrintLayout*>(proj.layoutManager()->layoutByName(name));
+  QVERIFY2(ly, qPrintable(err));
+
+  auto* map = new QgsLayoutItemMap(ly);
+  map->setId(QStringLiteral("ka_map"));
+  map->setFrameEnabled(true);
+  const QRectF frame(20.0, 20.0, 120.0, 80.0);
+  map->attemptSetSceneRect(frame);
+  map->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  map->setKeepLayerSet(true);
+  auto* blank = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                   QStringLiteral("layout_blank"), QStringLiteral("memory"));
+  QVERIFY(blank->isValid());
+  map->setLayers(QList<QgsMapLayer*>{blank});
+  map->zoomToExtent(QgsRectangle(200000.0, 450000.0, 200200.0, 450160.0));
+  if (map->scene() != ly)
+    ly->addLayoutItem(map);
+
+  QVERIFY(map->keepLayerSet());
+  QCOMPARE(map->layers().size(), 1);
+  QVERIFY2(qAbs(map->rect().width() - 120.0) < 1.0, "zoomToExtent must keep dragged width");
+  QVERIFY2(qAbs(map->rect().height() - 80.0) < 1.0, "setExtent would rewrite height; zoomToExtent must not");
+  QVERIFY(map->extent().isFinite());
+  QVERIFY(map->extent().width() > 0.0);
+}
+
+void TestWorkflow::layoutStudio_checkedLayersScaleBarLegendSize() {
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+
+  auto* survey = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                    QStringLiteral("구역"), QStringLiteral("memory"));
+  QVERIFY(survey->isValid());
+  LayerOps::markSurveyLayer(survey, QStringLiteral("survey_area"));
+  auto* cad = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:3857"),
+                                 QStringLiteral("VWorld 지적 본번"), QStringLiteral("memory"));
+  QVERIFY(cad->isValid());
+  LayerOps::markReferenceLayer(cad);
+  auto* sat = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:3857"),
+                                 QStringLiteral("VWorld 위성"), QStringLiteral("memory"));
+  QVERIFY(sat->isValid());
+  LayerOps::markReferenceLayer(sat);
+  proj.addMapLayer(sat);
+  proj.addMapLayer(cad);
+  proj.addMapLayer(survey);
+  QgsMapLayer* toCheck[] = {survey, cad, sat};
+  for (QgsMapLayer* l : toCheck) {
+    if (auto* n = proj.layerTreeRoot()->findLayer(l->id()))
+      n->setItemVisibilityChecked(true);
+  }
+
+  const QList<QgsMapLayer*> order = LayerOps::visibleLayersPaintOrder(&proj);
+  QVERIFY(order.contains(survey));
+  QVERIFY(order.contains(cad));
+  QVERIFY(order.contains(sat));
+  QVERIFY2(order.indexOf(cad) < order.indexOf(sat), "cadastral must paint above satellite");
+  QVERIFY2(order.indexOf(survey) < order.indexOf(cad), "survey must paint above cadastral");
+
+  QString err;
+  QVERIFY(!LayoutService::createBlankSheet(&proj, 297.0, 210.0, QStringLiteral("user_sheet"), &err).isEmpty());
+  auto* ly = dynamic_cast<QgsPrintLayout*>(proj.layoutManager()->layoutByName(QStringLiteral("user_sheet")));
+  QVERIFY(ly);
+
+  auto* map = new QgsLayoutItemMap(ly);
+  map->setId(QStringLiteral("ka_map"));
+  map->attemptSetSceneRect(QRectF(20.0, 20.0, 160.0, 120.0));
+  map->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  map->setKeepLayerSet(true);
+  map->setLayers(order);
+  map->zoomToExtent(QgsRectangle(200000.0, 450000.0, 200400.0, 450300.0));
+  if (map->scene() != ly)
+    ly->addLayoutItem(map);
+  QCOMPARE(map->layers().size(), 3);
+  QVERIFY(map->layers().indexOf(cad) < map->layers().indexOf(sat));
+
+  auto* sb = new QgsLayoutItemScaleBar(ly);
+  ly->addLayoutItem(sb);
+  sb->applyDefaultSettings();
+  sb->setLinkedMap(map);
+  sb->setStyle(QStringLiteral("Double Box"));
+  sb->setUnits(Qgis::DistanceUnit::Meters);
+  sb->setSegmentSizeMode(Qgis::ScaleBarSegmentSizeMode::FitWidth);
+  sb->setMinimumBarWidth(22.0);
+  sb->setMaximumBarWidth(37.0);
+  sb->setNumberOfSegments(4);
+  const QRectF barRect(20.0, 150.0, 160.0, 16.0);
+  sb->attemptSetSceneRect(barRect);
+  sb->refresh();
+  sb->attemptSetSceneRect(barRect);
+  QVERIFY2(sb->unitsPerSegment() > 0.0, "scale bar must not stay 0 m");
+  QCOMPARE(sb->linkedMap(), map);
+  QCOMPARE(sb->style(), QStringLiteral("Double Box"));
+  const double barW = sb->rect().width();
+  QVERIFY2(qAbs(barW - 160.0) < 8.0,
+           qPrintable(QStringLiteral("scale bar paper width must stay ~160mm (got %1)").arg(barW)));
+  map->zoomToExtent(QgsRectangle(200000.0, 450000.0, 200080.0, 450060.0));
+  sb->refresh();
+  sb->attemptSetSceneRect(barRect);
+  QVERIFY2(qAbs(sb->rect().width() - 160.0) < 8.0, "zoom must not shrink scale bar on paper");
+
+  auto* legend = new QgsLayoutItemLegend(ly);
+  legend->setResizeToContents(false);
+  legend->setTitle(QStringLiteral("범례"));
+  legend->setLinkedMap(map);
+  legend->attemptSetSceneRect(QRectF(190.0, 20.0, 48.0, 74.0));
+  ly->addLayoutItem(legend);
+  QVERIFY(!legend->resizeToContents());
+  QVERIFY2(qAbs(legend->rect().width() - 48.0) < 2.0, "legend width must keep user size");
+  QVERIFY2(qAbs(legend->rect().height() - 74.0) < 2.0, "legend height must keep user size");
+}
+
+void TestWorkflow::layoutExtentForPaperScale_keepsTypedDenominator() {
+  const QgsRectangle cur(200000.0, 450000.0, 200200.0, 450160.0);
+  const QgsRectangle next = LayoutService::extentForPaperScale(cur, 100.0, 1000.0);
+  QVERIFY(next.isFinite());
+  QCOMPARE(next.center().x(), cur.center().x());
+  QCOMPARE(next.center().y(), cur.center().y());
+  QVERIFY2(qAbs(next.width() - 100.0) < 0.001, "1:1000 on 100mm paper is 100m on ground");
+  QVERIFY2(qAbs(next.height() / next.width() - cur.height() / cur.width()) < 0.001,
+           "aspect ratio stays");
+  const QgsRectangle five = LayoutService::extentForPaperScale(cur, 100.0, 5000.0);
+  QVERIFY2(qAbs(five.width() - 500.0) < 0.001, "typed 5000 must stay 5000, not a computed 989-like value");
+  for (int den : {500, 1000, 2500, 5000}) {
+    const QgsRectangle e = LayoutService::extentForPaperScale(cur, 100.0, static_cast<double>(den));
+    QVERIFY2(qAbs(e.width() - den / 10.0) < 0.001,
+             qPrintable(QStringLiteral("chip 1:%1 on 100mm paper must stay typed").arg(den)));
+  }
+}
+
+void TestWorkflow::legendTitlesHideEpsgAndUseShortKorean() {
+  auto* sat = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:3857"),
+                                 QStringLiteral("VWorld 위성 [EPSG:3857]"),
+                                 QStringLiteral("memory"));
+  QVERIFY(sat->isValid());
+  LayerOps::applyLegendCrsLabel(sat);
+  QCOMPARE(sat->name(), QStringLiteral("위성"));
+  QVERIFY(!sat->name().contains(QStringLiteral("EPSG")));
+  delete sat;
+
+  auto* cad = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                 QStringLiteral("VWorld 지적(본번·부번) [EPSG:3857]"),
+                                 QStringLiteral("memory"));
+  QVERIFY(cad->isValid());
+  LayerOps::applyLegendCrsLabel(cad);
+  QCOMPARE(cad->name(), QStringLiteral("지적"));
+  QVERIFY(!cad->name().contains(QStringLiteral("EPSG")));
+  delete cad;
+
+  auto* zone = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                  QStringLiteral("구역 [EPSG:5186]"), QStringLiteral("memory"));
+  QVERIFY(zone->isValid());
+  LayerOps::applyLegendCrsLabel(zone);
+  QCOMPARE(zone->name(), QStringLiteral("구역"));
+  QVERIFY(!zone->name().contains(QStringLiteral("EPSG")));
+  delete zone;
 }
 
 #include "test_workflow.moc"

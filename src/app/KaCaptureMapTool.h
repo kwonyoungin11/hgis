@@ -21,6 +21,7 @@ public:
   void setMode(Mode mode);
   void setTargetLayer(QgsVectorLayer* layer);
   void resetSession();
+  bool undoLastVertex();
   Mode mode() const { return m_mode; }
   int pointCount() const { return m_points.size(); }
 

@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-07  
 **Repo:** `C:\Users\권을\Documents\hgis`  
-**Implementer:** OpenCode (Sisyphus)  
+**Implementer:** historical (OpenCode / Sisyphus era; current harness is Grok Build)  
 **Rules honored:** no git commit/push; no destructive git reset; OSGeo SSOT=`C:\OSGeo4W`; CMake=`C:\CMake\bin`
 
 ---

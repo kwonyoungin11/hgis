@@ -1,6 +1,6 @@
-# ka-hgis Agent Rules (OpenCode / Sisyphus)
+# ka-hgis Agent Rules (Grok Build)
 
-You are the coding agent for **ka-hgis**: standalone C++20/Qt6 desktop HGIS
+You are the Grok Build coding agent for **ka-hgis**: standalone C++20/Qt6 desktop HGIS
 linked to OSGeo4W **qgis-dev** (not a QGIS fork). Korean archaeology field drawings.
 
 **This file overrides generic “max agent graph” defaults for this repo.**
@@ -9,11 +9,13 @@ Use the mode router below. Do not force parallel explore/deep graphs on every tu
 Identity: orchestrator when multi-module; implementer when scope is local and clear.
 Reply in the user’s language (usually Korean). Code/identifiers in files: English OK; UI strings: Korean.
 
+Harness: **Grok Build only**. Do not look for OpenCode, Sisyphus, or `.agents/` / `opencode.json`.
+
 ---
 
 ## SSOT (read before non-trivial work)
 
-1. `OPENCODE_HANDOFF.md` (mirror: `docs/OPENCODE_HANDOFF.md`) — product truth
+1. `HANDOFF.md` (mirror: `docs/HANDOFF.md`) — product truth; edit both together
 2. `docs/adr/0001-standalone-cpp-qgis-libs.md` — Architecture B, no fork
 3. `docs/domain/data-model.md` — GPKG layers & fields
 4. `docs/architecture/data-flow.md` — critical path
@@ -72,15 +74,22 @@ Use manuals to decide **how tools connect**, not to clone QGIS chrome.
 - Implement only on explicit verbs: implement / add / fix / change / create / wire / 적용 / 구현 / 수정
 - Prefer minimal diff; bugfix = no drive-by refactor
 - Do not commit unless the user explicitly asks
+- **Small plan first** (`.grok/rules/20-small-plan.md`): before any develop/fix, write a 5–10 line plan (symptom, GIS/code cause, files, user-visible done check), then implement only that plan
 
 ---
 
+## GIS verify gate (map / CRS / WMS / digitize / layout)
+
+Treat these as **GIS** bugs. Before editing: name project CRS, layer CRS, OTF, canvas layer order, WMS GetMap/scale. Read `docs/vendor/qgis-manual-3.44/` and `.grok/rules/10-gis-verify.md`. Collect QGIS/VWorld evidence; do not guess. ArcGIS terms: `docs/user/job-cards/arcgis-용어.md`. User is not a GIS expert — do not ask them to diagnose EPSG/WMS.
+
 ## Tool preference (this repo)
 
-1. `codegraph_explore` **FIRST** for symbols/flows under `src/`
-2. Then targeted Read / Edit
-3. explore / librarian agents only when location is unknown **or** external QGIS/Qt/GDAL API docs are required
-4. Do **not** spawn parallel agent graphs for single-file known fixes
+MCP, skills, and hooks are **disabled** for Grok Build. Do not call `search_tool` / `use_tool`, do not load skills, do not install MCP servers.
+
+1. Targeted `read_file` / `search_replace` / `grep` / `list_dir`
+2. `lsp` (clangd) for C++ definition/references after edits
+3. In-repo QGIS manuals under `docs/vendor/qgis-manual-3.44/` for `Qgs*` behavior
+4. Do **not** spawn parallel subagents for single-file known fixes
 
 ---
 
@@ -91,15 +100,15 @@ Use manuals to decide **how tools connect**, not to clone QGIS chrome.
 **When:** one file / known symbol / typo / local bug / UI string / one function
 
 - Solo OK. No mandatory agent graph.
-- Flow: codegraph → edit → build/tests for touched area when feasible
-- Skip Metis / Momus / Oracle unless stuck twice on the same issue
+- Flow: read/grep → edit → build/tests for touched area when feasible
+- Skip extra `architect` / council unless stuck twice on the same issue
 
 ### B) FEATURE
 
 **When:** app+core, new export path, checklist rule, digitize flow, CRS convert, multi-file behavior change
 
 ```
-intent → codegraph (+ optional explore bg if unknown)
+intent → read/grep
       → plan only if ambiguous
       → implement (core vs app boundary)
       → verify (cmake build + relevant ctest + smoke if UI path)
@@ -116,7 +125,7 @@ intent → codegraph (+ optional explore bg if unknown)
 
 - Read SSOT + relevant `docs/PO_GOAL_*.md`
 - Plan / clarify with user before large edits
-- Oracle only after 2 failed fix rounds or a true design fork
+- `architect` / `plan` only after 2 failed fix rounds or a true design fork
 
 ---
 
@@ -178,7 +187,7 @@ ctest --test-dir build -C Release --output-on-failure
 - C++20, Qt6, AUTOMOC as existing CMake
 - Match surrounding style; user-visible Korean via existing `QStringLiteral` patterns
 - Prefer services (`LayerOps`, `ExportService`, …) over dumping logic into MainWindow
-- QGIS API: check in-repo usage first; librarian / Context7 for unfamiliar `Qgs*` APIs
+- QGIS API: check in-repo usage first; context7 MCP for unfamiliar `Qgs*` APIs
 - Extend existing tests; never delete failing tests to “pass”
 - No `as any`-style escapes; no empty catch that swallows GIS errors silently
 
@@ -186,7 +195,7 @@ ctest --test-dir build -C Release --output-on-failure
 
 ## Delegation (FEATURE / ARCHITECTURE only)
 
-Worker prompts MUST include: TASK, EXPECTED OUTCOME, MUST DO, MUST NOT DO, CONTEXT (paths + invariants).
+Use Grok Build subagents (`explore`, `codebase-scout`, `architect`, `implementer`, `tester`, `reviewer`, `debugger`). Worker prompts MUST include: TASK, EXPECTED OUTCOME, MUST DO, MUST NOT DO, CONTEXT (paths + invariants).
 
 **MUST NOT:**
 
@@ -218,13 +227,10 @@ Resume failed workers with session continuation; do not re-discover from zero.
 - Ignoring OSGeo4W PATH / `pdal-dev\bin` when debugging missing DLLs
 - Forcing max-parallel agent graphs for trivial C++ edits
 - Playwright / web visual-engineering defaults (this is Qt desktop)
+- Reintroducing OpenCode (`opencode.json`, `.agents/`, Sisyphus trailers)
 
 ---
 
-## Global orchestrator interaction
+## Grok Build orchestrator
 
-If a global Grok Build / max-subagent skill is loaded:
-
-1. **This `AGENTS.md` wins** for routing and solo-vs-graph decisions in this repo
-2. QUICK mode is the default; max fan-out applies only in FEATURE/ARCHITECTURE when units are independent
-3. Still keep: intent gate, root-cause fixes, verify-before-done, no commit without ask
+MCP / skills / hooks stay off. QUICK is the default. Still keep: intent gate, root-cause fixes, verify-before-done, no commit without ask.

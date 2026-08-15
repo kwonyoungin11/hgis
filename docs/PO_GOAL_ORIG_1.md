@@ -36,7 +36,7 @@ Korean field archaeology HGIS replacing ArcGIS:
 ### A) Remove false 7-step product UI
 - Remove left-dock "7단계 발굴 워크플로우" list from MainWindow primary UI
 - WorkflowGuide.cpp may remain as optional internal helper OR unused; must NOT drive main UX
-- OPENCODE_HANDOFF.md: rewrite section claiming 7-step as core — mark deprecated/misread
+- HANDOFF.md: rewrite section claiming 7-step as core — mark deprecated/misread
 - Toolbar/menus carry real actions: New survey, Open, Basemap, Digitize, Save edits, Checklist, Export
 
 ### B) Layer model SSOT (DATA vs REFERENCE)

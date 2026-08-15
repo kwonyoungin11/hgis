@@ -1,7 +1,8 @@
 ﻿# GOAL-0 — ka-hgis P0 ship-blockers (PO order)
 
-**From:** Product Owner (other OpenCode session / Sisyphus orchestrator)
-**To:** Implementer OpenCode
+**From:** Product Owner (historical session)
+**To:** Implementer
+**Harness now:** Grok Build (`AGENTS.md`, `HANDOFF.md`) — this brief was written before OpenCode was removed.
 **Repo:** C:\Users\권을\Documents\hgis
 **OSGeo SSOT this PC:** C:\OSGeo4W (no D: drive). CMake: C:\CMake\bin.
 

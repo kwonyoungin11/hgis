@@ -22,9 +22,7 @@ foreach ($p in $Path) {
 & "$PSScriptRoot\update-commit-status.ps1" -IncludeStagedSummary
 & git add -- docs/COMMIT_STATUS.md
 
-$f1 = "Ultraworked with [Sisyphus](https://github.com/code-yeongyu/oh-my-openagent)"
-$f2 = "Co-authored-by: Sisyphus <clio-agent@sisyphuslabs.ai>"
-& git commit -m $Message -m $f1 -m $f2
+& git commit -m $Message
 if ($LASTEXITCODE -ne 0) { throw "git commit failed" }
 
 if ($Push) {

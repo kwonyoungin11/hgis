@@ -29,7 +29,7 @@ cmake --build build --config Release → OK
 |------|--------|----------|
 | Remove left-dock 7-step list | DONE | No `m_workflowList` / `workflowGuideList` / `onStepClicked` / `refreshWorkflowGuide` in MainWindow |
 | WorkflowGuide not primary UX | DONE | Not included/called from MainWindow; remains for unit tests only |
-| Handoff rewritten | DONE | `OPENCODE_HANDOFF.md` marks 7-step as **DEPRECATED (context7 misread)** |
+| Handoff rewritten | DONE | `HANDOFF.md` marks 7-step as **DEPRECATED (context7 misread)** |
 | README product axis | DONE | Replaced “7단계” section with GPKG digitize + basemap + checklist + 5179 |
 | Toolbar real actions | DONE | 파일 / 편집커밋 / 디지타이즈 / 검수·제출; 배경지도 menu |
 
@@ -79,7 +79,7 @@ Key files:
 - `src/app/MainWindow.h/.cpp` — 7-step UI removed; layer_key digitize path
 - `src/core/LayerOps.h/.cpp` — legend groups, mark/find/remove domain layers
 - `src/core/ProjectStateBuilder.cpp`, `ExportService.cpp` — findByLayerKey
-- `OPENCODE_HANDOFF.md`, `README.md` — product SSOT corrected
+- `HANDOFF.md`, `README.md` — product SSOT corrected
 
 Commands:
 

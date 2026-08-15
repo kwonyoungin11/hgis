@@ -1,74 +1,41 @@
-﻿CompileFlags:
-  CompilationDatabase: build
+# clangd fallback when MSVC's compile_commands.json is missing.
+# Prefer a Ninja compile DB under build/ if present.
+
+CompileFlags:
   Add:
-    - --target=x86_64-pc-windows-msvc
     - -std=c++20
-    - -fcxx-exceptions
-    - -fms-extensions
-    - -fms-compatibility
-    - -DWIN32
-    - -D_WINDOWS
-    - -DUNICODE
-    - -D_UNICODE
-    - -DQT_CORE_LIB
-    - -DQT_GUI_LIB
-    - -DQT_WIDGETS_LIB
-    - -DQT_NETWORK_LIB
-    - -DQT_XML_LIB
-    - -DQT_SVG_LIB
-    - -DQT_PRINTSUPPORT_LIB
+    - -xc++
     - -DKA_HGIS_HAS_QGIS=1
-    - -DCORE_EXPORT=__declspec(dllimport)
-    - -DGUI_EXPORT=__declspec(dllimport)
-    - -isystem
-    - C:/OSGeo4W/apps/Qt6/include
-    - -isystem
-    - C:/OSGeo4W/apps/Qt6/include/QtCore
-    - -isystem
-    - C:/OSGeo4W/apps/Qt6/include/QtGui
-    - -isystem
-    - C:/OSGeo4W/apps/Qt6/include/QtWidgets
-    - -isystem
-    - C:/OSGeo4W/apps/Qt6/include/QtNetwork
-    - -isystem
-    - C:/OSGeo4W/apps/Qt6/include/QtXml
-    - -isystem
-    - C:/OSGeo4W/apps/Qt6/include/QtSvg
-    - -isystem
-    - C:/OSGeo4W/apps/Qt6/include/QtPrintSupport
-    - -isystem
-    - C:/OSGeo4W/apps/Qt6/include/QtTest
-    - -isystem
-    - C:/OSGeo4W/apps/Qt6/include/QtConcurrent
-    - -isystem
-    - C:/OSGeo4W/apps/Qt6/include/QtSql
-    - -isystem
-    - C:/OSGeo4W/apps/Qt6/include/QtOpenGL
-    - -isystem
-    - C:/OSGeo4W/apps/Qt6/include/QtOpenGLWidgets
-    - -isystem
-    - C:/OSGeo4W/apps/qgis-dev/include
-    - -isystem
-    - C:/OSGeo4W/apps/gdal-dev/include
-    - -isystem
-    - C:/OSGeo4W/include
-    - -I
-    - src
-    - -I
-    - src/app
-    - -I
-    - src/core
-    - -I
-    - build-clangd/ka-hgis_autogen/include
-    - -I
-    - build-clangd/ka_core_autogen/include
-    - -I
-    - build-clangd/ka_hgis_tests_autogen/include
-    - -I
-    - build-clangd/ka_workflow_tests_autogen/include
-    - -Wno-unknown-argument
+    - -Isrc
+    - -IC:/OSGeo4W/apps/qgis-dev/include
+    - -IC:/OSGeo4W/apps/gdal-dev/include
+    - -IC:/OSGeo4W/include
+    - -IC:/OSGeo4W/apps/Qt6/include
+    - -IC:/OSGeo4W/apps/Qt6/include/QtCore
+    - -IC:/OSGeo4W/apps/Qt6/include/QtGui
+    - -IC:/OSGeo4W/apps/Qt6/include/QtWidgets
+    - -IC:/OSGeo4W/apps/Qt6/include/QtXml
+    - -IC:/OSGeo4W/apps/Qt6/include/QtNetwork
+    - -IC:/OSGeo4W/apps/Qt6/include/QtSvg
+    - -IC:/OSGeo4W/apps/Qt6/include/QtPrintSupport
+    - -IC:/OSGeo4W/apps/Qt6/include/QtTest
+    - -ID:/OSGeo4W/apps/qgis-dev/include
+    - -ID:/OSGeo4W/apps/gdal-dev/include
+    - -ID:/OSGeo4W/include
+    - -ID:/OSGeo4W/apps/Qt6/include
+    - -ID:/OSGeo4W/apps/Qt6/include/QtCore
+    - -ID:/OSGeo4W/apps/Qt6/include/QtGui
+    - -ID:/OSGeo4W/apps/Qt6/include/QtWidgets
+    - -ID:/OSGeo4W/apps/Qt6/include/QtXml
+    - -ID:/OSGeo4W/apps/Qt6/include/QtNetwork
+    - -ID:/OSGeo4W/apps/Qt6/include/QtSvg
+    - -ID:/OSGeo4W/apps/Qt6/include/QtPrintSupport
+    - -ID:/OSGeo4W/apps/Qt6/include/QtTest
+  CompilationDatabase: build
+
 Index:
   Background: Build
+
 Diagnostics:
   UnusedIncludes: None
   MissingIncludes: None

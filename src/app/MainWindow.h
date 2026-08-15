@@ -1,6 +1,8 @@
 ﻿#pragma once
 #include <QMainWindow>
 #include <QJsonObject>
+#include <QPair>
+#include <QVector>
 #include "core/LocationSearch.h"
 class QListWidget;
 class QListWidgetItem;
@@ -19,9 +21,12 @@ class QgsLayerTreeView;
 class QgsVectorLayer;
 class QgsMapTool;
 class KaCaptureMapTool;
-class KaLayoutWindow;
+class KaAttributeMapTool;
+class KaDrawingStudio;
 class QgsMapToolPan;
+class QgsMapToolSelect;
 class QgsGeometry;
+class QgsFeature;
 class QgsLayerTreeMapCanvasBridge;
 #endif
 
@@ -46,9 +51,16 @@ private slots:
   void startEditSurveyArea();
   void startEditFeaturePoly();
   void startEditFeatureLine();
+  void startEditSectionLine();
   void mergeFeaturePolygons();
+  void onWorkControlClicked(QListWidgetItem* item);
+  void refreshWorkPanel();
   void saveEdits();
   void stopEdits();
+  void startAttributeEditTool();
+  void editCurrentLayerAttributes();
+  void editCurrentLayerStyle();
+  void addUserLayer();
   void addControlPoint();
   void importControlCsv();
   void runChecklist();
@@ -59,7 +71,10 @@ private slots:
   void setWorkCrs5186();
   void setWorkCrs5187();
   void convertSelectedTo5179();
+  void convertSelected5186To5179();
+  void convertSelected5187To5179();
   void convertShpFileTo5179();
+  void startSelectTool();
   void addBasemapVworld();
   void addBasemapVworldSat();
   void addBasemapVworldCadastral();
@@ -75,8 +90,11 @@ private slots:
   void exportReportLayout();
   void browseDataFolder();
   void goFileBrowserRoot(const QString& path);
+  static QString resolvedDesktopPath();
   void onMapContextMenu(const QPoint& pos);
   void onLayerTreeContextMenu(const QPoint& pos);
+  void renameSelectedLayer();
+  void onLayerTreeDoubleClicked(const QModelIndex& index);
   void zoomMapToFullMax();
   void zoomSelectedLayerMax();
   void onCanvasScaleChanged(double scale);
@@ -87,11 +105,14 @@ private slots:
   void showSubToolsSubmit();
   void hideSubTools();
   void openLayoutDesigner();
+  void undoLastAction();
 
 private:
   void buildUi();
   void buildMenus();
+  void setupWorkPanel();
   void applyPhase1Theme();
+  void updateNextActionStatus();
   void setupFileBrowser();
   void clearSubToolbar();
   bool addVectorFromPath(const QString& path);
@@ -112,10 +133,16 @@ private:
   void beginEdit(QgsVectorLayer* layer);
   void onGeometryCaptured(const QgsGeometry& geom);
   void stopCaptureTool();
+  void ensureAttributeTool();
+  void editFeatureAttributes(QgsVectorLayer* layer, const QgsFeature& feature);
+  void editAttributesAtCanvasPos(const QPoint& canvasPos);
+  static QString attributeFieldLabelKo(const QString& fieldName);
 #endif
 
   QLabel* m_help = nullptr;
   QLabel* m_checkView = nullptr;
+  QLabel* m_workHint = nullptr;
+  QListWidget* m_workList = nullptr;
   QLineEdit* m_searchEdit = nullptr;
   QTreeView* m_fileBrowser = nullptr;
   QFileSystemModel* m_fsModel = nullptr;
@@ -133,7 +160,9 @@ private:
   QgsMapCanvas* m_canvas = nullptr;
   QgsLayerTreeView* m_layerTree = nullptr;
   KaCaptureMapTool* m_captureTool = nullptr;
+  KaAttributeMapTool* m_attributeTool = nullptr;
   QgsMapToolPan* m_panTool = nullptr;
+  QgsMapToolSelect* m_selectTool = nullptr;
   QgsVectorLayer* m_editLayer = nullptr;
   QgsLayerTreeMapCanvasBridge* m_bridge = nullptr;
   QLineEdit* m_scaleEdit = nullptr;
@@ -142,6 +171,7 @@ private:
   bool m_extentClampGuard = false;
   QToolBar* m_subToolbar = nullptr;
   QString m_subToolsMode;
-  KaLayoutWindow* m_layoutWindow = nullptr;
+  KaDrawingStudio* m_drawingStudio = nullptr;
+  QVector<QPair<QString, qint64>> m_committedUndo;
 #endif
 };
