@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-15 15:29:21 +09:00 |
+| Updated (local) | 2026-08-15 15:31:08 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `1f5e990` |
-| HEAD full | `1f5e99064a2643159307499aa560c4ef67145362` |
-| HEAD date | 2026-08-15 15:29:07 +0900 |
+| HEAD short | `f4c1901` |
+| HEAD full | `f4c1901cabd7950a66fc47f6f65f9c089db8895c` |
+| HEAD date | 2026-08-15 15:29:21 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Ship field HGIS: layout studio, keyed VWorld basemap, icon chrome, Ctrl+Z undo. |
-| Total commits | 15 |
+| HEAD subject | Sync COMMIT_STATUS to tip after field HGIS push. |
+| Total commits | 16 |
 | Upstream | `origin/main` |
 | Sync | up to date with origin/main |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (2 paths) |
+| Working tree dirty | **yes** (4 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Ship field HGIS: layout studio, keyed VWorld basemap, icon chrome, Ctrl+Z undo. (`1f5e990` @ 2026-08-15 15:29:07 +0900)
+- **Recorded tip when this file was written:** Sync COMMIT_STATUS to tip after field HGIS push. (`f4c1901` @ 2026-08-15 15:29:21 +0900)
 - **Remote sync at write time:** up to date with origin/main
-- **Uncommitted local changes at write time:** yes (2 paths)
+- **Uncommitted local changes at write time:** yes (4 paths)
 
 ### Read this correctly
 
@@ -43,11 +43,13 @@
 - `31e51be` commit progress ledger ??Sync COMMIT_STATUS to HEAD after push ledger update.
 - `6b9f373` commit progress ledger ??Refresh COMMIT_STATUS after bootstrap docs commit.
 - `3a5a87a` commit progress ledger ??Sync COMMIT_STATUS to tip after bootstrap push.
+- `f4c1901` commit progress ledger ??Sync COMMIT_STATUS to tip after field HGIS push.
 
 ## Recent commits (newest first, max 30)
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `f4c1901` | 2026-08-15T15:29:21+09:00 | Sync COMMIT_STATUS to tip after field HGIS push. |
 | `1f5e990` | 2026-08-15T15:29:07+09:00 | Ship field HGIS: layout studio, keyed VWorld basemap, icon chrome, Ctrl+Z undo. |
 | `3a5a87a` | 2026-08-09T18:57:37+09:00 | Sync COMMIT_STATUS to tip after bootstrap push. |
 | `6b9f373` | 2026-08-09T18:57:28+09:00 | Refresh COMMIT_STATUS after bootstrap docs commit. |
@@ -67,7 +69,9 @@
 ## Staged in this commit
 
 ```
+M	HANDOFF.md
 M	docs/COMMIT_STATUS.md
+M	docs/HANDOFF.md
 ```
 ## Other PC checklist
 

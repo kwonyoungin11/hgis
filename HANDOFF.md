@@ -1,73 +1,99 @@
 # ka-hgis Handoff — product SSOT (v0.3.0)
 
-> Grok Build product truth for this repo.  
-> Updated: 2026-08-15 (OpenCode removed; Grok Build is the only agent harness)
+> Updated: 2026-08-15. Grok Build only. MCP / skills / hooks **off**.
 
-**Agent operating rules:** repo-root [`AGENTS.md`](./AGENTS.md)  
-(QUICK / FEATURE / ARCHITECTURE; product invariants; build verify).  
-This file is **product SSOT**. `AGENTS.md` is **Grok Build behavior SSOT**.
+**Agent rules:** [`AGENTS.md`](./AGENTS.md)  
+**This file + `docs/HANDOFF.md`:** edit together.
 
 ---
 
-## 1. Product (SSOT)
+## Resume after reconnect (same PC or clone)
 
-Korean field archaeology HGIS (standalone C++/Qt6 + QGIS libs):
+Remote: `https://github.com/kwonyoungin11/hgis.git` · branch **`main`**
 
-1. Survey store = GPKG schema on disk; **legend empty until user draws/imports** (QGIS layer lifecycle)
-2. Domain keys (when added): `survey_area`, `feature_poly`, `feature_line`, `section_line`, `control_points` (`ka_hgis/layer_key`)
-3. **참조 지도** basemap = user-chosen underlay — NOT survey data
-4. Digitize only (no attr popups while drawing); **편집저장** / per-feature commit; checklist blocks export on error
-5. **도면 만들기** (`KaDrawingStudio`): 용지 → 지도 칸 드래그. 방위표·축척자는 샘플을 고른 뒤 드래그로 위치·크기. 지도 칸 우클릭 **지도 조정**(ArcGIS Activate와 같음) → 그린 것 가운데 → **지도조정끝**. QGIS 조판 디자이너 아님. 제출 SHP/PDF **EPSG:5179** + MANIFEST
-7. **작업 제어** 독: 각 단계를 직접 눌러 실행·상태 확인 (새 조사/배경/그리기/속성/GPS/검수/도면/제출)
-6. Work CRS 5186/5187 OK; upload 5179
+```powershell
+cd D:\qgis
+git pull origin main
+$env:PATH = "C:\CMake\bin;" + $env:PATH
+. .\scripts\dev-env.ps1
+.\scripts\run-ka-hgis.ps1
+```
 
-**Other PC:** `docs/other-pc-setup.md` · `.\scripts\bootstrap-dev-pc.ps1`
+Launch for the field user (do **not** start `ka-hgis.exe` raw):
 
----
+- `고고학 전용 HGIS.lnk` → `scripts\start-ka-hgis.vbs` → `launch.ps1`
+- or `.\ka-hgis-실행.bat`
 
-## 2. Recent implementation notes
-
-- VWorld key via `VworldSettings` only (no hardcoded production key)
-- Legend groups: **조사 데이터** / **참조 지도**
-- `loadSurveyLayers` never `removeAllMapLayers()` — drops domain layers only; keeps basemaps
-- Toolbar: 파일 | 편집커밋(편집저장/그리기종료) | 디지타이즈 | 검수·제출
-- Basemap from menu; startup does not force auto-basemap spam
+Other PC first time: `docs/other-pc-setup.md` · `.\scripts\bootstrap-dev-pc.ps1`  
+VWorld key is **local only** (`VworldSettings` / 도움말 → API 키). Never commit `config/secrets.ini`.
 
 ---
 
-## 3. Layout
+## 1. Product
+
+Korean field archaeology HGIS (C++20/Qt6 + OSGeo4W `qgis-dev`, Architecture B, no QGIS fork):
+
+1. GPKG survey store; **legend empty until draw/import** (`LayerOps::ensureDomainLayer` only)
+2. Domain keys: `survey_area`, `feature_poly`, `feature_line`, `section_line`, `control_points`
+3. **참조 지도** (위성/지적) vs **조사 데이터**
+4. Digitize: startEditing → addFeature → commit (keep tool). **Ctrl+Z** undoes last vertex, then last saved feature
+5. **도면 만들기** = `KaDrawingStudio` (not QGIS Layout Designer). Samples for north/scale/legend/CRS. **Ctrl+Z** removes last placed item
+6. Work CRS EPSG:5186 / 5187; **export SHP+PDF+MANIFEST = EPSG:5179**. Checklist error hard-blocks 제출
+7. Icon toolbar (새조사/열기/저장/위성/지적/그리기/선택/속성/도면/검수/보내기/찾기). Text menu bar **hidden**. File drawer and 작업 제어 dock hidden by default (**더보기**)
+
+---
+
+## 2. What landed (do not rebuild)
+
+| Area | Notes |
+| --- | --- |
+| VWorld 위성 | Stored API key → `api.vworld.kr` WMTS **first**; xdworld only if no key |
+| VWorld 지적 | Frozen tiled WMS `crs=EPSG:3857` + KEY/DOMAIN. Do not put 5186/5187/5179 in WMS CRS list |
+| Digitize / attrs | `KaCaptureMapTool`, `KaAttributeMapTool`, `ensureDomainLayer` |
+| Layout studio | `src/app/KaDrawingStudio.*` — 160 mm scale bar, PNG north = sample, CRS label |
+| Launch | `scripts/start-ka-hgis.vbs` + `launch.ps1` (Job Object safe) |
+| Tests | `tests/test_workflow.cpp` (satellite key-first, undo feature, scale bar width, …) |
+
+---
+
+## 3. Next (if continuing production)
+
+1. Export package PDF should be the **composed studio sheet**, not `rebuildDefaultLayouts` 5 templates
+2. Checklist `layout_exists:*` must not pass on empty auto-seeded layouts
+3. Do **not**: QGIS fork, DXF submit, restore 7-step rail, change cadastral WMS recipe, hardcode VWorld key
+
+---
+
+## 4. Layout / build
 
 ```
-src/app/MainWindow.*     UI, digitize, export
-src/core/LayerOps.*      basemap, groups, layer_key
+src/app/MainWindow.*        chrome, digitize, export
+src/app/KaDrawingStudio.*   조판
+src/app/KaCaptureMapTool.*  그리기
+src/app/KaAttributeMapTool.* 속성 클릭
+src/core/LayerOps.*         basemap, layer_key, undoCommittedFeature
+src/core/ExportService.*    SHP 5179 + MANIFEST
+src/core/LayoutService.*    default 5 layouts (package PDF still uses these)
 src/core/ChecklistEngine.*
-src/core/ExportService.* SHP/PDF package (no DXF)
-src/core/WorkflowGuide.*
 tests/test_workflow.cpp
-scripts/dev-env.ps1, build-all.ps1, po-smoke-field.ps1
 ```
-
-## 4. Build
 
 ```
 $env:PATH = "C:\CMake\bin;" + $env:PATH
 . .\scripts\dev-env.ps1
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DOSGEO4W_ROOT=C:/OSGeo4W -DKA_HGIS_BUILD_TESTS=ON
 cmake --build build --config Release
-ctest --test-dir build -C Release --output-on-failure
+.\scripts\run-ka-hgis.ps1
 ```
 
-OSGeo SSOT: `C:\OSGeo4W`. CMake: `C:\CMake\bin`.
+This machine: OSGeo `D:\OSGeo4W` (also `C:\OSGeo4W` in docs). CMake `C:\CMake\bin`.
 
-## 5. Grok Build surface
+---
+
+## 5. Grok Build
 
 | Surface | Path |
-|---------|------|
+| --- | --- |
 | Agent rules | `AGENTS.md` |
-| Product SSOT | `HANDOFF.md` (this file; mirror `docs/HANDOFF.md`) |
-| Project MCP | `.grok/config.toml` (repowise) |
-| Project skill | `.grok/skills/ka-hgis/` |
-| Skill focus | `.grok/rules/10-skill-focus.md` |
-| clangd flags | `.clangd` (user LSP: `~/.grok/lsp.json`) |
-| Workspace memory | `~/.grok/memory/qgis-a61a2c3a/MEMORY.md` |
-| User MCP (global) | context7, exa, firecrawl, sequential-thinking, playwright, github, linear |
+| Product SSOT | `HANDOFF.md` + `docs/HANDOFF.md` |
+| No MCP/skills/hooks | `.grok/rules/00-no-mcp-skills-hooks.md` |
+| clangd | `.clangd` |
