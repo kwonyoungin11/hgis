@@ -7,39 +7,117 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QFont>
+#include <QFontDatabase>
+#include <QFontInfo>
+#include <QPainter>
+#include <QPainterPath>
+#include <QProxyStyle>
+#include <QStyleOption>
 #include <QWidget>
 
 namespace KaTheme {
 namespace {
 
 const Tokens kTokens = {
-    QColor(0xB8, 0xDF, 0xF6),  // sky0
-    QColor(0x5E, 0xB3, 0xE4),  // sky1
-    QColor(0x2E, 0x94, 0xD0),  // sky2
-    QColor(0x18, 0x78, 0xB8),  // sky3
-    QColor(0x0F, 0x5F, 0x9A),  // sky4
-    QColor(0x0A, 0x4A, 0x7C),  // sky5
-    QColor(0x06, 0x32, 0x5A),  // sky6
-    QColor(0x0F, 0x17, 0x2A),  // ink
-    QColor(0x33, 0x41, 0x55),  // inkMuted
-    QColor(0x64, 0x74, 0x8B),  // inkDisabled
-    QColor(0x00, 0x00, 0x00),  // border
+    QColor(0xEF, 0xF6, 0xFF),  // sky0 primary pale
+    QColor(0x25, 0x63, 0xEB),  // sky1 primary
+    QColor(0x1D, 0x4E, 0xD8),  // sky2
+    QColor(0x1E, 0x40, 0xAF),  // sky3
+    QColor(0xF8, 0xFA, 0xFC),  // sky4 surface
+    QColor(0x25, 0x63, 0xEB),  // sky5
+    QColor(0x1E, 0x29, 0x3B),  // sky6 ink
+    QColor(0x1E, 0x29, 0x3B),  // ink
+    QColor(0x64, 0x74, 0x8B),  // inkMuted
+    QColor(0x94, 0xA3, 0xB8),  // inkDisabled
+    QColor(0xE5, 0xE7, 0xEB),  // border
     QColor(0xFF, 0xFF, 0xFF),  // bevelLight
-    QColor(0x00, 0x00, 0x00),  // bevelDark
-    QColor(0xE8, 0xEE, 0xF4),  // canvasNeutral
-    QColor(0xE5, 0xE7, 0xEB),  // desk
-    QColor(0xB9, 0x1C, 0x1C),  // danger
-    QColor(0x16, 0x65, 0x34),  // ok
+    QColor(0xCB, 0xD5, 0xE1),  // bevelDark
+    QColor(0xFF, 0xFF, 0xFF),  // canvasNeutral
+    QColor(0xF8, 0xFA, 0xFC),  // desk
+    QColor(0xDC, 0x26, 0x26),  // danger
+    QColor(0x16, 0xA3, 0x4A),  // ok
+};
+
+class ChromeStyle : public QProxyStyle {
+public:
+  ChromeStyle() : QProxyStyle(QStringLiteral("Fusion")) {}
+
+  int pixelMetric(PixelMetric metric, const QStyleOption* opt, const QWidget* w) const override {
+    if (metric == PM_IndicatorWidth || metric == PM_IndicatorHeight ||
+        metric == PM_ExclusiveIndicatorWidth || metric == PM_ExclusiveIndicatorHeight)
+      return 14;
+    return QProxyStyle::pixelMetric(metric, opt, w);
+  }
+
+  void drawPrimitive(PrimitiveElement pe, const QStyleOption* opt, QPainter* p,
+                     const QWidget* w) const override {
+    if (!opt || !p) {
+      QProxyStyle::drawPrimitive(pe, opt, p, w);
+      return;
+    }
+    if (pe == PE_IndicatorCheckBox || pe == PE_IndicatorItemViewItemCheck) {
+      p->save();
+      p->setRenderHint(QPainter::Antialiasing, true);
+      const QRectF r = QRectF(opt->rect).adjusted(1.0, 1.0, -1.0, -1.0);
+      const bool on = opt->state.testFlag(State_On);
+      const bool part = opt->state.testFlag(State_NoChange);
+      const bool dis = !opt->state.testFlag(State_Enabled);
+      p->setPen(QPen(dis ? QColor(0x94, 0xA3, 0xB8) : QColor(0x94, 0xA3, 0xB8), 1.0));
+      p->setBrush(on || part ? QColor(0x25, 0x63, 0xEB) : QColor(255, 255, 255));
+      p->drawRoundedRect(r, 2.0, 2.0);
+      if (on) {
+        QPainterPath tick;
+        tick.moveTo(r.left() + r.width() * 0.20, r.center().y());
+        tick.lineTo(r.left() + r.width() * 0.42, r.bottom() - r.height() * 0.26);
+        tick.lineTo(r.right() - r.width() * 0.18, r.top() + r.height() * 0.24);
+        p->setPen(QPen(QColor(255, 255, 255), 1.7, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        p->setBrush(Qt::NoBrush);
+        p->drawPath(tick);
+      } else if (part) {
+        p->fillRect(r.adjusted(3, 3, -3, -3), QColor(255, 255, 255));
+      }
+      p->restore();
+      return;
+    }
+    if (pe == PE_IndicatorSpinUp || pe == PE_IndicatorSpinDown || pe == PE_IndicatorArrowUp ||
+        pe == PE_IndicatorArrowDown) {
+      p->save();
+      p->setRenderHint(QPainter::Antialiasing, true);
+      const QRect r = opt->rect;
+      const bool up = (pe == PE_IndicatorSpinUp || pe == PE_IndicatorArrowUp);
+      const qreal cx = r.center().x();
+      const qreal cy = r.center().y();
+      QPainterPath path;
+      if (up) {
+        path.moveTo(cx, cy - 3.6);
+        path.lineTo(cx + 5.2, cy + 2.6);
+        path.lineTo(cx - 5.2, cy + 2.6);
+      } else {
+        path.moveTo(cx, cy + 3.6);
+        path.lineTo(cx + 5.2, cy - 2.6);
+        path.lineTo(cx - 5.2, cy - 2.6);
+      }
+      path.closeSubpath();
+      p->setPen(Qt::NoPen);
+      p->setBrush(opt->state.testFlag(State_Enabled) ? QColor(0x1E, 0x29, 0x3B)
+                                                     : QColor(0x94, 0xA3, 0xB8));
+      p->drawPath(path);
+      p->restore();
+      return;
+    }
+    QProxyStyle::drawPrimitive(pe, opt, p, w);
+  }
 };
 
 void setGroup(QPalette& pal, QPalette::ColorGroup g, const Tokens& t, bool disabled) {
   const QColor text = disabled ? t.inkDisabled : t.ink;
-  pal.setColor(g, QPalette::Window, t.sky1);
+  pal.setColor(g, QPalette::Window, t.sky4);
   pal.setColor(g, QPalette::WindowText, text);
   pal.setColor(g, QPalette::Base, disabled ? t.sky0 : Qt::white);
   pal.setColor(g, QPalette::AlternateBase, disabled ? t.sky2 : t.sky0);
   pal.setColor(g, QPalette::Text, text);
-  pal.setColor(g, QPalette::Button, disabled ? t.sky2 : t.sky1);
+  pal.setColor(g, QPalette::Button, disabled ? t.sky4 : Qt::white);
   pal.setColor(g, QPalette::ButtonText, text);
   pal.setColor(g, QPalette::BrightText, text);
   pal.setColor(g, QPalette::Highlight, disabled ? t.sky3 : t.sky5);
@@ -115,6 +193,25 @@ QString loadStyleSheet() {
 void apply(QApplication* app) {
   if (!app)
     return;
+  const QStringList fontCands = {
+      QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("data/fonts/PretendardGOV-Regular.otf")),
+      QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../data/fonts/PretendardGOV-Regular.otf")),
+      QDir::current().filePath(QStringLiteral("data/fonts/PretendardGOV-Regular.otf")),
+  };
+  for (const QString& fp : fontCands) {
+    if (QFile::exists(fp) && QFontDatabase::addApplicationFont(fp) >= 0)
+      break;
+  }
+  QFont ui(QStringLiteral("Pretendard GOV"));
+  if (ui.exactMatch() || QFontInfo(ui).family().contains(QLatin1String("Pretendard"))) {
+    ui.setPixelSize(13);
+    app->setFont(ui);
+  } else {
+    QFont fallback(QStringLiteral("Malgun Gothic"));
+    fallback.setPixelSize(13);
+    app->setFont(fallback);
+  }
+  app->setStyle(new ChromeStyle);
   app->setPalette(palette());
   app->setStyleSheet(loadStyleSheet());
 }
@@ -136,7 +233,7 @@ void excludeMapSurface(QWidget* w) {
 
 QString colorSwatchStyle(const QColor& fill) {
   const QColor use = fill.isValid() ? fill : QColor(Qt::white);
-  return QStringLiteral("background-color: %1; border: 2px solid #000000; border-radius: 4px;")
+  return QStringLiteral("background-color: %1; border: 1px solid #E5E7EB; border-radius: 8px;")
       .arg(use.name());
 }
 

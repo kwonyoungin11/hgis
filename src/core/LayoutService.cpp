@@ -537,10 +537,10 @@ LayoutService::SheetChromeRects LayoutService::standardSheetChrome(const QRectF&
   out.scaleLabel = QRectF(map.left(), out.scaleBar.bottom() + kLabelGap, kLabelW, kLabelH);
   out.north = QRectF(map.right() - kNorthW, rowTop, kNorthW, kNorthH);
 
-  const double crsLeft = out.scaleBar.right() + kInner;
-  const double crsRight = out.north.left() - kInner;
-  const double crsW = std::max(8.0, crsRight - crsLeft);
-  out.crs = QRectF(crsLeft, rowTop + (kBarH - kCrsH) * 0.5, crsW, kCrsH);
+  const double crsLeft = out.scaleLabel.right() + 8.0;
+  const double crsRight = out.north.left() - 6.0;
+  const double crsW = std::max(24.0, crsRight - crsLeft);
+  out.crs = QRectF(crsLeft, out.scaleLabel.top(), crsW, kCrsH);
 
   auto clampOnPage = [&](QRectF& r) {
     if (r.top() < map.bottom())

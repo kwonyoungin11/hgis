@@ -15,6 +15,7 @@
 #include "core/WorkflowGuide.h"
 
 #include <algorithm>
+#include <functional>
 #include <QApplication>
 #include <QAction>
 #include <QDockWidget>
@@ -66,8 +67,8 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QTimer>
-#include <QFileSystemModel>
-#include <QTreeView>
+#include <QListWidget>
+#include <QListWidgetItem>
 #include <QSplitter>
 #include <QFrame>
 #include <QStandardPaths>
@@ -75,6 +76,7 @@
 #include <QPalette>
 #include <QUrl>
 #include <QMimeData>
+#include <QDrag>
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QHBoxLayout>
@@ -278,7 +280,7 @@ void MainWindow::buildMenus() {
 
   auto* mainTb = addToolBar(QStringLiteral("주요"));
   mainTb->setObjectName(QStringLiteral("mainToolbar"));
-  mainTb->setIconSize(QSize(28, 28));
+  mainTb->setIconSize(QSize(25, 25));
   mainTb->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   mainTb->setMovable(false);
   mainTb->setFloatable(false);
@@ -288,12 +290,21 @@ void MainWindow::buildMenus() {
     a->setToolTip(tip);
     return a;
   };
-  addIcon(QStringLiteral("new"), QStringLiteral("새조사"),
+  QAction* actNew = addIcon(QStringLiteral("new"), QStringLiteral("새조사"),
           QStringLiteral("오늘 현장 조사를 새로 만듭니다"), &MainWindow::newSurvey);
-  addIcon(QStringLiteral("open"), QStringLiteral("열기"),
+  QAction* actOpen = addIcon(QStringLiteral("open"), QStringLiteral("열기"),
           QStringLiteral("저장한 조사를 엽니다"), &MainWindow::openProject);
-  addIcon(QStringLiteral("save"), QStringLiteral("저장"),
+  QAction* actSave = addIcon(QStringLiteral("save"), QStringLiteral("저장"),
           QStringLiteral("지금 조사를 저장합니다"), &MainWindow::saveProject);
+  auto paintPrimary = [mainTb](QAction* act, const QString& iconId) {
+    if (auto* b = qobject_cast<QToolButton*>(mainTb->widgetForAction(act))) {
+      b->setObjectName(QStringLiteral("btnPrimary"));
+      b->setIcon(KaIcons::icon(iconId, QColor(255, 255, 255)));
+    }
+  };
+  paintPrimary(actNew, QStringLiteral("new"));
+  paintPrimary(actOpen, QStringLiteral("open"));
+  paintPrimary(actSave, QStringLiteral("save"));
   mainTb->addSeparator();
   addIcon(QStringLiteral("satellite"), QStringLiteral("위성"),
           QStringLiteral("VWorld 위성 사진을 올립니다"), &MainWindow::addBasemapVworldSat);
@@ -392,7 +403,7 @@ void MainWindow::buildMenus() {
 
   m_subToolbar = addToolBar(QStringLiteral("세부도구"));
   m_subToolbar->setObjectName(QStringLiteral("subToolbar"));
-  m_subToolbar->setIconSize(QSize(22, 22));
+  m_subToolbar->setIconSize(QSize(20, 20));
   m_subToolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
   m_subToolbar->setMovable(false);
   m_subToolbar->setVisible(false);
@@ -548,6 +559,7 @@ void MainWindow::buildUi() {
   m_canvas->setParallelRenderingEnabled(true);
   m_canvas->setMapUpdateInterval(60);
   m_canvas->setPreviewJobsEnabled(true);
+  m_canvas->setAcceptDrops(true);
   m_canvas->setSegmentationTolerance(2.0);
   const QgsCoordinateReferenceSystem crs(m_workCrs);
   m_canvas->setDestinationCrs(crs);
@@ -652,7 +664,7 @@ void MainWindow::buildUi() {
   auto* filesLay = new QVBoxLayout(filesCard);
   filesLay->setContentsMargins(10, 10, 10, 10);
   filesLay->setSpacing(8);
-  auto* capFiles = new QLabel(QStringLiteral("조사 파일"), filesCard);
+  auto* capFiles = new QLabel(QStringLiteral("내 컴퓨터"), filesCard);
   capFiles->setObjectName(QStringLiteral("cardCaption"));
   capFiles->setProperty("class", QStringLiteral("cardCaptionFiles"));
   auto* pathBar = new QHBoxLayout();
@@ -660,7 +672,22 @@ void MainWindow::buildUi() {
   auto* btnPc = new QToolButton(filesCard);
   btnPc->setText(QStringLiteral("내PC"));
   btnPc->setObjectName(QStringLiteral("btnBrowsePc"));
-  connect(btnPc, &QToolButton::clicked, this, [this]() { goFileBrowserRoot(QStringLiteral("")); });
+  connect(btnPc, &QToolButton::clicked, this, [this]() { goFileBrowserRoot(QString()); });
+  auto* btnUp = new QToolButton(filesCard);
+  btnUp->setText(QStringLiteral("위로"));
+  btnUp->setObjectName(QStringLiteral("btnBrowseUp"));
+  connect(btnUp, &QToolButton::clicked, this, [this]() {
+    if (m_browserPath.isEmpty()) {
+      goFileBrowserRoot(QString());
+      return;
+    }
+    const QDir d(m_browserPath);
+    const QString parent = QDir::cleanPath(d.absolutePath() + QStringLiteral("/.."));
+    if (parent == QDir::cleanPath(m_browserPath) || parent.length() < 3)
+      goFileBrowserRoot(QString());
+    else
+      goFileBrowserRoot(parent);
+  });
   auto* btnC = new QToolButton(filesCard);
   btnC->setText(QStringLiteral("C:\\"));
   btnC->setObjectName(QStringLiteral("btnBrowseC"));
@@ -682,6 +709,7 @@ void MainWindow::buildUi() {
   btnPick->setObjectName(QStringLiteral("btnBrowseFolder"));
   connect(btnPick, &QToolButton::clicked, this, &MainWindow::browseDataFolder);
   pathBar->addWidget(btnPc);
+  pathBar->addWidget(btnUp);
   pathBar->addWidget(btnC);
   pathBar->addWidget(btnDocs);
   pathBar->addWidget(btnDesk);
@@ -695,7 +723,6 @@ void MainWindow::buildUi() {
   filesLay->addWidget(capFiles);
   filesLay->addLayout(pathBar);
   filesLay->addWidget(filesInner, 1);
-  filesCard->hide();
 
   auto* layersCard = new QFrame(central);
   layersCard->setObjectName(QStringLiteral("layersCard"));
@@ -707,8 +734,24 @@ void MainWindow::buildUi() {
   auto* layersInner = new QFrame(layersCard);
   layersInner->setObjectName(QStringLiteral("layersInner"));
   auto* layersInnerLay = new QVBoxLayout(layersInner);
-  layersInnerLay->setContentsMargins(6, 6, 6, 6);
+  layersInnerLay->setContentsMargins(8, 8, 8, 8);
   layersInnerLay->addWidget(m_layerTree, 1);
+  m_layerEmpty = new QLabel(
+      QStringLiteral("등록된 지도가 없습니다.\n위 폴더에서 SHP·DXF·DWG를 끌어 넣거나\n위성·지적을 올리세요."),
+      layersInner);
+  m_layerEmpty->setObjectName(QStringLiteral("emptyState"));
+  m_layerEmpty->setAlignment(Qt::AlignCenter);
+  m_layerEmpty->setWordWrap(true);
+  layersInnerLay->addWidget(m_layerEmpty, 1);
+#if KA_HGIS_HAS_QGIS
+  connect(QgsProject::instance(), &QgsProject::layersAdded, this, [this](const QList<QgsMapLayer*>&) {
+    refreshLayerEmptyState();
+  });
+  connect(QgsProject::instance(), &QgsProject::layersRemoved, this, [this](const QStringList&) {
+    refreshLayerEmptyState();
+  });
+#endif
+  refreshLayerEmptyState();
   auto* bottomBar = new QHBoxLayout();
   bottomBar->setSpacing(6);
   bottomBar->addWidget(addBtn);
@@ -727,11 +770,11 @@ void MainWindow::buildUi() {
   leftSplit->setChildrenCollapsible(false);
   leftSplit->addWidget(filesCard);
   leftSplit->addWidget(layersCard);
-  leftSplit->setStretchFactor(0, 1);
-  leftSplit->setStretchFactor(1, 5);
-  leftSplit->setSizes({0, 420});
-  leftSplit->setMinimumWidth(200);
-  leftSplit->setMaximumWidth(280);
+  leftSplit->setStretchFactor(0, 2);
+  leftSplit->setStretchFactor(1, 3);
+  leftSplit->setSizes({200, 280});
+  leftSplit->setMinimumWidth(220);
+  leftSplit->setMaximumWidth(340);
 
   auto* mapCard = new QFrame(central);
   mapCard->setObjectName(QStringLiteral("mapCard"));
@@ -961,7 +1004,8 @@ void MainWindow::openLayoutDesigner() {
   m_drawingStudio->show();
   m_drawingStudio->raise();
   m_drawingStudio->activateWindow();
-  statusBar()->showMessage(QStringLiteral("빈 종이에서 끌어 지도 칸을 만드세요."), 6000);
+  m_drawingStudio->refreshMapFromProject();
+  statusBar()->showMessage(QStringLiteral("지금 지도가 용지에 올라갔습니다."), 6000);
 #endif
 }
 
@@ -1033,9 +1077,23 @@ void MainWindow::newSurvey() {
   LayoutService::ensureDefaultLayouts(QgsProject::instance());
   applyStartupMap();
 #endif
+  if (auto* b86 = findChild<QToolButton*>(QStringLiteral("btnCrs5186")))
+    b86->setChecked(!m_workCrs.contains(QLatin1String("5187")));
+  if (auto* b87 = findChild<QToolButton*>(QStringLiteral("btnCrs5187")))
+    b87->setChecked(m_workCrs.contains(QLatin1String("5187")));
   setWindowTitle(QStringLiteral("고고학 전용 HGIS — %1").arg(name));
   updateNextActionStatus();
   refreshWorkPanel();
+}
+
+void MainWindow::refreshLayerEmptyState() {
+#if KA_HGIS_HAS_QGIS
+  const bool empty = !QgsProject::instance() || QgsProject::instance()->mapLayers().isEmpty();
+  if (m_layerEmpty) m_layerEmpty->setVisible(empty);
+  if (m_layerTree) m_layerTree->setVisible(!empty);
+#else
+  if (m_layerEmpty) m_layerEmpty->setVisible(true);
+#endif
 }
 
 void MainWindow::applyStartupMap() {
@@ -1388,20 +1446,27 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
     }
   }
 
-  const bool onLayerDrop = m_layerTree &&
-      (watched == m_layerTree || watched == m_layerTree->viewport());
+  const bool onLayerDrop = (m_layerTree &&
+      (watched == m_layerTree || watched == m_layerTree->viewport())) ||
+      (m_canvas && (watched == m_canvas || watched == m_canvas->viewport()));
   if (onLayerDrop) {
     if (event->type() == QEvent::DragEnter || event->type() == QEvent::DragMove) {
       auto* de = static_cast<QDragEnterEvent*>(event);
-      if (de->mimeData() && de->mimeData()->hasUrls()) {
+      const bool fromBrowser = de->source() == m_fileBrowser ||
+                               (m_fileBrowser && de->source() == m_fileBrowser->viewport());
+      if ((de->mimeData() && de->mimeData()->hasUrls()) || fromBrowser) {
         de->acceptProposedAction();
         return true;
       }
     }
     if (event->type() == QEvent::Drop) {
       auto* de = static_cast<QDropEvent*>(event);
-      if (de->mimeData() && de->mimeData()->hasUrls()) {
-        tryAddDroppedUrls(de->mimeData()->urls());
+      bool ok = false;
+      if (de->mimeData() && de->mimeData()->hasUrls())
+        ok = tryAddDroppedUrls(de->mimeData()->urls());
+      if (!ok)
+        ok = tryAddDroppedPaths(selectedBrowserFiles());
+      if (ok) {
         de->acceptProposedAction();
         return true;
       }
@@ -1659,6 +1724,7 @@ void MainWindow::loadSurveyLayers(const QString& gpkgOrStub) {
     LayerOps::zoomToKorea(m_canvas, m_workCrs);
     m_canvas->refresh();
   }
+  refreshLayerEmptyState();
 #else
   Q_UNUSED(gpkgOrStub);
 #endif
@@ -1858,6 +1924,35 @@ void MainWindow::startAttributeEditTool() {
 
 namespace {
 
+class FileListView : public QListWidget {
+public:
+  explicit FileListView(QWidget* parent = nullptr) : QListWidget(parent) {
+    setDragEnabled(true);
+    setDragDropMode(QAbstractItemView::DragOnly);
+    setDefaultDropAction(Qt::CopyAction);
+    setSelectionMode(QAbstractItemView::ExtendedSelection);
+    setUniformItemSizes(true);
+    setIconSize(QSize(0, 0));
+  }
+
+protected:
+  void startDrag(Qt::DropActions) override {
+    QList<QUrl> urls;
+    const auto items = selectedItems();
+    for (QListWidgetItem* it : items) {
+      if (!it || it->data(Qt::UserRole + 1).toBool()) continue;
+      const QString p = it->data(Qt::UserRole).toString();
+      if (!p.isEmpty()) urls.append(QUrl::fromLocalFile(p));
+    }
+    if (urls.isEmpty()) return;
+    auto* md = new QMimeData;
+    md->setUrls(urls);
+    QDrag drag(this);
+    drag.setMimeData(md);
+    drag.exec(Qt::CopyAction);
+  }
+};
+
 void kaPaintColorButton(QPushButton* b, const QColor& c, const QString& suffix) {
   if (!b) return;
   b->setStyleSheet(KaTheme::colorSwatchStyle(c));
@@ -1867,10 +1962,10 @@ void kaPaintColorButton(QPushButton* b, const QColor& c, const QString& suffix) 
 }
 
 QPushButton* kaMakeColorButton(QWidget* parent, const QColor& c, const QString& suffix,
-                               const QString& pickerTitle) {
+                               const QString& pickerTitle, const std::function<void()>& onChanged = {}) {
   auto* b = new QPushButton(parent);
   kaPaintColorButton(b, c.isValid() && c.alpha() > 0 ? c : QColor(22, 163, 74, 160), suffix);
-  QObject::connect(b, &QPushButton::clicked, b, [b, suffix, pickerTitle]() {
+  QObject::connect(b, &QPushButton::clicked, b, [b, suffix, pickerTitle, onChanged]() {
     QColorDialog picker(b->property("kaColor").value<QColor>(), b->window());
     picker.setOption(QColorDialog::DontUseNativeDialog, true);
     picker.setOption(QColorDialog::ShowAlphaChannel, true);
@@ -1879,6 +1974,7 @@ QPushButton* kaMakeColorButton(QWidget* parent, const QColor& c, const QString& 
     const QColor picked = picker.selectedColor();
     if (!picked.isValid()) return;
     kaPaintColorButton(b, picked, suffix);
+    if (onChanged) onChanged();
   });
   return b;
 }
@@ -1899,39 +1995,17 @@ QDoubleSpinBox* kaMakeArrowSpin(QWidget* parent, QWidget** rowOut, double minV, 
   auto* row = new QWidget(parent);
   auto* h = new QHBoxLayout(row);
   h->setContentsMargins(0, 0, 0, 0);
-  h->setSpacing(6);
+  h->setSpacing(0);
   auto* spin = new QDoubleSpinBox(row);
-  spin->setButtonSymbols(QAbstractSpinBox::NoButtons);
+  spin->setButtonSymbols(QAbstractSpinBox::UpDownArrows);
   spin->setRange(minV, maxV);
   spin->setSingleStep(step);
   spin->setDecimals(decimals);
   spin->setSuffix(QStringLiteral(" mm"));
   spin->setValue(value);
-  spin->setMinimumHeight(40);
-  spin->setAlignment(Qt::AlignCenter);
-  auto* arrows = new QWidget(row);
-  auto* av = new QVBoxLayout(arrows);
-  av->setContentsMargins(0, 0, 0, 0);
-  av->setSpacing(2);
-  const QString arrowQss = QStringLiteral(
-      "QPushButton { font-size:11px; font-weight:900; color:#0F172A; min-width:36px; max-width:36px;"
-      " background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #C5E8F8, stop:1 #1878B8);"
-      " border:1px solid #000000; border-top:1px solid #FFFFFF; border-bottom:2px solid #000000; }"
-      "QPushButton:pressed { background:#0F5F9A; }");
-  auto* up = new QPushButton(QStringLiteral("▲"), arrows);
-  auto* down = new QPushButton(QStringLiteral("▼"), arrows);
-  up->setFixedSize(36, 19);
-  down->setFixedSize(36, 19);
-  up->setCursor(Qt::PointingHandCursor);
-  down->setCursor(Qt::PointingHandCursor);
-  up->setStyleSheet(arrowQss + QStringLiteral("QPushButton { border-top-left-radius:6px; border-top-right-radius:6px; }"));
-  down->setStyleSheet(arrowQss + QStringLiteral("QPushButton { border-bottom-left-radius:6px; border-bottom-right-radius:6px; }"));
-  QObject::connect(up, &QPushButton::clicked, spin, [spin]() { spin->stepUp(); });
-  QObject::connect(down, &QPushButton::clicked, spin, [spin]() { spin->stepDown(); });
-  av->addWidget(up);
-  av->addWidget(down);
+  spin->setMinimumHeight(29);
+  spin->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
   h->addWidget(spin, 1);
-  h->addWidget(arrows, 0, Qt::AlignVCenter);
   if (rowOut) *rowOut = row;
   return spin;
 }
@@ -2025,6 +2099,22 @@ void MainWindow::editCurrentLayerStyle() {
     root->addWidget(catCheck);
   }
 
+  auto applyLive = [this, layer, fillBtn, strokeBtn, noFillCheck, noStrokeCheck, widthSpin,
+                    markerSpin, markerMm, catCheck]() {
+    if (catCheck && catCheck->isChecked()) {
+      LayerOps::applyFeaturePolyStyle(layer);
+    } else {
+      const QColor outFill = fillBtn ? fillBtn->property("kaColor").value<QColor>() : QColor();
+      const QColor outStroke = strokeBtn->property("kaColor").value<QColor>();
+      LayerOps::applySimpleVectorStyle(layer, outFill, outStroke, widthSpin->value(),
+                                       markerSpin ? markerSpin->value() : markerMm,
+                                       noFillCheck && noFillCheck->isChecked(),
+                                       noStrokeCheck && noStrokeCheck->isChecked());
+    }
+    if (m_canvas) m_canvas->refresh();
+    if (m_drawingStudio) m_drawingStudio->refreshMapFromProject();
+  };
+
   auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dlg);
   buttons->button(QDialogButtonBox::Save)->setText(QStringLiteral("적용"));
   buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("취소"));
@@ -2032,39 +2122,36 @@ void MainWindow::editCurrentLayerStyle() {
   connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
   connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
 
-  auto syncVisible = [&dlg, fillBox, strokeBox, widthBox, noFillCheck, noStrokeCheck]() {
+  auto syncVisible = [&dlg, fillBox, strokeBox, widthBox, noFillCheck, noStrokeCheck, applyLive]() {
     const bool nf = noFillCheck && noFillCheck->isChecked();
     const bool ns = noStrokeCheck && noStrokeCheck->isChecked();
     if (fillBox) fillBox->setVisible(!nf);
     if (strokeBox) strokeBox->setVisible(!ns);
     if (widthBox) widthBox->setVisible(!ns);
     dlg.adjustSize();
+    applyLive();
   };
   if (noFillCheck) connect(noFillCheck, &QCheckBox::toggled, &dlg, syncVisible);
   connect(noStrokeCheck, &QCheckBox::toggled, &dlg, syncVisible);
+  connect(widthSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), &dlg,
+          [applyLive](double) { applyLive(); });
+  if (markerSpin)
+    connect(markerSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), &dlg,
+            [applyLive](double) { applyLive(); });
+  if (catCheck)
+    connect(catCheck, &QCheckBox::toggled, &dlg, [applyLive](bool) { applyLive(); });
+  if (fillBtn)
+    connect(fillBtn, &QPushButton::clicked, &dlg, [applyLive]() { applyLive(); });
+  connect(strokeBtn, &QPushButton::clicked, &dlg, [applyLive]() { applyLive(); });
   syncVisible();
 
-  if (dlg.exec() != QDialog::Accepted) return;
-
-  if (catCheck && catCheck->isChecked()) {
-    if (LayerOps::applyFeaturePolyStyle(layer)) {
-      if (m_canvas) m_canvas->refresh();
-      statusBar()->showMessage(QStringLiteral("종류별 색 구분 적용: %1").arg(layer->name()), 5000);
-    }
+  if (dlg.exec() != QDialog::Accepted) {
+    LayerOps::applySimpleVectorStyle(layer, fill, stroke, widthMm, markerMm, noFill, noStroke);
+    if (m_canvas) m_canvas->refresh();
+    if (m_drawingStudio) m_drawingStudio->refreshMapFromProject();
     return;
   }
-
-  const QColor outFill = fillBtn ? fillBtn->property("kaColor").value<QColor>() : fill;
-  const QColor outStroke = strokeBtn->property("kaColor").value<QColor>();
-  const bool outNoFill = noFillCheck && noFillCheck->isChecked();
-  const bool outNoStroke = noStrokeCheck->isChecked();
-  const double markerVal = markerSpin ? markerSpin->value() : markerMm;
-  if (!LayerOps::applySimpleVectorStyle(layer, outFill, outStroke, widthSpin->value(),
-                                        markerVal, outNoFill, outNoStroke)) {
-    QMessageBox::warning(this, QStringLiteral("모양"), QStringLiteral("스타일 적용 실패"));
-    return;
-  }
-  if (m_canvas) m_canvas->refresh();
+  applyLive();
   statusBar()->showMessage(QStringLiteral("면·선 색 적용: %1").arg(layer->name()), 5000);
 #else
   QMessageBox::information(this, QStringLiteral("모양"), QStringLiteral("QGIS 빌드 필요"));
@@ -3006,124 +3093,94 @@ void MainWindow::configureVworldKey() {
 }
 
 void MainWindow::setupFileBrowser() {
-  m_fsModel = new QFileSystemModel(this);
-  m_fsModel->setFilter(QDir::AllDirs | QDir::Files | QDir::NoDotAndDotDot | QDir::Drives);
-  m_fsModel->setNameFilters({QStringLiteral("*.shp"), QStringLiteral("*.gpkg"),
-                             QStringLiteral("*.geojson"), QStringLiteral("*.json"),
-                             QStringLiteral("*.tif"), QStringLiteral("*.tiff")});
-  m_fsModel->setNameFilterDisables(false);
-  m_fileBrowser = new QTreeView(this);
+  auto* view = new FileListView(this);
+  m_fileBrowser = view;
   m_fileBrowser->setObjectName(QStringLiteral("fileBrowser"));
-  m_fileBrowser->setModel(m_fsModel);
-  m_fileBrowser->setHeaderHidden(true);
-  for (int c = 1; c < m_fsModel->columnCount(); ++c)
-    m_fileBrowser->hideColumn(c);
-  m_fileBrowser->setDragEnabled(true);
-  m_fileBrowser->setSelectionMode(QAbstractItemView::ExtendedSelection);
-  m_fileBrowser->setAnimated(false);
-  m_fileBrowser->setIndentation(18);
-  m_fileBrowser->setUniformRowHeights(true);
-  m_fileBrowser->setTextElideMode(Qt::ElideMiddle);
-  connect(m_fileBrowser, &QTreeView::doubleClicked, this, &MainWindow::onFileBrowserActivated);
-
-  QString start = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-  if (start.isEmpty() || !QDir(start).exists())
-    start = QDir::homePath();
-  if (start.isEmpty() || !QDir(start).exists())
-    start = QStringLiteral("C:/");
-  m_fsModel->setRootPath(start);
-  goFileBrowserRoot(start);
+  connect(m_fileBrowser, &QListWidget::itemDoubleClicked, this, &MainWindow::onFileBrowserActivated);
+  goFileBrowserRoot(QString());
 }
 
 QString MainWindow::resolvedDesktopPath() {
-  QStringList candidates;
-  candidates << QStandardPaths::writableLocation(QStandardPaths::DesktopLocation)
-             << (QDir::homePath() + QStringLiteral("/Desktop"))
-             << (QDir::homePath() + QStringLiteral("/OneDrive/Desktop"))
-             << (QDir::homePath() + QStringLiteral("/OneDrive/바탕 화면"));
-
-  const QStringList scanRoots = {QDir::homePath(), QDir::homePath() + QStringLiteral("/OneDrive")};
-  for (const QString& root : scanRoots) {
-    QDir d(root);
-    if (!d.exists()) continue;
-    const QFileInfoList dirs = d.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
-    for (const QFileInfo& fi : dirs) {
-      const QString n = fi.fileName();
-      if (n.compare(QLatin1String("Desktop"), Qt::CaseInsensitive) == 0 ||
-          n.contains(QStringLiteral("바탕")))
-        candidates.prepend(fi.absoluteFilePath());
-    }
-  }
+  static QString cached;
+  if (!cached.isEmpty() && QFileInfo(cached).isDir())
+    return cached;
+  const QStringList candidates = {
+      QStandardPaths::writableLocation(QStandardPaths::DesktopLocation),
+      QDir::homePath() + QStringLiteral("/Desktop"),
+      QDir::homePath() + QStringLiteral("/OneDrive/Desktop"),
+      QDir::homePath() + QStringLiteral("/OneDrive/바탕 화면"),
+  };
   for (const QString& c : candidates) {
     if (c.isEmpty()) continue;
     const QFileInfo fi(c);
-    if (fi.exists() && fi.isDir())
-      return QDir::cleanPath(fi.absoluteFilePath());
+    if (fi.exists() && fi.isDir()) {
+      cached = QDir::cleanPath(fi.absoluteFilePath());
+      return cached;
+    }
   }
-  return QDir::homePath();
+  cached = QDir::homePath();
+  return cached;
 }
 
 void MainWindow::goFileBrowserRoot(const QString& path) {
-  if (!m_fsModel || !m_fileBrowser) return;
+  if (!m_fileBrowser) return;
+  m_fileBrowser->clear();
 
-  try {
-    m_fileBrowser->clearSelection();
-    if (m_fileBrowser->selectionModel())
-      m_fileBrowser->selectionModel()->clear();
+  QString p = QDir::fromNativeSeparators(path.trimmed());
+  if (p.length() == 2 && p[1] == QLatin1Char(':'))
+    p += QLatin1Char('/');
 
-    QString p = QDir::fromNativeSeparators(path.trimmed());
-    if (p.isEmpty()) {
-      m_fsModel->setRootPath(QStringLiteral(""));
-      const QModelIndex root = m_fsModel->index(QStringLiteral(""));
-      m_fileBrowser->setRootIndex(root.isValid() ? root : QModelIndex());
-      statusBar()->showMessage(QStringLiteral("내 PC 드라이브 목록 — 폴더를 열어 SHP/GPKG를 찾으세요"), 8000);
-      return;
-    }
+  auto addRow = [this](const QString& label, const QString& full, bool isDir) {
+    auto* it = new QListWidgetItem(label);
+    it->setData(Qt::UserRole, full);
+    it->setData(Qt::UserRole + 1, isDir);
+    it->setToolTip(QDir::toNativeSeparators(full));
+    m_fileBrowser->addItem(it);
+  };
 
-    if (p.length() == 2 && p[1] == QLatin1Char(':'))
-      p += QLatin1Char('/');
-    p = QDir::cleanPath(p);
-
-    QFileInfo fi(p);
-    if (!fi.exists() || !fi.isDir()) {
-      statusBar()->showMessage(
-          QStringLiteral("폴더 없음: %1 → 내 PC로 이동합니다").arg(QDir::toNativeSeparators(p)), 8000);
-      goFileBrowserRoot(QString());
-      return;
-    }
-    p = QDir::cleanPath(fi.absoluteFilePath());
-
-    m_fsModel->setRootPath(p);
-    auto applyRoot = [this, p]() -> bool {
-      if (!m_fsModel || !m_fileBrowser) return false;
-      const QModelIndex idx = m_fsModel->index(p);
-      if (!idx.isValid()) return false;
-      m_fileBrowser->setRootIndex(idx);
-      statusBar()->showMessage(
-          QStringLiteral("경로: %1  |  SHP·GPKG 더블클릭 또는 아래「지도 레이어」로 드래그")
-              .arg(QDir::toNativeSeparators(p)),
-          10000);
-      return true;
-    };
-
-    if (applyRoot()) return;
-
-    statusBar()->showMessage(
-        QStringLiteral("경로 여는 중: %1").arg(QDir::toNativeSeparators(p)), 5000);
-    QTimer::singleShot(50, this, [this, applyRoot]() {
-      if (applyRoot()) return;
-      QTimer::singleShot(200, this, [this, applyRoot]() {
-        if (!applyRoot()) {
-          statusBar()->showMessage(
-              QStringLiteral("바탕화면/폴더를 열 수 없습니다. 「폴더…」로 직접 선택하세요"), 8000);
-        }
-      });
-    });
-  } catch (const std::exception& ex) {
-    statusBar()->showMessage(QStringLiteral("폴더 이동 실패: %1").arg(QString::fromUtf8(ex.what())), 8000);
-  } catch (...) {
-    statusBar()->showMessage(QStringLiteral("폴더 이동 실패 — 내 PC 또는 폴더…를 사용하세요"), 8000);
+  if (p.isEmpty()) {
+    m_browserPath.clear();
+    const QFileInfoList drives = QDir::drives();
+    for (const QFileInfo& d : drives)
+      addRow(QDir::toNativeSeparators(d.absoluteFilePath()),
+             QDir::fromNativeSeparators(d.absoluteFilePath()), true);
+    statusBar()->showMessage(QStringLiteral("드라이브 목록 — 폴더를 더블클릭하세요"), 5000);
+    return;
   }
+
+  p = QDir::cleanPath(p);
+  const QFileInfo fi(p);
+  if (!fi.exists() || !fi.isDir()) {
+    statusBar()->showMessage(QStringLiteral("폴더 없음 → 드라이브 목록"), 5000);
+    goFileBrowserRoot(QString());
+    return;
+  }
+  m_browserPath = QDir::cleanPath(fi.absoluteFilePath());
+
+  QDir dir(m_browserPath);
+  dir.setFilter(QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks);
+  dir.setSorting(QDir::Name | QDir::IgnoreCase);
+  const QStringList folders = dir.entryList();
+  int n = 0;
+  for (const QString& name : folders) {
+    if (n >= 250) break;
+    if (name.compare(QLatin1String("$Recycle.Bin"), Qt::CaseInsensitive) == 0 ||
+        name.compare(QLatin1String("System Volume Information"), Qt::CaseInsensitive) == 0)
+      continue;
+    addRow(QStringLiteral("[폴더] ") + name, dir.absoluteFilePath(name), true);
+    ++n;
+  }
+  dir.setFilter(QDir::Files | QDir::NoSymLinks);
+  dir.setNameFilters({QStringLiteral("*.shp"), QStringLiteral("*.dxf"), QStringLiteral("*.dwg"),
+                      QStringLiteral("*.gpkg"), QStringLiteral("*.geojson"), QStringLiteral("*.json")});
+  const QStringList files = dir.entryList();
+  for (const QString& name : files) {
+    if (n >= 400) break;
+    addRow(name, dir.absoluteFilePath(name), false);
+    ++n;
+  }
+  statusBar()->showMessage(
+      QStringLiteral("경로: %1").arg(QDir::toNativeSeparators(m_browserPath)), 6000);
 }
 
 void MainWindow::browseDataFolder() {
@@ -3134,26 +3191,46 @@ void MainWindow::browseDataFolder() {
     goFileBrowserRoot(dir);
 }
 
-void MainWindow::onFileBrowserActivated(const QModelIndex& index) {
-  if (!m_fsModel) return;
-  const QString path = m_fsModel->filePath(index);
+void MainWindow::onFileBrowserActivated(QListWidgetItem* item) {
+  if (!item) return;
+  const QString path = item->data(Qt::UserRole).toString();
+  const bool isDir = item->data(Qt::UserRole + 1).toBool();
   if (path.isEmpty()) return;
-  if (m_fsModel->isDir(index)) {
+  if (isDir) {
     goFileBrowserRoot(path);
     return;
   }
   if (!addVectorFromPath(path))
     QMessageBox::warning(this, QStringLiteral("파일"),
-                         QStringLiteral("지도 레이어로 열 수 없습니다 (SHP/GPKG/GeoJSON):\n%1").arg(path));
+                         QStringLiteral("지도 레이어로 열 수 없습니다 (SHP/DXF/DWG/GPKG):\n%1").arg(path));
+}
+
+QStringList MainWindow::selectedBrowserFiles() const {
+  QStringList out;
+  if (!m_fileBrowser) return out;
+  const auto items = m_fileBrowser->selectedItems();
+  for (QListWidgetItem* it : items) {
+    if (!it || it->data(Qt::UserRole + 1).toBool()) continue;
+    const QString p = it->data(Qt::UserRole).toString();
+    if (!p.isEmpty()) out.append(p);
+  }
+  return out;
 }
 
 bool MainWindow::tryAddDroppedUrls(const QList<QUrl>& urls) {
-  int n = 0;
+  QStringList paths;
   for (const QUrl& u : urls) {
-    if (!u.isLocalFile()) continue;
-    const QString path = u.toLocalFile();
+    if (u.isLocalFile()) paths.append(u.toLocalFile());
+  }
+  return tryAddDroppedPaths(paths);
+}
+
+bool MainWindow::tryAddDroppedPaths(const QStringList& paths) {
+  int n = 0;
+  for (const QString& path : paths) {
     const QString low = path.toLower();
-    if (!(low.endsWith(QLatin1String(".shp")) || low.endsWith(QLatin1String(".gpkg")) ||
+    if (!(low.endsWith(QLatin1String(".shp")) || low.endsWith(QLatin1String(".dxf")) ||
+          low.endsWith(QLatin1String(".dwg")) || low.endsWith(QLatin1String(".gpkg")) ||
           low.endsWith(QLatin1String(".geojson")) || low.endsWith(QLatin1String(".json")) ||
           low.endsWith(QLatin1String(".tif")) || low.endsWith(QLatin1String(".tiff"))))
       continue;
@@ -3194,8 +3271,17 @@ bool MainWindow::addVectorFromPath(const QString& path) {
   } else {
     takeLayer(new QgsVectorLayer(path, baseTitle, QStringLiteral("ogr")), baseTitle);
   }
-  if (added.isEmpty())
+  if (added.isEmpty()) {
+    const QString low = path.toLower();
+    if (low.endsWith(QLatin1String(".dwg")) || low.endsWith(QLatin1String(".dxf"))) {
+      QMessageBox::warning(this, QStringLiteral("파일"),
+                           QStringLiteral("이 CAD 파일을 열 수 없습니다.\n"
+                                          "DXF는 보통 열리고, DWG는 버전/드라이버에 따라 안 열릴 수 있습니다.\n"
+                                          "AutoCAD에서 DXF로 저장한 뒤 다시 끌어 넣으세요.\n%1")
+                               .arg(QDir::toNativeSeparators(path)));
+    }
     return false;
+  }
   LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, m_workCrs);
   LayerOps::pruneEmptyLegendGroups(QgsProject::instance());
   if (m_canvas) {

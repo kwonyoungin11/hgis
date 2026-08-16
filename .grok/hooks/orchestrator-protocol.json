@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd.exe /d /c .grok\\hooks\\run.cmd prompt-inject",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd.exe /d /c .grok\\hooks\\run.cmd stop-gate",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -13,15 +13,15 @@ This product is a field HGIS on QGIS libraries (Architecture B). Map / layer / C
 3. ArcGIS words map through `docs/user/job-cards/arcgis-용어.md` and `docs/research/02-qgis-arcgis-pain-gain.md`. Do not clone ArcMap chrome.
 4. Prove the failure with a GIS check (layer in project? on canvas? CRS? scale? GetMap image has pixels?) then patch.
 
-## Roles (Grok subagents, not MCP)
+## Roles (Grok subagents)
 
-When the user reports a map problem, use at most these — read-only first:
+When the user reports a map problem, spawn these in parallel — read-only first — plus context7 / sequential-thinking:
 
 - **qgis-api**: cookbook + `Qgs*` wiring (addMapLayer, destinationCrs, WMS URI, extent)
 - **gis-protocol**: VWorld/WMS/WMTS/XYZ live or documented request
 - **field-check**: turn the screenshot into a pass/fail (e.g. 병산동 1:2000, 지적 선이 위성 위)
 
-Do not invent a fourth GIS theory. Do not re-enable MCP / skills / hooks.
+Use MCP and matching skills. Do not invent a fourth GIS theory.
 
 ## User is not a GIS engineer
 

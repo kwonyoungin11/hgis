@@ -12,8 +12,6 @@ class QToolButton;
 class QLineEdit;
 class QComboBox;
 class QEvent;
-class QTreeView;
-class QFileSystemModel;
 class ChecklistEngine;
 #if KA_HGIS_HAS_QGIS
 class QgsMapCanvas;
@@ -86,7 +84,7 @@ private slots:
   void runLocationSearch();
   void configureVworldKey();
   void rebuildLayouts();
-  void onFileBrowserActivated(const QModelIndex& index);
+  void onFileBrowserActivated(QListWidgetItem* item);
   void exportReportLayout();
   void browseDataFolder();
   void goFileBrowserRoot(const QString& path);
@@ -116,6 +114,8 @@ private:
   void clearSubToolbar();
   bool addVectorFromPath(const QString& path);
   bool tryAddDroppedUrls(const QList<QUrl>& urls);
+  bool tryAddDroppedPaths(const QStringList& paths);
+  QStringList selectedBrowserFiles() const;
   void loadSurveyLayers(const QString& gpkgOrStub);
   void applyStartupMap();
   void setWorkCrs(const QString& authId);
@@ -138,13 +138,15 @@ private:
   static QString attributeFieldLabelKo(const QString& fieldName);
 #endif
 
+  void refreshLayerEmptyState();
+  QLabel* m_layerEmpty = nullptr;
   QLabel* m_help = nullptr;
   QLabel* m_checkView = nullptr;
   QLabel* m_workHint = nullptr;
   QListWidget* m_workList = nullptr;
   QLineEdit* m_searchEdit = nullptr;
-  QTreeView* m_fileBrowser = nullptr;
-  QFileSystemModel* m_fsModel = nullptr;
+  QListWidget* m_fileBrowser = nullptr;
+  QString m_browserPath;
   ChecklistEngine* m_checklist = nullptr;
   LocationSearch* m_locator = nullptr;
   QString m_surveyPath;

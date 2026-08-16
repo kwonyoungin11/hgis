@@ -12,6 +12,8 @@
 #include <QApplication>
 #include <QAction>
 #include <QBrush>
+#include <QButtonGroup>
+#include <QCheckBox>
 #include <QColor>
 #include <QComboBox>
 #include <QDialog>
@@ -45,7 +47,9 @@
 #include <QPixmap>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QShowEvent>
 #include <QSizePolicy>
+#include <QGraphicsRectItem>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStatusBar>
@@ -55,7 +59,9 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include <qgis.h>
 #include <qgscoordinatereferencesystem.h>
+#include <qgspointxy.h>
 #include <qgscoordinatetransform.h>
 #include <qgsgui.h>
 #include <qgslayout.h>
@@ -66,15 +72,20 @@
 #include <qgslayoutitemlabel.h>
 #include <qgslayoutitemlegend.h>
 #include <qgslayoutitemmap.h>
+#include <qgslayoutitemmapgrid.h>
+#include <qgstextformat.h>
+#include <qgslayoutitempage.h>
 #include <qgslayoutitempicture.h>
 #include <qgslayoutitemscalebar.h>
 #include <qgslayoutmanager.h>
+#include <qgslayoutpagecollection.h>
 #include <qgslayoutview.h>
 #include <qgslayoutviewmouseevent.h>
 #include <qgslayoutviewtool.h>
 #include <qgslayoutviewtoolpan.h>
 #include <qgslayoutviewtoolselect.h>
 #include <qgslayertree.h>
+#include <qgslayertreenode.h>
 #include <qgslayertreelayer.h>
 #include <qgslayertreemodel.h>
 #include <qgslayertreeview.h>
@@ -95,6 +106,7 @@ constexpr const char* kIdNorth = "ka_north";
 constexpr const char* kIdScaleBar = "ka_scalebar";
 constexpr const char* kIdScale = "ka_scale";
 constexpr const char* kIdCrs = "ka_crs";
+constexpr const char* kGridAnnPrefix = "ka_grid_ann_";
 
 bool isLiveBasemapLayer(QgsMapLayer* layer) {
   if (!layer) return false;
@@ -550,30 +562,77 @@ void KaDrawingStudio::ensureLayoutGuiRegistered(QgsMapCanvas* mapCanvas) {
 
 bool KaDrawingStudio::promptPaper(QWidget* parent, double* widthMm, double* heightMm) {
   if (!widthMm || !heightMm) return false;
+  auto paperIcon = [](bool landscape) {
+    QPixmap pm(48, 48);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(QPen(QColor(15, 23, 42), 1.6));
+    p.setBrush(QColor(255, 255, 255));
+    if (landscape)
+      p.drawRoundedRect(QRectF(5, 14, 38, 22), 3, 3);
+    else
+      p.drawRoundedRect(QRectF(13, 4, 22, 40), 3, 3);
+    return QIcon(pm);
+  };
   QDialog dlg(parent);
   dlg.setWindowTitle(QStringLiteral("용지 설정"));
-  dlg.setMinimumWidth(360);
+  dlg.setMinimumWidth(400);
   auto* form = new QFormLayout(&dlg);
-  auto* paper = new QComboBox(&dlg);
-  paper->addItem(QStringLiteral("A4"), 0);
-  paper->addItem(QStringLiteral("A3"), 1);
-  paper->addItem(QStringLiteral("사용자 크기"), 2);
-  auto* orient = new QComboBox(&dlg);
-  orient->addItem(QStringLiteral("가로"), 0);
-  orient->addItem(QStringLiteral("세로"), 1);
+  auto makeChoice = [&dlg](const QString& text, const QIcon& icon, bool checked) {
+    auto* b = new QToolButton(&dlg);
+    b->setText(text);
+    if (!icon.isNull()) b->setIcon(icon);
+    b->setIconSize(QSize(28, 28));
+    b->setToolButtonStyle(icon.isNull() ? Qt::ToolButtonTextOnly : Qt::ToolButtonTextUnderIcon);
+    b->setCheckable(true);
+    b->setChecked(checked);
+    b->setCursor(Qt::PointingHandCursor);
+    b->setMinimumSize(88, 56);
+    return b;
+  };
+  auto* paperRow = new QWidget(&dlg);
+  auto* paperLay = new QHBoxLayout(paperRow);
+  paperLay->setContentsMargins(0, 0, 0, 0);
+  auto* btnA4 = makeChoice(QStringLiteral("A4"), QIcon(), true);
+  auto* btnA3 = makeChoice(QStringLiteral("A3"), QIcon(), false);
+  auto* btnCustom = makeChoice(QStringLiteral("직접 입력"), QIcon(), false);
+  auto* paperGroup = new QButtonGroup(&dlg);
+  paperGroup->setExclusive(true);
+  paperGroup->addButton(btnA4, 0);
+  paperGroup->addButton(btnA3, 1);
+  paperGroup->addButton(btnCustom, 2);
+  paperLay->addWidget(btnA4);
+  paperLay->addWidget(btnA3);
+  paperLay->addWidget(btnCustom);
+  paperLay->addStretch(1);
+
+  auto* orientRow = new QWidget(&dlg);
+  auto* orientLay = new QHBoxLayout(orientRow);
+  orientLay->setContentsMargins(0, 0, 0, 0);
+  auto* btnPort = makeChoice(QStringLiteral("세로"), paperIcon(false), true);
+  auto* btnLand = makeChoice(QStringLiteral("가로"), paperIcon(true), false);
+  auto* orientGroup = new QButtonGroup(&dlg);
+  orientGroup->setExclusive(true);
+  orientGroup->addButton(btnLand, 0);
+  orientGroup->addButton(btnPort, 1);
+  orientLay->addWidget(btnPort);
+  orientLay->addWidget(btnLand);
+  orientLay->addStretch(1);
+
   auto* w = new QDoubleSpinBox(&dlg);
   w->setRange(50.0, 2000.0);
   w->setDecimals(1);
   w->setSuffix(QStringLiteral(" mm"));
-  w->setValue(297.0);
+  w->setValue(210.0);
   auto* h = new QDoubleSpinBox(&dlg);
   h->setRange(50.0, 2000.0);
   h->setDecimals(1);
   h->setSuffix(QStringLiteral(" mm"));
-  h->setValue(210.0);
-  auto applyPreset = [paper, orient, w, h]() {
-    const int p = paper->currentData().toInt();
-    const bool land = orient->currentData().toInt() == 0;
+  h->setValue(297.0);
+  auto applyPreset = [paperGroup, orientGroup, w, h]() {
+    const int p = paperGroup->checkedId();
+    const bool land = orientGroup->checkedId() == 0;
     const bool custom = p == 2;
     w->setEnabled(custom);
     h->setEnabled(custom);
@@ -584,14 +643,16 @@ bool KaDrawingStudio::promptPaper(QWidget* parent, double* widthMm, double* heig
     w->setValue(pw);
     h->setValue(ph);
   };
-  connect(paper, QOverload<int>::of(&QComboBox::currentIndexChanged), &dlg, applyPreset);
-  connect(orient, QOverload<int>::of(&QComboBox::currentIndexChanged), &dlg, applyPreset);
+  QObject::connect(paperGroup, &QButtonGroup::idClicked, &dlg, [applyPreset](int) { applyPreset(); });
+  QObject::connect(orientGroup, &QButtonGroup::idClicked, &dlg, [applyPreset](int) { applyPreset(); });
   applyPreset();
-  form->addRow(QStringLiteral("용지"), paper);
-  form->addRow(QStringLiteral("방향"), orient);
+  form->addRow(QStringLiteral("용지"), paperRow);
+  form->addRow(QStringLiteral("방향"), orientRow);
   form->addRow(QStringLiteral("가로"), w);
   form->addRow(QStringLiteral("세로"), h);
-  auto* tip = new QLabel(QStringLiteral("확인하면 빈 용지가 열립니다. 드래그해서 지도 칸을 만드세요."), &dlg);
+  auto* tip = new QLabel(
+      QStringLiteral("확인하면 A4/A3 용지에 지도가 바로 올라갑니다. 격자 숫자는 칸 밖에 찍힙니다."),
+      &dlg);
   tip->setWordWrap(true);
   form->addRow(tip);
   auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
@@ -616,7 +677,7 @@ KaDrawingStudio::KaDrawingStudio(QgsProject* project, QgsMapCanvas* mapCanvas,
   ensureLayoutGuiRegistered(mapCanvas);
   ensureBlankLayout();
   buildUi();
-  beginDrawMapFrame();
+  autoPlaceDefaultSheet();
   auto* undoAct = new QAction(QStringLiteral("되돌리기"), this);
   undoAct->setShortcut(QKeySequence::Undo);
   undoAct->setShortcutContext(Qt::WindowShortcut);
@@ -629,10 +690,11 @@ void KaDrawingStudio::resetPaper(double widthMm, double heightMm) {
   m_paperH = heightMm;
   endActivateMap();
   ensureBlankLayout();
-  if (m_view) m_view->zoomFull();
-  beginDrawMapFrame();
+  m_paperFitPending = true;
+  zoomPaperVisible();
+  autoPlaceDefaultSheet();
   if (m_status)
-    m_status->setText(QStringLiteral("빈 용지입니다. 드래그해서 지도가 들어갈 칸을 그리세요."));
+    m_status->setText(QStringLiteral("용지에 지도를 올려 두었습니다. 축척을 맞추거나 그린곳 가운데를 누르세요."));
 }
 
 void KaDrawingStudio::ensureBlankLayout() {
@@ -659,6 +721,7 @@ void KaDrawingStudio::attachLayoutToView() {
   connect(ly, &QgsLayout::selectedItemChanged, this, &KaDrawingStudio::onLayoutSelectionChanged,
           Qt::UniqueConnection);
   updateInspector(nullptr);
+  updatePageOutline();
 }
 
 QgsPrintLayout* KaDrawingStudio::layout() const {
@@ -672,146 +735,68 @@ QgsLayoutItemMap* KaDrawingStudio::mapItem() const {
 }
 
 void KaDrawingStudio::buildUi() {
-  auto* tb = addToolBar(QStringLiteral("조판"));
-  tb->setObjectName(QStringLiteral("studioToolbar"));
-  tb->setMovable(false);
-  tb->setIconSize(QSize(26, 26));
-  tb->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-
-  auto addTb = [this, tb](const QString& iconId, const QString& text, const QString& tip, auto slot) {
-    QAction* a = tb->addAction(KaIcons::icon(iconId), text, this, slot);
-    a->setToolTip(tip);
-    return a;
-  };
-  addTb(QStringLiteral("layout_map_frame"), QStringLiteral("지도칸"),
-        QStringLiteral("용지에서 드래그해 지도가 들어갈 칸을 만듭니다"),
-        &KaDrawingStudio::beginDrawMapFrame);
-  addTb(QStringLiteral("layout_select"), QStringLiteral("선택"),
-        QStringLiteral("항목을 옮기거나 모서리를 끌어 크기를 바꿉니다"),
-        &KaDrawingStudio::useSelectTool);
-  addTb(QStringLiteral("layout_pan"), QStringLiteral("옮기기"),
-        QStringLiteral("용지를 잡아 옮깁니다"),
-        &KaDrawingStudio::usePanTool);
-  addTb(QStringLiteral("layout_zoom_full"), QStringLiteral("전체"),
-        QStringLiteral("용지 전체가 보이게 합니다"),
-        &KaDrawingStudio::zoomFull);
-  tb->addSeparator();
-  addTb(QStringLiteral("layout_activate"), QStringLiteral("지도조정"),
-        QStringLiteral("칸 안의 지도를 옮기고 확대합니다"),
-        &KaDrawingStudio::beginActivateMap);
-  addTb(QStringLiteral("layout_center"), QStringLiteral("가운데"),
-        QStringLiteral("그린 조사 도형이 칸 가운데에 오게 합니다"),
-        &KaDrawingStudio::centerSurveyInMap);
-  m_actEndAdjust = addTb(QStringLiteral("layout_activate_done"), QStringLiteral("조정끝"),
-                         QStringLiteral("지도 조정을 끝냅니다"),
-                         &KaDrawingStudio::endActivateMap);
-  m_actEndAdjust->setVisible(false);
-  tb->addSeparator();
-  tb->addAction(KaIcons::icon(QStringLiteral("trash")), QStringLiteral("삭제"), this,
-                &KaDrawingStudio::deleteSelectedItems)
-      ->setToolTip(QStringLiteral("선택한 항목을 지웁니다 (Delete)"));
-  tb->addSeparator();
-  addTb(QStringLiteral("pdf"), QStringLiteral("PDF"),
-        QStringLiteral("지금 용지를 PDF로 저장합니다"),
-        &KaDrawingStudio::savePdf);
-
   auto* root = new QWidget(this);
-  auto* rootLay = new QVBoxLayout(root);
+  auto* rootLay = new QHBoxLayout(root);
   rootLay->setContentsMargins(0, 0, 0, 0);
   rootLay->setSpacing(0);
 
-  auto* top = new QWidget(root);
-  top->setObjectName(QStringLiteral("sampleStrip"));
-  top->setFixedHeight(108);
-  auto* topLay = new QHBoxLayout(top);
-  topLay->setContentsMargins(8, 6, 8, 6);
-  topLay->setSpacing(8);
+  auto* leftCol = new QFrame(root);
+  leftCol->setObjectName(QStringLiteral("studioLeftCol"));
+  leftCol->setMinimumWidth(248);
+  leftCol->setMaximumWidth(300);
+  auto* leftLay = new QHBoxLayout(leftCol);
+  leftLay->setContentsMargins(6, 6, 0, 6);
+  leftLay->setSpacing(6);
 
-  auto* layerBox = new QWidget(top);
-  layerBox->setMinimumWidth(180);
-  layerBox->setMaximumWidth(240);
+  auto* layerBox = new QFrame(leftCol);
+  layerBox->setObjectName(QStringLiteral("layersCard"));
   auto* layerLay = new QVBoxLayout(layerBox);
-  layerLay->setContentsMargins(0, 0, 0, 0);
+  layerLay->setContentsMargins(8, 8, 8, 8);
   layerLay->setSpacing(4);
   auto* leftCap = new QLabel(QStringLiteral("레이어"), layerBox);
+  leftCap->setObjectName(QStringLiteral("cardCaption"));
   m_layerModel = new QgsLayerTreeModel(QgsProject::instance()->layerTreeRoot(), this);
   m_layerModel->setFlag(QgsLayerTreeModel::AllowNodeChangeVisibility, true);
   m_layerTree = new QgsLayerTreeView(layerBox);
   m_layerTree->setObjectName(QStringLiteral("layoutLayerTree"));
   m_layerTree->setModel(m_layerModel);
+  m_layerTree->setMinimumWidth(160);
   m_layerTree->setSelectionMode(QAbstractItemView::ExtendedSelection);
   connect(m_layerTree->selectionModel(), &QItemSelectionModel::selectionChanged,
           this, &KaDrawingStudio::syncMapFromLayers);
   connect(m_layerModel, &QAbstractItemModel::dataChanged, this, &KaDrawingStudio::syncMapFromLayers);
+  if (QgsLayerTree* tree = QgsProject::instance()->layerTreeRoot()) {
+    connect(tree, &QgsLayerTreeNode::visibilityChanged, this,
+            [this](QgsLayerTreeNode*) { syncMapFromLayers(); });
+  }
   layerLay->addWidget(leftCap);
   layerLay->addWidget(m_layerTree, 1);
-  topLay->addWidget(layerBox, 0);
-
-  auto* sampleBox = new QWidget(top);
-  auto* sampleLay = new QVBoxLayout(sampleBox);
-  sampleLay->setContentsMargins(0, 0, 0, 0);
-  sampleLay->setSpacing(4);
-  auto* sampleCap = new QLabel(QStringLiteral("넣을 것"), sampleBox);
-  sampleLay->addWidget(sampleCap);
-  auto* sampleRow = new QHBoxLayout;
-  sampleRow->setSpacing(8);
-
-  auto* legendBtn = makeRailTile(sampleBox, KaIcons::icon(QStringLiteral("layout_legend")),
-                                 QStringLiteral("범례"), QSize(32, 32));
-  connect(legendBtn, &QToolButton::clicked, this, &KaDrawingStudio::beginPlaceLegend);
-  m_cardLegend = nullptr;
-  sampleRow->addWidget(legendBtn);
-
-  struct NorthSample { const char* rel; const char* tip; int art; };
-  const NorthSample norths[] = {
-      {"", "글자 N", 0},
-      {"arrows/NorthArrow_02.svg", "화살", 1},
-      {"arrows/NorthArrow_04.svg", "나침반", 2},
-      {"wind_roses/WindRose_01.svg", "바람장미", 3},
+  auto* layerEmpty = new QLabel(
+      QStringLiteral("이 도면에 올라간 레이어가 없습니다.\n왼쪽 목록에서 켜거나, 본 창에서 위성을 올리세요."),
+      layerBox);
+  layerEmpty->setObjectName(QStringLiteral("emptyState"));
+  layerEmpty->setAlignment(Qt::AlignCenter);
+  layerEmpty->setWordWrap(true);
+  layerEmpty->setVisible(QgsProject::instance()->mapLayers().isEmpty());
+  layerLay->addWidget(layerEmpty);
+  auto syncEmpty = [this, layerEmpty]() {
+    const bool empty = !QgsProject::instance() || QgsProject::instance()->mapLayers().isEmpty();
+    if (layerEmpty) layerEmpty->setVisible(empty);
+    if (m_layerTree) m_layerTree->setVisible(!empty);
   };
-  for (const auto& ns : norths) {
-    auto* b = makeRailTile(sampleBox, northPreviewIcon(ns.art), QString::fromUtf8(ns.tip), QSize(40, 40));
-    const QString rel = QString::fromUtf8(ns.rel);
-    connect(b, &QToolButton::clicked, this, [this, rel]() { beginPlaceNorth(rel); });
-    sampleRow->addWidget(b);
-  }
+  connect(QgsProject::instance(), &QgsProject::layersAdded, this,
+          [syncEmpty](const QList<QgsMapLayer*>&) { syncEmpty(); });
+  connect(QgsProject::instance(), &QgsProject::layersRemoved, this,
+          [syncEmpty](const QStringList&) { syncEmpty(); });
+  syncEmpty();
 
-  struct BarSample { const char* style; const char* tip; };
-  const BarSample bars[] = {
-      {"Double Box", "쌍칸"},
-      {"Single Box", "외칸"},
-      {"Line Ticks Up", "눈금"},
-  };
-  for (const auto& bs : bars) {
-    auto* b = makeRailTile(sampleBox, scaleBarPreviewIcon(bs.style), QString::fromUtf8(bs.tip), QSize(48, 28));
-    const QString style = QString::fromUtf8(bs.style);
-    connect(b, &QToolButton::clicked, this, [this, style]() { beginPlaceScaleBar(style); });
-    sampleRow->addWidget(b);
-  }
-
-  auto* scaleLblBtn = makeRailTile(sampleBox, KaIcons::icon(QStringLiteral("layout_scale")),
-                                   QStringLiteral("축척글자"), QSize(32, 32));
-  connect(scaleLblBtn, &QToolButton::clicked, this, &KaDrawingStudio::beginPlaceScaleLabel);
-  sampleRow->addWidget(scaleLblBtn);
-
-  auto* crsBtn = makeRailTile(sampleBox, KaIcons::icon(QStringLiteral("crs")),
-                              QStringLiteral("좌표계"), QSize(32, 32));
-  connect(crsBtn, &QToolButton::clicked, this, &KaDrawingStudio::beginPlaceCrsLabel);
-  sampleRow->addWidget(crsBtn);
-  sampleRow->addStretch(1);
-  sampleLay->addLayout(sampleRow, 1);
-  topLay->addWidget(sampleBox, 1);
-
-  m_inspector = new QFrame(top);
+  m_inspector = new QFrame(layerBox);
   m_inspector->setObjectName(QStringLiteral("itemInspector"));
-  m_inspector->setMinimumWidth(220);
-  m_inspector->setMaximumWidth(280);
   auto* inspLay = new QVBoxLayout(m_inspector);
-  inspLay->setContentsMargins(8, 8, 8, 8);
+  inspLay->setContentsMargins(4, 4, 4, 4);
   inspLay->setSpacing(4);
   m_inspectorCap = new QLabel(m_inspector);
   inspLay->addWidget(m_inspectorCap);
-
   m_legendProps = new QWidget(m_inspector);
   auto* lp = new QFormLayout(m_legendProps);
   lp->setContentsMargins(0, 0, 0, 0);
@@ -828,9 +813,61 @@ void KaDrawingStudio::buildUi() {
   lp->addRow(QStringLiteral("글자"), m_legendFont);
   inspLay->addWidget(m_legendProps);
   m_inspector->hide();
-  topLay->addWidget(m_inspector, 0);
+  layerLay->addWidget(m_inspector, 0);
+  leftLay->addWidget(layerBox, 1);
 
-  m_adjustBar = new QFrame(root);
+  auto* toolRail = new QToolBar(leftCol);
+  toolRail->setObjectName(QStringLiteral("studioToolRail"));
+  toolRail->setOrientation(Qt::Vertical);
+  toolRail->setMovable(false);
+  toolRail->setFloatable(false);
+  toolRail->setIconSize(QSize(20, 20));
+  toolRail->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+  auto addTb = [this, toolRail](const QString& iconId, const QString& text, const QString& tip,
+                                auto slot) {
+    QAction* a = toolRail->addAction(KaIcons::icon(iconId), text, this, slot);
+    a->setToolTip(tip);
+    return a;
+  };
+  addTb(QStringLiteral("layout_map_frame"), QStringLiteral("지도칸\n만들기"),
+        QStringLiteral("용지에서 드래그해 지도가 들어갈 칸을 만듭니다"),
+        &KaDrawingStudio::beginDrawMapFrame);
+  addTb(QStringLiteral("layout_select"), QStringLiteral("고르기"),
+        QStringLiteral("항목을 고르고, 끌어 옮기거나 모서리로 크기를 바꿉니다"),
+        &KaDrawingStudio::useSelectTool);
+  addTb(QStringLiteral("layout_pan"), QStringLiteral("용지\n옮기기"),
+        QStringLiteral("용지 전체를 잡아 화면에서 옮깁니다"),
+        &KaDrawingStudio::usePanTool);
+  addTb(QStringLiteral("layout_zoom_full"), QStringLiteral("용지\n전체"),
+        QStringLiteral("용지가 화면에 크게 보이게 합니다"),
+        &KaDrawingStudio::zoomFull);
+  addTb(QStringLiteral("layout_activate"), QStringLiteral("지도\n밀기"),
+        QStringLiteral("칸 안의 지도를 밀고 휠로 확대합니다. 축척은 아래 숫자로 맞춥니다"),
+        &KaDrawingStudio::beginActivateMap);
+  addTb(QStringLiteral("layout_center"), QStringLiteral("그린곳\n가운데"),
+        QStringLiteral("지금 축척을 유지한 채, 그린 조사 도형을 칸 한가운데로 옮깁니다"),
+        &KaDrawingStudio::centerSurveyInMap);
+  addTb(QStringLiteral("crs"), QStringLiteral("격자\n설정"),
+        QStringLiteral("좌표 격자, 간격, 칸 밖 숫자를 설정합니다"),
+        &KaDrawingStudio::focusGridSettings);
+  m_actEndAdjust = addTb(QStringLiteral("layout_activate_done"), QStringLiteral("밀기\n끝"),
+                         QStringLiteral("지도 밀기를 끝냅니다"),
+                         &KaDrawingStudio::endActivateMap);
+  m_actEndAdjust->setVisible(false);
+  toolRail->addAction(KaIcons::icon(QStringLiteral("trash")), QStringLiteral("지우기"), this,
+                      &KaDrawingStudio::deleteSelectedItems)
+      ->setToolTip(QStringLiteral("고른 항목을 지웁니다 (Delete)"));
+  addTb(QStringLiteral("pdf"), QStringLiteral("PDF\n저장"),
+        QStringLiteral("지금 용지를 PDF 파일로 저장합니다"),
+        &KaDrawingStudio::savePdf);
+  leftLay->addWidget(toolRail, 0);
+
+  auto* right = new QWidget(root);
+  auto* rightLay = new QVBoxLayout(right);
+  rightLay->setContentsMargins(0, 0, 0, 0);
+  rightLay->setSpacing(0);
+
+  m_adjustBar = new QFrame(right);
   m_adjustBar->setObjectName(QStringLiteral("mapAdjustBar"));
   auto* barLay = new QHBoxLayout(m_adjustBar);
   barLay->setContentsMargins(12, 8, 12, 8);
@@ -847,7 +884,7 @@ void KaDrawingStudio::buildUi() {
   barLay->addWidget(btnDone);
   m_adjustBar->hide();
 
-  m_view = new QgsLayoutView(root);
+  m_view = new QgsLayoutView(right);
   m_view->setObjectName(QStringLiteral("layoutView"));
   KaTheme::excludeMapSurface(m_view);
   m_view->setFrameShape(QFrame::NoFrame);
@@ -868,10 +905,16 @@ void KaDrawingStudio::buildUi() {
           &KaDrawingStudio::syncScaleDecorations);
   attachLayoutToView();
 
-  m_scaleBar = new QFrame(root);
+  auto* bottom = new QFrame(right);
+  bottom->setObjectName(QStringLiteral("studioBottomBar"));
+  auto* bottomLay = new QHBoxLayout(bottom);
+  bottomLay->setContentsMargins(8, 4, 8, 4);
+  bottomLay->setSpacing(8);
+
+  m_scaleBar = new QFrame(bottom);
   m_scaleBar->setObjectName(QStringLiteral("mapAdjustBar"));
   auto* scaleLay = new QHBoxLayout(m_scaleBar);
-  scaleLay->setContentsMargins(10, 6, 10, 6);
+  scaleLay->setContentsMargins(8, 4, 8, 4);
   scaleLay->setSpacing(6);
   auto* scaleCap = new QLabel(QStringLiteral("축척 조정  1 :"), m_scaleBar);
   m_scaleSpin = new QSpinBox(m_scaleBar);
@@ -895,25 +938,88 @@ void KaDrawingStudio::buildUi() {
     chip->setProperty("denom", n);
     chip->setCheckable(true);
     chip->setCursor(Qt::PointingHandCursor);
-    chip->setMinimumWidth(52);
+    chip->setMinimumWidth(48);
     connect(chip, &QPushButton::clicked, this, [this, n]() {
       if (m_scaleSpin) m_scaleSpin->setValue(n);
       applyOnScreenScale();
     });
     scaleLay->addWidget(chip);
   }
-  scaleLay->addStretch(1);
+  bottomLay->addWidget(m_scaleBar, 0);
 
-  rootLay->addWidget(top);
-  rootLay->addWidget(m_adjustBar);
-  rootLay->addWidget(m_view, 1);
-  rootLay->addWidget(m_scaleBar);
+  auto* sampleBox = new QWidget(bottom);
+  auto* sampleLay = new QHBoxLayout(sampleBox);
+  sampleLay->setContentsMargins(0, 0, 0, 0);
+  sampleLay->setSpacing(6);
+  auto* sampleCap = new QLabel(QStringLiteral("용지에 넣기"), sampleBox);
+  sampleLay->addWidget(sampleCap);
+
+  auto* legendBtn = makeRailTile(sampleBox, KaIcons::icon(QStringLiteral("layout_legend")),
+                                 QStringLiteral("범례"), QSize(28, 28));
+  connect(legendBtn, &QToolButton::clicked, this, &KaDrawingStudio::beginPlaceLegend);
+  m_cardLegend = nullptr;
+  sampleLay->addWidget(legendBtn);
+
+  struct NorthSample { const char* rel; const char* tip; int art; };
+  const NorthSample norths[] = {
+      {"", "북 글자", 0},
+      {"arrows/NorthArrow_02.svg", "북 화살", 1},
+      {"arrows/NorthArrow_04.svg", "나침반", 2},
+      {"wind_roses/WindRose_01.svg", "바람장미", 3},
+  };
+  for (const auto& ns : norths) {
+    auto* b = makeRailTile(sampleBox, northPreviewIcon(ns.art), QString::fromUtf8(ns.tip), QSize(36, 36));
+    const QString rel = QString::fromUtf8(ns.rel);
+    connect(b, &QToolButton::clicked, this, [this, rel]() { beginPlaceNorth(rel); });
+    sampleLay->addWidget(b);
+  }
+
+  struct BarSample { const char* style; const char* tip; };
+  const BarSample bars[] = {
+      {"Double Box", "쌍칸 축척"},
+      {"Single Box", "외칸 축척"},
+      {"Line Ticks Up", "눈금 축척"},
+  };
+  for (const auto& bs : bars) {
+    auto* b = makeRailTile(sampleBox, scaleBarPreviewIcon(bs.style), QString::fromUtf8(bs.tip), QSize(43, 25));
+    const QString style = QString::fromUtf8(bs.style);
+    connect(b, &QToolButton::clicked, this, [this, style]() { beginPlaceScaleBar(style); });
+    sampleLay->addWidget(b);
+  }
+
+  auto* scaleLblBtn = makeRailTile(sampleBox, KaIcons::icon(QStringLiteral("layout_scale")),
+                                   QStringLiteral("축척 글자"), QSize(28, 28));
+  connect(scaleLblBtn, &QToolButton::clicked, this, &KaDrawingStudio::beginPlaceScaleLabel);
+  sampleLay->addWidget(scaleLblBtn);
+
+  auto* crsBtn = makeRailTile(sampleBox, KaIcons::icon(QStringLiteral("crs")),
+                              QStringLiteral("좌표계"), QSize(28, 28));
+  connect(crsBtn, &QToolButton::clicked, this, &KaDrawingStudio::beginPlaceCrsLabel);
+  sampleLay->addWidget(crsBtn);
+  bottomLay->addStretch(1);
+  bottomLay->addWidget(sampleBox, 0);
+
+  auto* bottomScroll = new QScrollArea(right);
+  bottomScroll->setWidgetResizable(true);
+  bottomScroll->setFrameShape(QFrame::NoFrame);
+  bottomScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+  bottomScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  bottomScroll->setWidget(bottom);
+  bottomScroll->setMinimumHeight(72);
+  bottomScroll->setMaximumHeight(96);
+
+  rightLay->addWidget(m_adjustBar);
+  rightLay->addWidget(m_view, 1);
+  rightLay->addWidget(bottomScroll);
+
+  rootLay->addWidget(leftCol, 0);
+  rootLay->addWidget(right, 1);
   setCentralWidget(root);
 
   m_status = new QLabel(this);
   statusBar()->addWidget(m_status, 1);
   m_status->setText(QStringLiteral("용지에서 드래그해 지도 칸을 만드세요. 항목을 고르고 Delete로 지울 수 있습니다."));
-  zoomFull();
+  m_paperFitPending = true;
 }
 
 void KaDrawingStudio::startPlace(PlaceKind kind) {
@@ -926,7 +1032,73 @@ void KaDrawingStudio::startPlace(PlaceKind kind) {
 void KaDrawingStudio::beginDrawMapFrame() {
   startPlace(PlaceKind::MapFrame);
   if (m_status)
-    m_status->setText(QStringLiteral("용지 위에서 드래그해 지도 칸을 만드세요."));
+    m_status->setText(QStringLiteral("칸을 다시 그리려면 용지 위에서 드래그하세요. 아니면 이미 올라간 지도를 쓰세요."));
+}
+
+QRectF KaDrawingStudio::defaultMapRect() const {
+  const double left = 22.0;
+  const double top = 12.0;
+  const double right = 16.0;
+  const double bottom = 32.0;
+  return QRectF(left, top, std::max(40.0, m_paperW - left - right),
+                std::max(40.0, m_paperH - top - bottom));
+}
+
+void KaDrawingStudio::autoPlaceDefaultSheet() {
+  createOrResizeMap(defaultMapRect());
+  zoomPaperVisible();
+}
+
+void KaDrawingStudio::refreshMapFromProject() {
+  syncMapFromLayers();
+  if (auto* map = mapItem())
+    applyCrsGrid(map);
+}
+
+void KaDrawingStudio::focusGridSettings() {
+  QDialog dlg(this);
+  dlg.setWindowTitle(QStringLiteral("격자 설정"));
+  dlg.setMinimumWidth(280);
+  auto* root = new QVBoxLayout(&dlg);
+  root->setContentsMargins(14, 12, 14, 12);
+  root->setSpacing(8);
+  auto* on = new QCheckBox(QStringLiteral("좌표 격자"), &dlg);
+  on->setChecked(m_gridEnabled);
+  auto* nums = new QCheckBox(QStringLiteral("칸 밖에 좌표 숫자"), &dlg);
+  nums->setChecked(m_gridShowNums);
+  auto* step = new QDoubleSpinBox(&dlg);
+  step->setRange(1.0, 100000.0);
+  step->setDecimals(0);
+  step->setSingleStep(10.0);
+  step->setSuffix(QStringLiteral(" m"));
+  step->setValue(m_gridIntervalM);
+  step->setKeyboardTracking(false);
+  auto apply = [this, on, nums, step]() {
+    m_gridEnabled = on->isChecked();
+    m_gridShowNums = nums->isChecked();
+    m_gridIntervalM = step->value() > 0.0 ? step->value() : 20.0;
+    if (auto* map = mapItem())
+      applyCrsGrid(map);
+    if (m_status)
+      m_status->setText(QStringLiteral("격자 간격 %1 m").arg(m_gridIntervalM, 0, 'f', 0));
+  };
+  connect(on, &QCheckBox::toggled, &dlg, [apply](bool) { apply(); });
+  connect(nums, &QCheckBox::toggled, &dlg, [apply](bool) { apply(); });
+  connect(step, QOverload<double>::of(&QDoubleSpinBox::valueChanged), &dlg,
+          [apply](double) { apply(); });
+  connect(step, &QDoubleSpinBox::editingFinished, &dlg, [apply]() { apply(); });
+  root->addWidget(on);
+  auto* stepRow = new QHBoxLayout;
+  stepRow->addWidget(new QLabel(QStringLiteral("간격"), &dlg));
+  stepRow->addWidget(step, 1);
+  root->addLayout(stepRow);
+  root->addWidget(nums);
+  auto* box = new QDialogButtonBox(QDialogButtonBox::Close, &dlg);
+  box->button(QDialogButtonBox::Close)->setText(QStringLiteral("닫기"));
+  connect(box, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+  root->addWidget(box);
+  apply();
+  dlg.exec();
 }
 
 void KaDrawingStudio::beginPlaceLegend() {
@@ -995,7 +1167,155 @@ void KaDrawingStudio::usePanTool() {
 }
 
 void KaDrawingStudio::zoomFull() {
-  if (m_view) m_view->zoomFull();
+  zoomPaperVisible();
+}
+
+void KaDrawingStudio::zoomPaperVisible() {
+  auto* ly = layout();
+  if (!m_view || !ly) return;
+  QgsLayoutItemPage* page = ly->pageCollection() ? ly->pageCollection()->page(0) : nullptr;
+  QRectF pr = page ? page->sceneBoundingRect() : QRectF(0, 0, m_paperW, m_paperH);
+  if (pr.width() < 8.0 || pr.height() < 8.0)
+    pr = QRectF(0, 0, m_paperW, m_paperH);
+  const qreal mx = pr.width() * 0.125;
+  const qreal my = pr.height() * 0.125;
+  m_view->fitInView(pr.adjusted(-mx, -my, mx, my), Qt::KeepAspectRatio);
+  updatePageOutline();
+}
+
+void KaDrawingStudio::updatePageOutline() {
+  auto* ly = layout();
+  if (!m_view || !ly || !m_view->scene()) return;
+  QgsLayoutItemPage* page = ly->pageCollection() ? ly->pageCollection()->page(0) : nullptr;
+  const QRectF pr = page ? page->sceneBoundingRect() : QRectF(0, 0, m_paperW, m_paperH);
+  if (!m_pageOutline) {
+    m_pageOutline = new QGraphicsRectItem();
+    m_pageOutline->setBrush(Qt::NoBrush);
+    m_pageOutline->setZValue(1.0e6);
+    m_pageOutline->setFlag(QGraphicsItem::ItemIsSelectable, false);
+    m_view->scene()->addItem(m_pageOutline);
+  }
+  QPen pen(QColor(40, 40, 40, 170));
+  pen.setCosmetic(true);
+  pen.setWidthF(1.0);
+  m_pageOutline->setPen(pen);
+  m_pageOutline->setRect(pr);
+  m_pageOutline->show();
+}
+
+void KaDrawingStudio::clearGridCoordinateLabels() {
+  auto* ly = layout();
+  if (!ly) return;
+  QList<QgsLayoutItemLabel*> labels;
+  ly->layoutItems(labels);
+  for (QgsLayoutItemLabel* lbl : labels) {
+    if (lbl && lbl->id().startsWith(QLatin1String(kGridAnnPrefix)))
+      ly->removeLayoutItem(lbl);
+  }
+}
+
+void KaDrawingStudio::placeGridCoordinateLabels(QgsLayoutItemMap* map) {
+  auto* ly = layout();
+  if (!ly || !map) return;
+  clearGridCoordinateLabels();
+  if (!m_gridShowNums) return;
+  const QgsRectangle ext = map->extent();
+  if (!ext.isFinite() || ext.width() <= 0.0 || ext.height() <= 0.0) return;
+  const double step = m_gridIntervalM > 0.0 ? m_gridIntervalM : 20.0;
+  const QRectF r = map->sceneBoundingRect();
+  auto toX = [&](double mx) {
+    return r.left() + (mx - ext.xMinimum()) / ext.width() * r.width();
+  };
+  auto toY = [&](double my) {
+    return r.bottom() - (my - ext.yMinimum()) / ext.height() * r.height();
+  };
+  auto first = [&](double lo) { return std::ceil(lo / step) * step; };
+
+  QVector<double> xs, ys;
+  for (double x = first(ext.xMinimum()); x <= ext.xMaximum() + 1e-6; x += step) xs.push_back(x);
+  for (double y = first(ext.yMinimum()); y <= ext.yMaximum() + 1e-6; y += step) ys.push_back(y);
+  const int xStride = std::max(1, static_cast<int>(xs.size()) / 16);
+  const int yStride = std::max(1, static_cast<int>(ys.size()) / 16);
+
+  int n = 0;
+  auto addLbl = [&](const QRectF& box, const QString& text, Qt::AlignmentFlag align) {
+    auto* lbl = new QgsLayoutItemLabel(ly);
+    lbl->setId(QStringLiteral("%1%2").arg(QLatin1String(kGridAnnPrefix)).arg(n++));
+    lbl->setText(text);
+    lbl->setFont(QFont(QStringLiteral("Malgun Gothic"), 6));
+    lbl->setHAlign(align);
+    lbl->setVAlign(Qt::AlignVCenter);
+    lbl->setFrameEnabled(false);
+    lbl->setBackgroundEnabled(false);
+    lbl->attemptSetSceneRect(box);
+    ly->addLayoutItem(lbl);
+  };
+
+  for (int i = 0; i < xs.size(); i += xStride) {
+    const double x = xs[i];
+    const double lx = toX(x);
+    if (lx < r.left() - 0.5 || lx > r.right() + 0.5) continue;
+    const QString t = QString::number(x, 'f', 2);
+    addLbl(QRectF(lx - 11.0, r.top() - 4.6, 22.0, 4.2), t, Qt::AlignHCenter);
+    addLbl(QRectF(lx - 11.0, r.bottom() + 0.6, 22.0, 4.2), t, Qt::AlignHCenter);
+  }
+  for (int i = 0; i < ys.size(); i += yStride) {
+    const double y = ys[i];
+    const double lyout = toY(y);
+    if (lyout < r.top() - 0.5 || lyout > r.bottom() + 0.5) continue;
+    const QString t = QString::number(y, 'f', 2);
+    addLbl(QRectF(r.left() - 24.0, lyout - 2.1, 23.0, 4.2), t, Qt::AlignRight);
+    addLbl(QRectF(r.right() + 0.8, lyout - 2.1, 23.0, 4.2), t, Qt::AlignLeft);
+  }
+}
+
+void KaDrawingStudio::applyCrsGrid(QgsLayoutItemMap* map) {
+  if (!map || !map->grids()) return;
+  const QList<QgsLayoutItemMapGrid*> olds = map->grids()->asList();
+  for (QgsLayoutItemMapGrid* old : olds) {
+    if (old) map->grids()->removeGrid(old->name());
+  }
+  if (!m_gridEnabled) {
+    clearGridCoordinateLabels();
+    map->updateBoundingRect();
+    map->invalidateCache();
+    map->refresh();
+    if (auto* ly = layout()) ly->refresh();
+    return;
+  }
+  auto* g = new QgsLayoutItemMapGrid(QStringLiteral("crs_grid"), map);
+  map->grids()->addGrid(g);
+  const QgsCoordinateReferenceSystem crs = map->crs().isValid()
+      ? map->crs()
+      : studioMapCrs(m_mapCanvas, m_project);
+  if (crs.isValid())
+    g->setCrs(crs);
+  g->setEnabled(true);
+  g->setUnits(Qgis::MapGridUnit::MapUnits);
+  g->setStyle(Qgis::MapGridStyle::Lines);
+  const double interval = m_gridIntervalM > 0.0 ? m_gridIntervalM : 20.0;
+  g->setIntervalX(interval);
+  g->setIntervalY(interval);
+  g->setOffsetX(0.0);
+  g->setOffsetY(0.0);
+  g->setGridLineWidth(0.07);
+  g->setGridLineColor(QColor(30, 41, 59, 128));
+  g->setFrameStyle(Qgis::MapGridFrameStyle::NoFrame);
+  g->setAnnotationEnabled(false);
+  map->updateBoundingRect();
+  map->invalidateCache();
+  map->refresh();
+  placeGridCoordinateLabels(map);
+  if (auto* ly = layout())
+    ly->refresh();
+}
+
+void KaDrawingStudio::showEvent(QShowEvent* event) {
+  QMainWindow::showEvent(event);
+  if (m_paperFitPending) {
+    m_paperFitPending = false;
+    QTimer::singleShot(0, this, [this]() { zoomPaperVisible(); });
+  }
 }
 
 void KaDrawingStudio::finishPlace() {
@@ -1062,8 +1382,10 @@ void KaDrawingStudio::applyLayersToMap(QgsLayoutItemMap* map, bool includeLiveBa
       layers.append(blank);
   }
   map->setKeepLayerSet(true);
-  if (!layers.isEmpty())
-    map->setLayers(layers);
+  map->setFollowVisibilityPreset(false);
+  map->setLayers(layers);
+  map->invalidateCache();
+  map->refresh();
   const QgsCoordinateReferenceSystem crs = studioMapCrs(m_mapCanvas, m_project);
   if (crs.isValid())
     map->setCrs(crs);
@@ -1135,13 +1457,13 @@ void KaDrawingStudio::createOrResizeMap(const QRectF& layoutRect) {
   QTimer::singleShot(0, this, [this, held, created]() {
     if (!held) return;
     applyLayersToMap(held, true, false);
+    applyCrsGrid(held);
     snapMapScaleToNice();
     connect(held, &QgsLayoutItemMap::extentChanged, this, &KaDrawingStudio::syncScaleDecorations,
             Qt::UniqueConnection);
     if (created)
       ensureStandardDecorations();
     else {
-      applyStandardChromePositions();
       relinkDecorations();
       applyCrsLabelNow();
     }
@@ -1354,8 +1676,11 @@ void KaDrawingStudio::placeScaleLabel(const QRectF& layoutRect, bool selectAfter
 }
 
 void KaDrawingStudio::syncMapFromLayers() {
-  if (auto* map = mapItem())
+  if (auto* map = mapItem()) {
     applyLayersToMap(map, true, false);
+    if (auto* ly = layout())
+      ly->refresh();
+  }
 }
 
 void KaDrawingStudio::relinkDecorations() {
@@ -1477,13 +1802,6 @@ void KaDrawingStudio::applyNiceScaleBar(QgsLayoutItemScaleBar* sb) {
   sb->attemptSetSceneRect(keep);
   sb->refresh();
   sb->attemptSetSceneRect(keep);
-  if (auto* crs = findItemById(ly, kIdCrs)) {
-    QRectF cr = chrome.crs;
-    cr.setLeft(keep.right() + 4.0);
-    cr.setRight(chrome.north.left() - 4.0);
-    if (cr.width() >= 8.0)
-      crs->attemptSetSceneRect(cr);
-  }
 }
 
 int KaDrawingStudio::displayScale(double raw) {
@@ -1528,6 +1846,7 @@ void KaDrawingStudio::syncScaleDecorations() {
         map->crs().isValid() ? map->crs() : studioMapCrs(m_mapCanvas, m_project);
     crs->setText(koreanCrsLabel(dest));
   }
+  applyCrsGrid(map);
   syncScaleChips();
 }
 
@@ -1709,6 +2028,10 @@ void KaDrawingStudio::deleteSelectedItems() {
 }
 
 bool KaDrawingStudio::eventFilter(QObject* watched, QEvent* event) {
+  if (event && event->type() == QEvent::Resize && m_paperFitPending && m_view &&
+      (watched == m_view || watched == m_view->viewport())) {
+    QTimer::singleShot(0, this, [this]() { zoomPaperVisible(); });
+  }
   if (event && event->type() == QEvent::KeyPress &&
       (watched == m_view || (m_view && watched == m_view->viewport()))) {
     auto* ke = static_cast<QKeyEvent*>(event);
@@ -1787,19 +2110,27 @@ void KaDrawingStudio::centerSurveyInMap() {
       m_status->setText(QStringLiteral("먼저 지도 칸을 그리세요."));
     return;
   }
-  const QgsRectangle ext = surveyExtentOnMap(map);
-  if (ext.isNull() || !ext.isFinite()) {
+  const QgsRectangle survey = surveyExtentOnMap(map);
+  if (survey.isNull() || !survey.isFinite()) {
     if (m_status)
       m_status->setText(QStringLiteral("가운데로 둘 조사 도형이 없습니다. 먼저 구역·유구를 그리세요."));
     return;
   }
-  map->zoomToExtent(ext);
-  snapMapScaleToNice();
+  const double keepScale = map->scale();
+  const QgsRectangle cur = map->extent();
+  const QgsPointXY c = survey.center();
+  const double hw = (cur.isFinite() && cur.width() > 0.0) ? cur.width() * 0.5 : survey.width() * 0.5;
+  const double hh = (cur.isFinite() && cur.height() > 0.0) ? cur.height() * 0.5 : survey.height() * 0.5;
+  map->setExtent(QgsRectangle(c.x() - hw, c.y() - hh, c.x() + hw, c.y() + hh));
+  if (keepScale > 1.0)
+    map->setScale(keepScale);
   refreshScaleWidgets(true);
+  applyCrsGrid(map);
   if (auto* sb = dynamic_cast<QgsLayoutItemScaleBar*>(findItemById(layout(), kIdScaleBar)))
     applyNiceScaleBar(sb);
   if (m_status)
-    m_status->setText(QStringLiteral("그린 것이 칸 가운데에 오도록 맞췄습니다."));
+    m_status->setText(QStringLiteral("축척 1 : %1 을 유지한 채 그린 곳을 가운데로 옮겼습니다.")
+                          .arg(displayScale(map->scale())));
 }
 
 void KaDrawingStudio::savePdf() {
@@ -1811,10 +2142,13 @@ void KaDrawingStudio::savePdf() {
   const QString path = QFileDialog::getSaveFileName(
       this, QStringLiteral("도면 PDF 저장"), QStringLiteral("도면.pdf"), QStringLiteral("PDF (*.pdf)"));
   if (path.isEmpty()) return;
+  if (m_pageOutline) m_pageOutline->hide();
   QgsLayoutExporter exporter(ly);
   QgsLayoutExporter::PdfExportSettings settings;
   settings.dpi = 300;
-  if (exporter.exportToPdf(path, settings) != QgsLayoutExporter::Success) {
+  const auto pdfOk = exporter.exportToPdf(path, settings);
+  if (m_pageOutline) m_pageOutline->show();
+  if (pdfOk != QgsLayoutExporter::Success) {
     QMessageBox::warning(this, QStringLiteral("PDF"), QStringLiteral("저장에 실패했습니다."));
     return;
   }

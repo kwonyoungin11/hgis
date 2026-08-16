@@ -14,16 +14,17 @@ private slots:
   void noUrl();
   void gisExcludePresent();
   void requiredSelectorsPresent();
+  void noCheapSpinArrowBlock();
   void noCatchAllWidgetRules();
 };
 
 void TestTheme::tokensMatchSpec() {
-  QCOMPARE(KaTheme::tokens().sky1, QColor(94, 179, 228));
-  QCOMPARE(KaTheme::tokens().ink, QColor(15, 23, 42));
-  QCOMPARE(KaTheme::tokens().sky5, QColor(10, 74, 124));
-  QCOMPARE(KaTheme::tokens().border, QColor(0, 0, 0));
-  QCOMPARE(KaTheme::tokens().canvasNeutral, QColor(232, 238, 244));
-  QCOMPARE(KaTheme::tokens().desk, QColor(229, 231, 235));
+  QCOMPARE(KaTheme::tokens().sky1, QColor(37, 99, 235));
+  QCOMPARE(KaTheme::tokens().ink, QColor(30, 41, 59));
+  QCOMPARE(KaTheme::tokens().sky5, QColor(37, 99, 235));
+  QCOMPARE(KaTheme::tokens().border, QColor(229, 231, 235));
+  QCOMPARE(KaTheme::tokens().canvasNeutral, QColor(255, 255, 255));
+  QCOMPARE(KaTheme::tokens().desk, QColor(248, 250, 252));
 }
 
 static QString normalize(QString s) { return s.replace(QLatin1String("\r\n"), QLatin1String("\n")); }
@@ -72,6 +73,12 @@ void TestTheme::requiredSelectorsPresent() {
   for (const char* sel : need) {
     QVERIFY2(qss.contains(QLatin1String(sel)), sel);
   }
+}
+
+void TestTheme::noCheapSpinArrowBlock() {
+  const QString qss = KaTheme::embeddedStyleSheet();
+  QVERIFY2(!qss.contains(QLatin1String("QAbstractSpinBox::up-arrow")),
+           "spin arrows must be drawn by ChromeStyle, not a QSS black square");
 }
 
 void TestTheme::noCatchAllWidgetRules() {

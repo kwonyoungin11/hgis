@@ -95,6 +95,7 @@ add_custom_command(TARGET ka-hgis POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${CMAKE_SOURCE_DIR}/data/theme/ka-hgis.qss"
     "$<TARGET_FILE_DIR:ka-hgis>/data/theme/ka-hgis.qss"
+  COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:ka-hgis>/data/fonts"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${CMAKE_SOURCE_DIR}/ka-hgis-실행.bat"
     "$<TARGET_FILE_DIR:ka-hgis>/ka-hgis-실행.bat"

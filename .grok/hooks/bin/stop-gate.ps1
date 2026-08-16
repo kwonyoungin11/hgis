@@ -45,7 +45,7 @@ if (Test-Path $stamp) {
     if (-not $newerSrc) { exit 0 }
 }
 
-$reason = "src/ C++ changed and the reply claims 완료/fixed, but there is no newer cmake/ctest/smoke stamp. Run cmake --build build --config Release and ctest (or /ka-hgis-verify) before finishing."
+$reason = "LOOP ENGINEERING: src/ C++ changed and the reply claims 완료/fixed, but there is no newer cmake/ctest/smoke stamp. Run cmake --build build --config Release and ctest (or /ka-hgis-verify), then finish."
 $payload = @{ decision = "block"; reason = $reason } | ConvertTo-Json -Compress
 Write-Output $payload
 exit 0

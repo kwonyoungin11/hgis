@@ -5,11 +5,15 @@
 #include <QString>
 
 class QAction;
+class QCheckBox;
+class QDoubleSpinBox;
 class QEvent;
 class QFrame;
+class QGraphicsRectItem;
 class QKeyEvent;
 class QLabel;
 class QLineEdit;
+class QShowEvent;
 class QSpinBox;
 class QWidget;
 class QgsProject;
@@ -39,6 +43,7 @@ public:
                            QWidget* parent = nullptr);
   static bool promptPaper(QWidget* parent, double* widthMm, double* heightMm);
   void resetPaper(double widthMm, double heightMm);
+  void refreshMapFromProject();
   bool isMapAdjusting() const { return m_adjustingMap; }
   bool eventFilter(QObject* watched, QEvent* event) override;
 
@@ -52,6 +57,7 @@ private slots:
   void useSelectTool();
   void usePanTool();
   void zoomFull();
+  void zoomPaperVisible();
   void onRectDrawn(const QRectF& layoutRect);
   void syncMapFromLayers();
   void savePdf();
@@ -66,6 +72,7 @@ private slots:
   void deleteSelectedItems();
   void undoLastChange();
   void syncScaleDecorations();
+  void focusGridSettings();
 
 private:
   void buildUi();
@@ -99,6 +106,13 @@ private:
   void updateInspector(QgsLayoutItem* item);
   void setDrawerCardActive(QFrame* card);
   void syncScaleChips();
+  void applyCrsGrid(QgsLayoutItemMap* map);
+  void clearGridCoordinateLabels();
+  void placeGridCoordinateLabels(QgsLayoutItemMap* map);
+  void autoPlaceDefaultSheet();
+  QRectF defaultMapRect() const;
+  void updatePageOutline();
+  void showEvent(QShowEvent* event) override;
   void keyPressEvent(QKeyEvent* event) override;
   static int displayScale(double raw);
 
@@ -113,6 +127,9 @@ private:
   KaLayoutMapDrawTool* m_toolDrawMap = nullptr;
   QgsLayerTreeView* m_layerTree = nullptr;
   QgsLayerTreeModel* m_layerModel = nullptr;
+  bool m_gridEnabled = true;
+  bool m_gridShowNums = true;
+  double m_gridIntervalM = 20.0;
   QLabel* m_status = nullptr;
   QFrame* m_adjustBar = nullptr;
   QFrame* m_scaleBar = nullptr;
@@ -133,5 +150,7 @@ private:
   QString m_pendingScaleBarStyle;
   QStringList m_placeUndo;
   bool m_adjustingMap = false;
+  bool m_paperFitPending = true;
+  QGraphicsRectItem* m_pageOutline = nullptr;
   QPointer<QgsVectorLayer> m_blankMapLayer;
 };
