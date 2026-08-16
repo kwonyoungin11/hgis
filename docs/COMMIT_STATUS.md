@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-16 15:35:37 +09:00 |
+| Updated (local) | 2026-08-16 15:35:46 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `ef06bf1` |
-| HEAD full | `ef06bf14e89f1291d1b2f50b461d1c8f8f84d649` |
-| HEAD date | 2026-08-16 12:37:19 +0900 |
+| HEAD short | `74abc32` |
+| HEAD full | `74abc32cb35517a79051067f853bb39514ddc72c` |
+| HEAD date | 2026-08-16 15:35:36 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Refresh COMMIT_STATUS after chrome and folder-import ship. |
-| Total commits | 21 |
+| HEAD subject | Ship teal chrome, artifact digitize, snap, and studio layer-center. |
+| Total commits | 22 |
 | Upstream | `origin/main` |
-| Sync | up to date with origin/main |
+| Sync | ahead 1 of origin/main (push pending) |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (19 paths) |
+| Working tree dirty | **yes** (2 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Refresh COMMIT_STATUS after chrome and folder-import ship. (`ef06bf1` @ 2026-08-16 12:37:19 +0900)
-- **Remote sync at write time:** up to date with origin/main
-- **Uncommitted local changes at write time:** yes (19 paths)
+- **Recorded tip when this file was written:** Ship teal chrome, artifact digitize, snap, and studio layer-center. (`74abc32` @ 2026-08-16 15:35:36 +0900)
+- **Remote sync at write time:** ahead 1 of origin/main (push pending)
+- **Uncommitted local changes at write time:** yes (2 paths)
 
 ### Read this correctly
 
@@ -51,6 +51,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `74abc32` | 2026-08-16T15:35:36+09:00 | Ship teal chrome, artifact digitize, snap, and studio layer-center. |
 | `ef06bf1` | 2026-08-16T12:37:19+09:00 | Refresh COMMIT_STATUS after chrome and folder-import ship. |
 | `e5c16ea` | 2026-08-16T12:37:07+09:00 | Ship flat chrome, layout grid/paper, and a fast PC folder import. |
 | `cf8c011` | 2026-08-15T23:43:28+09:00 | Refresh COMMIT_STATUS after theme ship; drop old no-MCP rule. |
@@ -76,24 +77,7 @@
 ## Staged in this commit
 
 ```
-M	data/schemas/ka_hgis_layers.yaml
-M	data/theme/ka-hgis.qss
 M	docs/COMMIT_STATUS.md
-M	src/app/KaApplication.cpp
-M	src/app/KaCaptureMapTool.cpp
-M	src/app/KaCaptureMapTool.h
-M	src/app/KaDrawingStudio.cpp
-M	src/app/KaDrawingStudio.h
-M	src/app/KaIcons.cpp
-M	src/app/KaTheme.cpp
-M	src/app/MainWindow.cpp
-M	src/app/MainWindow.h
-M	src/core/ExportService.cpp
-M	src/core/LayerOps.cpp
-M	src/core/LayoutService.cpp
-M	src/core/SurveyProjectFactory.cpp
-M	tests/test_theme.cpp
-M	tests/test_workflow.cpp
 ```
 ## Other PC checklist
 
