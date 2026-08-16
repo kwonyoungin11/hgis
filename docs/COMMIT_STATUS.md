@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-16 12:37:07 +09:00 |
+| Updated (local) | 2026-08-16 12:37:20 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `cf8c011` |
-| HEAD full | `cf8c0115b9c6bf4c2855a51fa8accbc94cccc26f` |
-| HEAD date | 2026-08-15 23:43:28 +0900 |
-| HEAD author | kwonypungin <kyi25@nate.com> |
-| HEAD subject | Refresh COMMIT_STATUS after theme ship; drop old no-MCP rule. |
-| Total commits | 19 |
+| HEAD short | `e5c16ea` |
+| HEAD full | `e5c16eacb455252d46984a43b39cadb55907c0bd` |
+| HEAD date | 2026-08-16 12:37:07 +0900 |
+| HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
+| HEAD subject | Ship flat chrome, layout grid/paper, and a fast PC folder import. |
+| Total commits | 20 |
 | Upstream | `origin/main` |
-| Sync | up to date with origin/main |
+| Sync | ahead 1 of origin/main (push pending) |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (23 paths) |
+| Working tree dirty | **yes** (2 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Refresh COMMIT_STATUS after theme ship; drop old no-MCP rule. (`cf8c011` @ 2026-08-15 23:43:28 +0900)
-- **Remote sync at write time:** up to date with origin/main
-- **Uncommitted local changes at write time:** yes (23 paths)
+- **Recorded tip when this file was written:** Ship flat chrome, layout grid/paper, and a fast PC folder import. (`e5c16ea` @ 2026-08-16 12:37:07 +0900)
+- **Remote sync at write time:** ahead 1 of origin/main (push pending)
+- **Uncommitted local changes at write time:** yes (2 paths)
 
 ### Read this correctly
 
@@ -50,6 +50,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `e5c16ea` | 2026-08-16T12:37:07+09:00 | Ship flat chrome, layout grid/paper, and a fast PC folder import. |
 | `cf8c011` | 2026-08-15T23:43:28+09:00 | Refresh COMMIT_STATUS after theme ship; drop old no-MCP rule. |
 | `bc50839` | 2026-08-15T23:42:38+09:00 | Ship sky-blue theme, studio chrome, and digitize wiring. |
 | `17ac917` | 2026-08-15T15:31:08+09:00 | Save resume handoff so reconnect/clone can continue field HGIS work. |
@@ -73,28 +74,7 @@
 ## Staged in this commit
 
 ```
-A	.grok/hooks/bin/prompt-inject.ps1
-M	.grok/hooks/bin/stop-gate.ps1
-M	.grok/hooks/ka-hgis.json
-A	.grok/hooks/orchestrator-protocol.json
-A	.grok/hooks/scripts/orchestrator-prompt-inject.ps1
-A	.grok/hooks/scripts/orchestrator-stop-gate.ps1
-A	.grok/rules/00-orchestrator-protocol.md
-M	.grok/rules/10-gis-verify.md
-A	.grok/skills/ka-hgis/SKILL.md
-A	.grok/skills/orchestrator-protocol/SKILL.md
-M	CMakeLists.txt
-M	data/theme/ka-hgis.qss
 M	docs/COMMIT_STATUS.md
-M	src/app/KaDrawingStudio.cpp
-M	src/app/KaDrawingStudio.h
-M	src/app/KaIcons.cpp
-M	src/app/KaIcons.h
-M	src/app/KaTheme.cpp
-M	src/app/MainWindow.cpp
-M	src/app/MainWindow.h
-M	src/core/LayoutService.cpp
-M	tests/test_theme.cpp
 ```
 ## Other PC checklist
 
