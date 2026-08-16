@@ -135,6 +135,10 @@ bool LayerOps::applyDomainDrawStyle(QgsVectorLayer* layer, const QString& layerK
     fill = QColor(234, 179, 8, 255);
     stroke = QColor(161, 98, 7, 255);
     markerSize = 4.0;
+  } else if (key == QLatin1String("artifact_point")) {
+    fill = QColor(185, 28, 28, 255);
+    stroke = QColor(127, 29, 29, 255);
+    markerSize = 3.6;
   }
 
   QgsSymbol* sym = nullptr;
@@ -273,6 +277,10 @@ bool LayerOps::readSimpleVectorStyle(const QgsVectorLayer* layer, QColor* fill, 
     f = QColor(234, 179, 8, 255);
     s = QColor(161, 98, 7, 255);
     m = 4.0;
+  } else if (key == QLatin1String("artifact_point")) {
+    f = QColor(185, 28, 28, 255);
+    s = QColor(127, 29, 29, 255);
+    m = 3.6;
   }
 
   const QVariant cf = layer->customProperty(QStringLiteral("ka_hgis/style_fill"));
@@ -602,7 +610,8 @@ QgsVectorLayer* LayerOps::digitizeTargetLayer(QgsProject* project, QgsVectorLaye
 
 QStringList LayerOps::domainLayerKeys() {
   return {QStringLiteral("survey_area"), QStringLiteral("feature_poly"), QStringLiteral("feature_line"),
-          QStringLiteral("section_line"), QStringLiteral("control_points")};
+          QStringLiteral("section_line"), QStringLiteral("control_points"),
+          QStringLiteral("artifact_point")};
 }
 
 void LayerOps::removeSurveyDomainLayers(QgsProject* project) {
@@ -650,8 +659,41 @@ QgsVectorLayer* LayerOps::ensureDomainLayer(QgsProject* project, const QString& 
   }
   auto* vl = new QgsVectorLayer(QStringLiteral("%1|layername=%2").arg(gpkgPath, layerKey),
                                 titleKo, QStringLiteral("ogr"));
-  if (!vl->isValid()) {
-    if (errorOut) *errorOut = vl->error().message();
+  if (!vl->isValid() && layerKey == QLatin1String("artifact_point")) {
+    delete vl;
+    vl = nullptr;
+    const QgsCoordinateReferenceSystem crs = project->crs().isValid()
+        ? project->crs()
+        : QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186"));
+    QgsVectorLayer mem(QStringLiteral("Point?crs=%1").arg(crs.authid()), titleKo, QStringLiteral("memory"));
+    if (mem.isValid()) {
+      QgsFields fields;
+      fields.append(QgsField(QStringLiteral("kind"), QMetaType::Type::QString));
+      fields.append(QgsField(QStringLiteral("period"), QMetaType::Type::QString));
+      fields.append(QgsField(QStringLiteral("artifact_no"), QMetaType::Type::QString));
+      fields.append(QgsField(QStringLiteral("note"), QMetaType::Type::QString));
+      mem.dataProvider()->addAttributes(fields.toList());
+      mem.updateFields();
+      mem.setCrs(crs);
+      QgsVectorFileWriter::SaveVectorOptions opts;
+      opts.driverName = QStringLiteral("GPKG");
+      opts.layerName = layerKey;
+      opts.fileEncoding = QStringLiteral("UTF-8");
+      opts.actionOnExistingFile = QgsVectorFileWriter::CreateOrOverwriteLayer;
+      QString errMsg, newFn, newLayer;
+      if (QgsVectorFileWriter::writeAsVectorFormatV3(
+              &mem, gpkgPath, project->transformContext(), opts, &errMsg, &newFn, &newLayer) ==
+          QgsVectorFileWriter::NoError) {
+        vl = new QgsVectorLayer(QStringLiteral("%1|layername=%2").arg(gpkgPath, layerKey),
+                                titleKo, QStringLiteral("ogr"));
+      } else if (errorOut) {
+        *errorOut = errMsg;
+      }
+    }
+  }
+  if (!vl || !vl->isValid()) {
+    if (errorOut && errorOut->isEmpty())
+      *errorOut = vl ? vl->error().message() : QStringLiteral("레이어를 열 수 없습니다.");
     delete vl;
     return nullptr;
   }
@@ -746,17 +788,6 @@ QList<QgsMapLayer*> LayerOps::visibleLayersPaintOrder(QgsProject* project) {
     }
   }
 
-  QList<QgsMapLayer*> surveyTop;
-  QList<QgsMapLayer*> otherVec;
-  QList<QgsMapLayer*> overlayMid;
-  QList<QgsMapLayer*> imageryBottom;
-  auto isImagery = [](const QgsMapLayer* l) {
-    if (!l) return false;
-    const QString n = l->name();
-    return n.contains(QStringLiteral("위성")) || n.contains(QStringLiteral("Satellite")) ||
-           n.contains(QStringLiteral("OSM")) || n.contains(QStringLiteral("Google")) ||
-           n.contains(QStringLiteral("Carto")) || n.contains(QStringLiteral("VWorld 배경"));
-  };
   auto pushVisible = [&](QgsMapLayer* l) {
     if (!l || !l->isValid()) return;
     if (root) {
@@ -764,26 +795,14 @@ QList<QgsMapLayer*> LayerOps::visibleLayersPaintOrder(QgsProject* project) {
         if (!n->itemVisibilityChecked()) return;
       }
     }
-    if (isImagery(l))
-      imageryBottom.append(l);
-    else if (LayerOps::isReferenceLayer(l) || qobject_cast<QgsRasterLayer*>(l))
-      overlayMid.append(l);
-    else if (!LayerOps::layerKeyOf(l).isEmpty())
-      surveyTop.append(l);
-    else
-      otherVec.append(l);
+    visible.append(l);
   };
   for (QgsMapLayer* l : ordered)
     pushVisible(l);
-  if (surveyTop.isEmpty() && otherVec.isEmpty() && overlayMid.isEmpty() && imageryBottom.isEmpty()) {
+  if (visible.isEmpty()) {
     for (QgsMapLayer* l : project->mapLayers())
       pushVisible(l);
   }
-  // First in setLayers is drawn on top: survey → 지적 → 위성.
-  visible.append(surveyTop);
-  visible.append(otherVec);
-  visible.append(overlayMid);
-  visible.append(imageryBottom);
   return visible;
 }
 
@@ -800,6 +819,7 @@ void LayerOps::syncMapCanvas(QgsProject* project, QgsMapCanvas* canvas, bool zoo
   }
 
   QList<QgsMapLayer*> visible = visibleLayersPaintOrder(project);
+  const bool layersChanged = (visible != canvas->layers());
 
   if (project->crs().isValid())
     canvas->setDestinationCrs(project->crs());
@@ -807,7 +827,8 @@ void LayerOps::syncMapCanvas(QgsProject* project, QgsMapCanvas* canvas, bool zoo
     canvas->setDestinationCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
   LayerOps::ensureOtfEnabled(project, canvas, canvas->mapSettings().destinationCrs().authid());
 
-  canvas->setLayers(visible);
+  if (layersChanged)
+    canvas->setLayers(visible);
   canvas->setCachingEnabled(true);
   canvas->setRenderFlag(true);
   canvas->freeze(false);
@@ -830,9 +851,8 @@ void LayerOps::syncMapCanvas(QgsProject* project, QgsMapCanvas* canvas, bool zoo
     }
     LayerOps::clampCanvasToKorea(canvas);
   }
-  canvas->redrawAllLayers();
-  canvas->refreshAllLayers();
-  canvas->refresh();
+  if (layersChanged || zoomKorea)
+    canvas->refresh();
 }
 
 static bool extentUsable(const QgsRectangle& ext) {

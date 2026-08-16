@@ -2,6 +2,9 @@
 #include <qgsmapcanvas.h>
 #include <qgsvectorlayer.h>
 #include <qgsrubberband.h>
+#include <qgsvertexmarker.h>
+#include <qgssnappingutils.h>
+#include <qgspointlocator.h>
 #include <qgsgeometry.h>
 #include <qgscoordinatetransform.h>
 #include <qgsproject.h>
@@ -18,6 +21,7 @@ KaCaptureMapTool::KaCaptureMapTool(QgsMapCanvas* canvas)
 
 KaCaptureMapTool::~KaCaptureMapTool() {
   destroyRubber();
+  destroySnapMarker();
 }
 
 QgsMapTool::Flags KaCaptureMapTool::flags() const {
@@ -33,6 +37,11 @@ void KaCaptureMapTool::setTargetLayer(QgsVectorLayer* layer) {
   m_layer = layer;
 }
 
+void KaCaptureMapTool::setSnapEnabled(bool on) {
+  m_snapEnabled = on;
+  if (!on) destroySnapMarker();
+}
+
 void KaCaptureMapTool::resetSession() {
   m_finishing = false;
   m_points.clear();
@@ -46,8 +55,32 @@ void KaCaptureMapTool::destroyRubber() {
   m_rubber = nullptr;
 }
 
+void KaCaptureMapTool::destroySnapMarker() {
+  delete m_snapMark;
+  m_snapMark = nullptr;
+}
+
+void KaCaptureMapTool::updateSnapMarker(const QgsPointXY& mapPt, bool snapped) {
+  QgsMapCanvas* c = canvas();
+  if (!c || !m_snapEnabled || !snapped) {
+    destroySnapMarker();
+    return;
+  }
+  if (!m_snapMark) {
+    m_snapMark = new QgsVertexMarker(c);
+    m_snapMark->setIconType(QgsVertexMarker::ICON_CIRCLE);
+    m_snapMark->setIconSize(14);
+    m_snapMark->setPenWidth(2);
+    m_snapMark->setColor(QColor(15, 118, 110));
+    m_snapMark->setFillColor(QColor(255, 255, 255, 220));
+  }
+  m_snapMark->setCenter(mapPt);
+  m_snapMark->show();
+}
+
 bool KaCaptureMapTool::mapPointFromEvent(QgsMapMouseEvent* e, QgsPointXY* out) {
   if (!e || !out || !canvas()) return false;
+  bool snapped = false;
   try {
     *out = e->mapPoint();
   } catch (...) {
@@ -57,7 +90,15 @@ bool KaCaptureMapTool::mapPointFromEvent(QgsMapMouseEvent* e, QgsPointXY* out) {
       return false;
     }
   }
+  if (m_snapEnabled && canvas()->snappingUtils()) {
+    const QgsPointLocator::Match hit = canvas()->snappingUtils()->snapToMap(e->pos());
+    if (hit.isValid()) {
+      *out = hit.point();
+      snapped = true;
+    }
+  }
   if (std::isnan(out->x()) || std::isnan(out->y())) return false;
+  updateSnapMarker(*out, snapped);
   return true;
 }
 
@@ -72,8 +113,8 @@ void KaCaptureMapTool::rebuildRubber(const QgsPointXY* cursorOrNull) {
     m_rubber = new QgsRubberBand(c, gt);
     m_rubber->setWidth(3);
     m_rubber->setSecondaryStrokeColor(QColor(255, 255, 255, 200));
-    m_rubber->setColor(QColor(37, 99, 235));
-    m_rubber->setFillColor(QColor(37, 99, 235, 80));
+    m_rubber->setColor(QColor(15, 118, 110));
+    m_rubber->setFillColor(QColor(15, 118, 110, 80));
   }
 
   Qgis::GeometryType gt = Qgis::GeometryType::Line;
@@ -105,6 +146,7 @@ void KaCaptureMapTool::activate() {
 
 void KaCaptureMapTool::deactivate() {
   destroyRubber();
+  destroySnapMarker();
   m_points.clear();
   m_finishing = false;
   QgsMapTool::deactivate();
@@ -148,9 +190,10 @@ void KaCaptureMapTool::canvasDoubleClickEvent(QgsMapMouseEvent* e) {
 }
 
 void KaCaptureMapTool::canvasMoveEvent(QgsMapMouseEvent* e) {
-  if (!e || m_points.isEmpty() || m_mode == Mode::Point || m_finishing) return;
+  if (!e || m_finishing) return;
   QgsPointXY mapPt;
   if (!mapPointFromEvent(e, &mapPt)) return;
+  if (m_points.isEmpty() || m_mode == Mode::Point) return;
   rebuildRubber(&mapPt);
 }
 

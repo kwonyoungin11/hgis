@@ -1300,8 +1300,8 @@ void TestWorkflow::drawSubToolbarWiresEachDomainSlot() {
            "draw_line (유구선) must call startEditFeatureLine");
   QVERIFY2(wired("\"line\"", "startEditSectionLine"),
            "line (단면선) must call startEditSectionLine");
-  QVERIFY2(wired("gps", "addControlPoint"),
-           "gps (기준점) must call addControlPoint");
+  QVERIFY2(wired("artifact", "startEditArtifact"),
+           "artifact (유물) must call startEditArtifact");
   QVERIFY2(!body.contains(QLatin1String("draw_area")) ||
                body.indexOf(QLatin1String("startEditFeaturePoly")) >
                    body.indexOf(QLatin1String("startEditSurveyArea")),

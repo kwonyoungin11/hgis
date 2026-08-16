@@ -19,12 +19,12 @@ private slots:
 };
 
 void TestTheme::tokensMatchSpec() {
-  QCOMPARE(KaTheme::tokens().sky1, QColor(37, 99, 235));
-  QCOMPARE(KaTheme::tokens().ink, QColor(30, 41, 59));
-  QCOMPARE(KaTheme::tokens().sky5, QColor(37, 99, 235));
-  QCOMPARE(KaTheme::tokens().border, QColor(229, 231, 235));
+  QCOMPARE(KaTheme::tokens().sky1, QColor(15, 118, 110));
+  QCOMPARE(KaTheme::tokens().ink, QColor(28, 25, 23));
+  QCOMPARE(KaTheme::tokens().sky5, QColor(15, 118, 110));
+  QCOMPARE(KaTheme::tokens().border, QColor(228, 220, 206));
   QCOMPARE(KaTheme::tokens().canvasNeutral, QColor(255, 255, 255));
-  QCOMPARE(KaTheme::tokens().desk, QColor(248, 250, 252));
+  QCOMPARE(KaTheme::tokens().desk, QColor(246, 241, 232));
 }
 
 static QString normalize(QString s) { return s.replace(QLatin1String("\r\n"), QLatin1String("\n")); }

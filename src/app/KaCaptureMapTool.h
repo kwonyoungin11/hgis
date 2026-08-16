@@ -7,6 +7,7 @@
 #include <QPointer>
 
 class QgsRubberBand;
+class QgsVertexMarker;
 class QgsVectorLayer;
 class QgsMapCanvas;
 
@@ -20,6 +21,7 @@ public:
 
   void setMode(Mode mode);
   void setTargetLayer(QgsVectorLayer* layer);
+  void setSnapEnabled(bool on);
   void resetSession();
   bool undoLastVertex();
   Mode mode() const { return m_mode; }
@@ -43,11 +45,15 @@ private:
   void cancel();
   void rebuildRubber(const QgsPointXY* cursorOrNull);
   void destroyRubber();
+  void updateSnapMarker(const QgsPointXY& mapPt, bool snapped);
+  void destroySnapMarker();
   bool mapPointFromEvent(QgsMapMouseEvent* e, QgsPointXY* out);
 
   Mode m_mode = Mode::Polygon;
   QPointer<QgsVectorLayer> m_layer;
   QgsRubberBand* m_rubber = nullptr;
+  QgsVertexMarker* m_snapMark = nullptr;
   QVector<QgsPointXY> m_points;
   bool m_finishing = false;
+  bool m_snapEnabled = true;
 };

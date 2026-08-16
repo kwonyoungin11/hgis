@@ -282,6 +282,29 @@ void dToolArea(QPainter& p) {
   p.drawRoundedRect(QRectF(14, 16, 28, 28), 3, 3);
 }
 
+void dArtifact(QPainter& p) {
+  prep(p, 2.6);
+  QPolygonF tri;
+  tri << QPointF(32, 14) << QPointF(50, 48) << QPointF(14, 48);
+  p.drawPolygon(tri);
+}
+
+void dSnap(QPainter& p) {
+  prep(p, 2.8);
+  QPainterPath mag;
+  mag.moveTo(18, 16);
+  mag.lineTo(18, 36);
+  mag.quadTo(18, 50, 32, 50);
+  mag.quadTo(46, 50, 46, 36);
+  mag.lineTo(46, 16);
+  p.drawPath(mag);
+  p.drawLine(QPointF(14, 16), QPointF(22, 16));
+  p.drawLine(QPointF(42, 16), QPointF(50, 16));
+  fillInk(p);
+  p.drawEllipse(QPointF(18, 14), 2.4, 2.4);
+  p.drawEllipse(QPointF(46, 14), 2.4, 2.4);
+}
+
 void dLayoutFrame(QPainter& p) {
   prep(p, 2.6);
   p.drawRoundedRect(QRectF(16, 12, 32, 40), 3, 3);
@@ -419,6 +442,8 @@ QIcon icon(const QString& id) {
   else if (id == QLatin1String("search")) ic = bake(dSearch);
   else if (id == QLatin1String("draw_line")) ic = bake(dToolLine);
   else if (id == QLatin1String("draw_area")) ic = bake(dToolArea);
+  else if (id == QLatin1String("snap")) ic = bake(dSnap);
+  else if (id == QLatin1String("artifact")) ic = bake(dArtifact);
   else if (id == QLatin1String("select") || id == QLatin1String("arrow")) ic = bake(dSelect);
   else if (id == QLatin1String("layout_map_frame")) ic = bake(dLayoutFrame);
   else if (id == QLatin1String("layout_select")) ic = bake(dLayoutSelect);

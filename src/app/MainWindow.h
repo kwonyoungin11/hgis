@@ -50,6 +50,7 @@ private slots:
   void startEditFeaturePoly();
   void startEditFeatureLine();
   void startEditSectionLine();
+  void startEditArtifact();
   void mergeFeaturePolygons();
   void onWorkControlClicked(QListWidgetItem* item);
   void refreshWorkPanel();
@@ -102,6 +103,7 @@ private slots:
   void showSubToolsBasemap();
   void showSubToolsSubmit();
   void hideSubTools();
+  void applySnapConfig();
   void openLayoutDesigner();
   void undoLastAction();
 
@@ -113,6 +115,7 @@ private:
   void setupFileBrowser();
   void clearSubToolbar();
   bool addVectorFromPath(const QString& path);
+  bool addRasterFromPath(const QString& path);
   bool tryAddDroppedUrls(const QList<QUrl>& urls);
   bool tryAddDroppedPaths(const QStringList& paths);
   QStringList selectedBrowserFiles() const;
@@ -129,6 +132,7 @@ private:
   QgsVectorLayer* layerByKey(const QString& layerKey) const;
   QgsVectorLayer* ensureDomainLayerForEdit(const QString& layerKey, const QString& titleKo);
   void onLayerTreeRowsMoved();
+  void moveSelectedLayer(int dir);
   void beginEdit(QgsVectorLayer* layer);
   void onGeometryCaptured(const QgsGeometry& geom);
   void stopCaptureTool();
@@ -172,6 +176,7 @@ private:
   bool m_extentClampGuard = false;
   QToolBar* m_subToolbar = nullptr;
   QString m_subToolsMode;
+  bool m_snapEnabled = true;
   KaDrawingStudio* m_drawingStudio = nullptr;
   QVector<QPair<QString, qint64>> m_committedUndo;
 #endif

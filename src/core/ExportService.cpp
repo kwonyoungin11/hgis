@@ -73,7 +73,7 @@ QString ExportService::exportSubmissionPackage(QgsProject* project,
     const QStringList names = {
       QStringLiteral("survey_area"), QStringLiteral("feature_poly"),
       QStringLiteral("feature_line"), QStringLiteral("control_points"),
-      QStringLiteral("section_line")
+      QStringLiteral("section_line"), QStringLiteral("artifact_point")
     };
     const QgsCoordinateReferenceSystem epsg5179(QStringLiteral("EPSG:5179"));
     for (const QString& n : names) {

@@ -7,6 +7,7 @@
 class QAction;
 class QCheckBox;
 class QDoubleSpinBox;
+class QDoubleSpinBox;
 class QEvent;
 class QFrame;
 class QGraphicsRectItem;
@@ -127,8 +128,8 @@ private:
   KaLayoutMapDrawTool* m_toolDrawMap = nullptr;
   QgsLayerTreeView* m_layerTree = nullptr;
   QgsLayerTreeModel* m_layerModel = nullptr;
-  bool m_gridEnabled = true;
-  bool m_gridShowNums = true;
+  bool m_gridEnabled = false;
+  bool m_gridShowNums = false;
   double m_gridIntervalM = 20.0;
   QLabel* m_status = nullptr;
   QFrame* m_adjustBar = nullptr;
@@ -136,6 +137,9 @@ private:
   QAction* m_actEndAdjust = nullptr;
   QLineEdit* m_legendTitle = nullptr;
   QSpinBox* m_legendFont = nullptr;
+  QCheckBox* m_legendBold = nullptr;
+  QCheckBox* m_legendItalic = nullptr;
+  QDoubleSpinBox* m_northSize = nullptr;
   QSpinBox* m_scaleSpin = nullptr;
   QWidget* m_inspector = nullptr;
   QLabel* m_inspectorCap = nullptr;

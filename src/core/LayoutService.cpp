@@ -459,8 +459,9 @@ static void fillLayout(QgsPrintLayout* layout, QgsProject* project,
 int LayoutService::niceScaleDenominator(double rawScale) {
   if (!(rawScale > 0.0) || !std::isfinite(rawScale))
     return 1000;
-  static const int kNice[] = {10,   20,    40,    50,    80,    100,   200,   400,
-                              500,  1000,  2000,  4000,  5000,  10000, 20000, 40000,
+  static const int kNice[] = {10,   20,    40,    50,    80,    100,   150,   200,
+                              250,  300,   400,   500,   1000,  2000,  4000,  5000,
+                              10000, 20000, 40000,
                               50000, 100000, 200000, 500000};
   // Smallest 10-ending cartographic scale that still contains the extent
   // (do not snap down — that clips the dragged survey).

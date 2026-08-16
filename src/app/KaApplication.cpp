@@ -322,7 +322,9 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
       return false;
     };
     all = step(QStringLiteral("sub_draw_select"), subHas(QStringLiteral("선택"))) && all;
+    all = step(QStringLiteral("sub_draw_snap"), subHas(QStringLiteral("자석"))) && all;
     all = step(QStringLiteral("sub_draw_area"), subHas(QStringLiteral("구역"))) && all;
+    all = step(QStringLiteral("sub_draw_artifact"), subHas(QStringLiteral("유물"))) && all;
     all = step(QStringLiteral("sub_draw_attr"), subHas(QStringLiteral("속성"))) && all;
     all = step(QStringLiteral("sub_draw_merge"), subHas(QStringLiteral("묶기"))) && all;
   }

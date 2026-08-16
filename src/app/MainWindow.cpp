@@ -75,6 +75,8 @@
 #include <QColor>
 #include <QPalette>
 #include <QUrl>
+#include <QDesktopServices>
+#include <QSizePolicy>
 #include <QMimeData>
 #include <QDrag>
 #include <QDragEnterEvent>
@@ -94,7 +96,11 @@
 #include <qgsproject.h>
 #include <qgsmaplayer.h>
 #include <qgsvectorlayer.h>
+#include <qgsrasterlayer.h>
+#include <qgsrasterrenderer.h>
+#include <qgsrastertransparency.h>
 #include <qgslayertree.h>
+#include <qgslayertreegroup.h>
 #include <qgslayertreenode.h>
 #include <qgslayertreelayer.h>
 #include <qgslayertreeview.h>
@@ -104,6 +110,7 @@
 #include <qgsmaptoolpan.h>
 #include <qgsmaptoolselect.h>
 #include <qgssnappingconfig.h>
+#include <qgssnappingutils.h>
 #include <qgsrubberband.h>
 #include <qgsapplication.h>
 #include <qgsfeature.h>
@@ -364,9 +371,35 @@ void MainWindow::buildMenus() {
   m_searchEdit->setClearButtonEnabled(true);
   connect(m_searchEdit, &QLineEdit::returnPressed, this, &MainWindow::runLocationSearch);
   mainTb->addWidget(m_searchEdit);
-  mainTb->addAction(KaIcons::icon(QStringLiteral("search")), QStringLiteral("찾기"),
-                    this, &MainWindow::runLocationSearch)
-      ->setToolTip(QStringLiteral("위치를 찾아 지도로 갑니다"));
+  QAction* actFind = mainTb->addAction(KaIcons::icon(QStringLiteral("search"), QColor(255, 255, 255)),
+                                       QStringLiteral("찾기"), this, &MainWindow::runLocationSearch);
+  actFind->setToolTip(QStringLiteral("위치를 찾아 지도로 갑니다"));
+  if (auto* b = qobject_cast<QToolButton*>(mainTb->widgetForAction(actFind)))
+    b->setObjectName(QStringLiteral("btnFind"));
+  addIcon(QStringLiteral("transform"), QStringLiteral("5179변환"),
+          QStringLiteral("지도 목록에서 고른 레이어를 업로드용 EPSG:5179 SHP로 저장합니다"),
+          &MainWindow::convertSelectedTo5179);
+
+  auto addWeb = [this, mainTb](const QString& iconId, const QString& text, const QString& url,
+                               const QString& tip) {
+    QAction* a = mainTb->addAction(KaIcons::icon(iconId), text);
+    a->setToolTip(tip);
+    QObject::connect(a, &QAction::triggered, this, [url]() {
+      QDesktopServices::openUrl(QUrl(url));
+    });
+  };
+  addWeb(QStringLiteral("upload"), QStringLiteral("인트라넷"),
+         QStringLiteral("https://intranet.gis-heritage.go.kr/"),
+         QStringLiteral("문화재 GIS 인트라넷을 엽니다"));
+  addWeb(QStringLiteral("layer"), QStringLiteral("토양도"),
+         QStringLiteral("http://soil.rda.go.kr/geoweb/soilmain.do"),
+         QStringLiteral("농진청 토양도를 엽니다"));
+  addWeb(QStringLiteral("cadastral"), QStringLiteral("지적도"),
+         QStringLiteral("https://www.vworld.kr/dtmk/dtmk_ntads_s002.do?dsId=30563"),
+         QStringLiteral("VWorld 지적도 자료를 엽니다"));
+  addWeb(QStringLiteral("contour"), QStringLiteral("지형도"),
+         QStringLiteral("https://map.ngii.go.kr/ms/map/NlipMap.do"),
+         QStringLiteral("국토정보맵 지형도를 엽니다"));
 
   auto* more = new QToolButton(mainTb);
   more->setIcon(KaIcons::icon(QStringLiteral("help")));
@@ -399,6 +432,9 @@ void MainWindow::buildMenus() {
   moreMenu->addAction(QStringLiteral("정보"), this, &MainWindow::showAbout);
   more->setMenu(moreMenu);
   more->setPopupMode(QToolButton::InstantPopup);
+  auto* stretch = new QWidget(mainTb);
+  stretch->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+  mainTb->addWidget(stretch);
   mainTb->addWidget(more);
 
   m_subToolbar = addToolBar(QStringLiteral("세부도구"));
@@ -414,6 +450,23 @@ void MainWindow::clearSubToolbar() {
 #if KA_HGIS_HAS_QGIS
   if (!m_subToolbar) return;
   m_subToolbar->clear();
+#endif
+}
+
+void MainWindow::applySnapConfig() {
+#if KA_HGIS_HAS_QGIS
+  if (!QgsProject::instance()) return;
+  QgsSnappingConfig cfg = QgsProject::instance()->snappingConfig();
+  cfg.setEnabled(m_snapEnabled);
+  cfg.setMode(Qgis::SnappingMode::AllLayers);
+  cfg.setTypeFlag(Qgis::SnappingType::Vertex);
+  cfg.setTolerance(16.0);
+  cfg.setUnits(Qgis::MapToolUnit::Pixels);
+  QgsProject::instance()->setSnappingConfig(cfg);
+  if (m_canvas && m_canvas->snappingUtils())
+    m_canvas->snappingUtils()->setConfig(cfg);
+  if (m_captureTool)
+    m_captureTool->setSnapEnabled(m_snapEnabled);
 #endif
 }
 
@@ -442,16 +495,27 @@ void MainWindow::showSubToolsDraw() {
   m_subToolbar->addWidget(lab);
   m_subToolbar->addAction(KaIcons::icon(QStringLiteral("select")), QStringLiteral("선택"),
                           this, &MainWindow::startSelectTool);
+  auto* snapAct = m_subToolbar->addAction(KaIcons::icon(QStringLiteral("snap")), QStringLiteral("자석"));
+  snapAct->setCheckable(true);
+  snapAct->setChecked(m_snapEnabled);
+  snapAct->setToolTip(QStringLiteral("켜면 지적·SHP·CAD가 꺾이는 점에 붙습니다"));
+  connect(snapAct, &QAction::toggled, this, [this](bool on) {
+    m_snapEnabled = on;
+    applySnapConfig();
+    statusBar()->showMessage(on ? QStringLiteral("자석 켜짐 — 꼭짓점에 붙습니다")
+                                : QStringLiteral("자석 꺼짐"),
+                             4000);
+  });
   m_subToolbar->addAction(KaIcons::icon(QStringLiteral("draw_area")), QStringLiteral("조사구역"),
                           this, &MainWindow::startEditSurveyArea);
   m_subToolbar->addAction(KaIcons::icon(QStringLiteral("draw_poly")), QStringLiteral("유구면"),
                           this, &MainWindow::startEditFeaturePoly);
   m_subToolbar->addAction(KaIcons::icon(QStringLiteral("draw_line")), QStringLiteral("유구선"),
                           this, &MainWindow::startEditFeatureLine);
+  m_subToolbar->addAction(KaIcons::icon(QStringLiteral("artifact")), QStringLiteral("유물"),
+                          this, &MainWindow::startEditArtifact);
   m_subToolbar->addAction(KaIcons::icon(QStringLiteral("line")), QStringLiteral("단면선"),
                           this, &MainWindow::startEditSectionLine);
-  m_subToolbar->addAction(KaIcons::icon(QStringLiteral("gps")), QStringLiteral("기준점"),
-                          this, &MainWindow::addControlPoint);
   m_subToolbar->addAction(QStringLiteral("속성"), this, &MainWindow::startAttributeEditTool);
   m_subToolbar->addAction(QStringLiteral("폴리곤 묶기"), this, &MainWindow::mergeFeaturePolygons);
   auto* closeAct = m_subToolbar->addAction(QStringLiteral("닫기"));
@@ -629,6 +693,14 @@ void MainWindow::buildUi() {
   delBtn->setText(QStringLiteral("레이어 삭제"));
   delBtn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
   connect(delBtn, &QToolButton::clicked, this, &MainWindow::removeSelectedLayers);
+  auto* upBtn = new QToolButton(central);
+  upBtn->setText(QStringLiteral("위"));
+  upBtn->setToolTip(QStringLiteral("고른 레이어를 목록에서 위로 (지도에서도 위)"));
+  connect(upBtn, &QToolButton::clicked, this, [this]() { moveSelectedLayer(-1); });
+  auto* downBtn = new QToolButton(central);
+  downBtn->setText(QStringLiteral("아래"));
+  downBtn->setToolTip(QStringLiteral("고른 레이어를 목록에서 아래로 (지도에서도 아래)"));
+  connect(downBtn, &QToolButton::clicked, this, [this]() { moveSelectedLayer(1); });
 
   auto* btnCrs5186 = new QToolButton(central);
   btnCrs5186->setObjectName(QStringLiteral("btnCrs5186"));
@@ -756,6 +828,8 @@ void MainWindow::buildUi() {
   bottomBar->setSpacing(6);
   bottomBar->addWidget(addBtn);
   bottomBar->addWidget(delBtn);
+  bottomBar->addWidget(upBtn);
+  bottomBar->addWidget(downBtn);
   bottomBar->addWidget(btnCrs5186);
   bottomBar->addWidget(btnCrs5187);
   bottomBar->addWidget(btnZoomMax);
@@ -1292,23 +1366,27 @@ void MainWindow::convertSelectedTo5179() {
 #if KA_HGIS_HAS_QGIS
   QgsMapLayer* cur = m_layerTree ? m_layerTree->currentLayer() : nullptr;
   auto* vl = qobject_cast<QgsVectorLayer*>(cur);
-  if (!vl) {
-    QMessageBox::information(this, QStringLiteral("업로드용으로 보내기"),
-                             QStringLiteral("지도 목록에서 보낼 면을 선택한 뒤 다시 누르세요."));
+  if (!vl || !vl->isValid()) {
+    QMessageBox::information(this, QStringLiteral("5179 변환"),
+                             QStringLiteral("지도 목록에서 변환할 레이어를 선택한 뒤 다시 누르세요."));
     return;
   }
+  const QString startDir = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
+  const QString suggest = QDir(startDir.isEmpty() ? QDir::homePath() : startDir)
+                              .filePath(vl->name() + QStringLiteral("_5179.shp"));
   const QString out = QFileDialog::getSaveFileName(
-      this, QStringLiteral("업로드용 5179 SHP 저장"),
-      vl->name() + QStringLiteral("_5179.shp"), QStringLiteral("SHP (*.shp)"));
+      this, QStringLiteral("EPSG:5179 SHP 저장 경로"),
+      suggest, QStringLiteral("SHP (*.shp)"));
   if (out.isEmpty()) return;
   QString err;
   if (LayerOps::convertToShp5179(vl, out, QgsProject::instance(), &err).isEmpty())
-    QMessageBox::warning(this, QStringLiteral("변환 실패"), err);
+    QMessageBox::warning(this, QStringLiteral("변환 실패"),
+                         err.isEmpty() ? QStringLiteral("저장하지 못했습니다.") : err);
   else {
     if (m_canvas) m_canvas->refresh();
-    statusBar()->showMessage(QStringLiteral("업로드용 파일을 만들었습니다."), 8000);
-    QMessageBox::information(this, QStringLiteral("보내기"),
-                             QStringLiteral("업로드용 파일을 저장했습니다.\n%1").arg(out));
+    statusBar()->showMessage(QStringLiteral("5179 변환 저장: %1").arg(QDir::toNativeSeparators(out)), 8000);
+    QMessageBox::information(this, QStringLiteral("5179 변환"),
+                             QStringLiteral("변환해서 저장했습니다.\n%1").arg(QDir::toNativeSeparators(out)));
   }
 #else
   QMessageBox::warning(this, QStringLiteral("CRS"), QStringLiteral("QGIS 빌드 필요"));
@@ -1446,9 +1524,15 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
     }
   }
 
-  const bool onLayerDrop = (m_layerTree &&
-      (watched == m_layerTree || watched == m_layerTree->viewport())) ||
-      (m_canvas && (watched == m_canvas || watched == m_canvas->viewport()));
+  const bool fromLayerTree = m_layerTree &&
+      (event->type() == QEvent::DragEnter || event->type() == QEvent::DragMove ||
+       event->type() == QEvent::Drop) &&
+      (static_cast<QDropEvent*>(event)->source() == m_layerTree ||
+       static_cast<QDropEvent*>(event)->source() == m_layerTree->viewport());
+  const bool onLayerDrop = !fromLayerTree &&
+      ((m_layerTree &&
+        (watched == m_layerTree || watched == m_layerTree->viewport())) ||
+       (m_canvas && (watched == m_canvas || watched == m_canvas->viewport())));
   if (onLayerDrop) {
     if (event->type() == QEvent::DragEnter || event->type() == QEvent::DragMove) {
       auto* de = static_cast<QDragEnterEvent*>(event);
@@ -1641,10 +1725,6 @@ void MainWindow::refreshMapCanvasNow() {
 #if KA_HGIS_HAS_QGIS
   if (!m_canvas) return;
   LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
-  for (int i = 0; i < 10; ++i)
-    QCoreApplication::processEvents(QEventLoop::AllEvents, 30);
-  m_canvas->refreshAllLayers();
-  m_canvas->refresh();
   updateNextActionStatus();
 #endif
 }
@@ -1754,9 +1834,8 @@ QgsVectorLayer* MainWindow::ensureDomainLayerForEdit(const QString& layerKey, co
   if (layerKey == QLatin1String("control_points"))
     LayerOps::ensureControlPointQualityFields(vl);
   LayerOps::applyDomainDrawStyle(vl, layerKey);
-  if (m_canvas) {
+  if (m_canvas && !QgsProject::instance()->mapLayer(vl->id())) {
     LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
-    m_canvas->refresh();
   }
   if (m_layerTree)
     m_layerTree->setCurrentLayer(vl);
@@ -1767,8 +1846,29 @@ QgsVectorLayer* MainWindow::ensureDomainLayerForEdit(const QString& layerKey, co
 
 void MainWindow::onLayerTreeRowsMoved() {
   if (!m_canvas) return;
+  LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
   m_canvas->refreshAllLayers();
   m_canvas->refresh();
+}
+
+void MainWindow::moveSelectedLayer(int dir) {
+#if KA_HGIS_HAS_QGIS
+  if (!m_layerTree || !QgsProject::instance()) return;
+  QgsLayerTreeNode* node = m_layerTree->currentNode();
+  if (!node || node->nodeType() != QgsLayerTreeNode::NodeLayer) return;
+  auto* parent = qobject_cast<QgsLayerTreeGroup*>(node->parent());
+  if (!parent) parent = QgsProject::instance()->layerTreeRoot();
+  if (!parent) return;
+  const int idx = parent->children().indexOf(node);
+  if (idx < 0) return;
+  const int dest = idx + dir;
+  if (dest < 0 || dest >= parent->children().size()) return;
+  if (!parent->takeChild(node)) return;
+  parent->insertChildNode(dest, node);
+  onLayerTreeRowsMoved();
+#else
+  Q_UNUSED(dir);
+#endif
 }
 
 void MainWindow::stopCaptureTool() {
@@ -1790,6 +1890,7 @@ QString MainWindow::attributeFieldLabelKo(const QString& fieldName) {
       {QStringLiteral("kind"), QStringLiteral("유구종류")},
       {QStringLiteral("period"), QStringLiteral("시대")},
       {QStringLiteral("feature_no"), QStringLiteral("유구번호")},
+      {QStringLiteral("artifact_no"), QStringLiteral("유물번호")},
       {QStringLiteral("note"), QStringLiteral("비고")},
       {QStringLiteral("section_id"), QStringLiteral("단면번호")},
       {QStringLiteral("point_id"), QStringLiteral("점ID")},
@@ -2517,7 +2618,6 @@ void MainWindow::beginEdit(QgsVectorLayer* layer) {
 
     m_canvas->freeze(false);
     m_canvas->setRenderFlag(true);
-    LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
 
     if (!layer->isEditable()) {
       if (!layer->startEditing()) {
@@ -2535,9 +2635,7 @@ void MainWindow::beginEdit(QgsVectorLayer* layer) {
     if (m_layerTree)
       m_layerTree->setCurrentLayer(layer);
 
-    QgsSnappingConfig snap = QgsProject::instance()->snappingConfig();
-    snap.setEnabled(false);
-    QgsProject::instance()->setSnappingConfig(snap);
+    applySnapConfig();
 
     KaCaptureMapTool::Mode mode = KaCaptureMapTool::Mode::Polygon;
     const Qgis::GeometryType gt = layer->geometryType();
@@ -2615,6 +2713,14 @@ void MainWindow::startEditSectionLine() {
   beginEdit(ensureDomainLayerForEdit(QStringLiteral("section_line"), QStringLiteral("단면선")));
 #else
   statusBar()->showMessage(QStringLiteral("스텁: 단면선"), 3000);
+#endif
+}
+
+void MainWindow::startEditArtifact() {
+#if KA_HGIS_HAS_QGIS
+  beginEdit(ensureDomainLayerForEdit(QStringLiteral("artifact_point"), QStringLiteral("유물")));
+#else
+  statusBar()->showMessage(QStringLiteral("스텁: 유물"), 3000);
 #endif
 }
 
@@ -3172,7 +3278,8 @@ void MainWindow::goFileBrowserRoot(const QString& path) {
   }
   dir.setFilter(QDir::Files | QDir::NoSymLinks);
   dir.setNameFilters({QStringLiteral("*.shp"), QStringLiteral("*.dxf"), QStringLiteral("*.dwg"),
-                      QStringLiteral("*.gpkg"), QStringLiteral("*.geojson"), QStringLiteral("*.json")});
+                      QStringLiteral("*.gpkg"), QStringLiteral("*.geojson"), QStringLiteral("*.json"),
+                      QStringLiteral("*.tif"), QStringLiteral("*.tiff"), QStringLiteral("*.gtiff")});
   const QStringList files = dir.entryList();
   for (const QString& name : files) {
     if (n >= 400) break;
@@ -3200,9 +3307,13 @@ void MainWindow::onFileBrowserActivated(QListWidgetItem* item) {
     goFileBrowserRoot(path);
     return;
   }
-  if (!addVectorFromPath(path))
+  const QString low = path.toLower();
+  const bool raster = low.endsWith(QLatin1String(".tif")) || low.endsWith(QLatin1String(".tiff")) ||
+                      low.endsWith(QLatin1String(".gtiff"));
+  if (raster ? !addRasterFromPath(path) : !addVectorFromPath(path))
     QMessageBox::warning(this, QStringLiteral("파일"),
-                         QStringLiteral("지도 레이어로 열 수 없습니다 (SHP/DXF/DWG/GPKG):\n%1").arg(path));
+                         QStringLiteral("지도 레이어로 열 수 없습니다 (SHP/DXF/DWG/GPKG/GeoTIFF):\n%1")
+                             .arg(QDir::toNativeSeparators(path)));
 }
 
 QStringList MainWindow::selectedBrowserFiles() const {
@@ -3232,14 +3343,67 @@ bool MainWindow::tryAddDroppedPaths(const QStringList& paths) {
     if (!(low.endsWith(QLatin1String(".shp")) || low.endsWith(QLatin1String(".dxf")) ||
           low.endsWith(QLatin1String(".dwg")) || low.endsWith(QLatin1String(".gpkg")) ||
           low.endsWith(QLatin1String(".geojson")) || low.endsWith(QLatin1String(".json")) ||
-          low.endsWith(QLatin1String(".tif")) || low.endsWith(QLatin1String(".tiff"))))
+          low.endsWith(QLatin1String(".tif")) || low.endsWith(QLatin1String(".tiff")) ||
+          low.endsWith(QLatin1String(".gtiff"))))
       continue;
-    if (addVectorFromPath(path))
+    const bool raster = low.endsWith(QLatin1String(".tif")) || low.endsWith(QLatin1String(".tiff")) ||
+                        low.endsWith(QLatin1String(".gtiff"));
+    if (raster ? addRasterFromPath(path) : addVectorFromPath(path))
       ++n;
   }
   if (n > 0)
     statusBar()->showMessage(QStringLiteral("레이어 %1개 추가됨 (파일→지도)").arg(n), 5000);
   return n > 0;
+}
+
+bool MainWindow::addRasterFromPath(const QString& path) {
+#if KA_HGIS_HAS_QGIS
+  const QString title = QFileInfo(path).completeBaseName();
+  auto* rl = new QgsRasterLayer(path, title, QStringLiteral("gdal"));
+  if (!rl || !rl->isValid()) {
+    delete rl;
+    return false;
+  }
+  if (!rl->crs().isValid() && QgsProject::instance() && QgsProject::instance()->crs().isValid()) {
+    rl->setCrs(QgsProject::instance()->crs());
+    statusBar()->showMessage(
+        QStringLiteral("GeoTIFF에 좌표계가 없어 작업 좌표계(%1)로 올렸습니다.").arg(m_workCrs), 8000);
+  }
+  if (QgsRasterRenderer* rend = rl->renderer()) {
+    auto* trans = new QgsRasterTransparency();
+    if (rl->bandCount() >= 3) {
+      QVector<QgsRasterTransparency::TransparentThreeValuePixel> whites;
+      whites.append(QgsRasterTransparency::TransparentThreeValuePixel(255, 255, 255, 0.0, 12, 12, 12));
+      whites.append(QgsRasterTransparency::TransparentThreeValuePixel(0, 0, 0, 0.0, 1, 1, 1));
+      trans->setTransparentThreeValuePixelList(whites);
+    } else {
+      QVector<QgsRasterTransparency::TransparentSingleValuePixel> vals;
+      vals.append(QgsRasterTransparency::TransparentSingleValuePixel(250, 255, 0.0));
+      vals.append(QgsRasterTransparency::TransparentSingleValuePixel(0, 2, 0.0));
+      trans->setTransparentSingleValuePixelList(vals);
+    }
+    rend->setRasterTransparency(trans);
+    rl->triggerRepaint();
+  }
+  LayerOps::markReferenceLayer(rl);
+  LayerOps::applyLegendCrsLabel(rl);
+  QgsProject::instance()->addMapLayer(rl, true);
+  LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, m_workCrs);
+  LayerOps::pruneEmptyLegendGroups(QgsProject::instance());
+  refreshLayerEmptyState();
+  if (m_canvas) {
+    LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
+    if (!LayerOps::zoomToLayerMax(m_canvas, rl))
+      statusBar()->showMessage(QStringLiteral("GeoTIFF는 올렸지만 범위를 잡지 못했습니다."), 8000);
+  }
+  const QString crs = rl->crs().isValid() ? rl->crs().authid() : m_workCrs;
+  statusBar()->showMessage(
+      QStringLiteral("GeoTIFF 추가: %1 · %2 · 화면 %3").arg(title, crs, m_workCrs), 10000);
+  return true;
+#else
+  Q_UNUSED(path);
+  return false;
+#endif
 }
 
 bool MainWindow::addVectorFromPath(const QString& path) {
