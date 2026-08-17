@@ -7,7 +7,7 @@
 #include "KaImageView.h"
 #include "KaDrawingStudio.h"
 #include "core/GeorefService.h"
-#include "core/FeaturePresets.h"
+#include "core/BufferAnalysis.h"
 #include "core/ChecklistEngine.h"
 #include "core/SurveyProjectFactory.h"
 #include "core/ExportService.h"
@@ -139,7 +139,8 @@
 #endif
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
-  setWindowTitle(QStringLiteral("고고학 전용 HGIS"));
+  setWindowTitle(QStringLiteral("유적 HGIS"));
+  setWindowIcon(KaIcons::appIcon());
   resize(1440, 900);
   m_checklist = new ChecklistEngine(this);
   m_checklist->loadRules(rulesPath());
@@ -333,6 +334,21 @@ void MainWindow::buildMenus() {
   addIcon(QStringLiteral("georef"), QStringLiteral("맞추기"),
           QStringLiteral("좌표 없는 그림·CAD를 지적 위에 맞춥니다"), &MainWindow::georefAssistant);
 
+  auto* btnBuffer = new QToolButton(mainTb);
+  btnBuffer->setObjectName(QStringLiteral("btnBuffer"));
+  btnBuffer->setIcon(KaIcons::icon(QStringLiteral("buffer")));
+  btnBuffer->setText(QStringLiteral("주변유적경계"));
+  btnBuffer->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+  btnBuffer->setCheckable(true);
+  btnBuffer->setToolTip(QStringLiteral("선택한 면 둘레에 500m·1000m 거리를 그립니다"));
+  connect(btnBuffer, &QToolButton::clicked, this, [this, btnBuffer](bool on) {
+    if (on) showSubToolsBuffer();
+    else hideSubTools();
+    btnBuffer->setChecked(m_subToolbar && m_subToolbar->isVisible()
+                          && m_subToolsMode == QLatin1String("buffer"));
+  });
+  mainTb->addWidget(btnBuffer);
+
   auto* btnDraw = new QToolButton(mainTb);
   btnDraw->setObjectName(QStringLiteral("btnDraw"));
   btnDraw->setIcon(KaIcons::icon(QStringLiteral("draw_poly")));
@@ -417,7 +433,7 @@ void MainWindow::buildMenus() {
          QStringLiteral("국토정보맵 지형도를 엽니다"));
 
   auto* more = new QToolButton(mainTb);
-  more->setIcon(KaIcons::icon(QStringLiteral("help")));
+  more->setIcon(KaIcons::icon(QStringLiteral("more")));
   more->setText(QStringLiteral("더보기"));
   more->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   more->setToolTip(QStringLiteral("가끔 쓰는 기능"));
@@ -497,54 +513,59 @@ void MainWindow::hideSubTools() {
   if (auto* b = findChild<QToolButton*>(QStringLiteral("btnDraw"))) b->setChecked(false);
   if (auto* b = findChild<QToolButton*>(QStringLiteral("btnBasemap"))) b->setChecked(false);
   if (auto* b = findChild<QToolButton*>(QStringLiteral("btnSubmit"))) b->setChecked(false);
+  if (auto* b = findChild<QToolButton*>(QStringLiteral("btnBuffer"))) b->setChecked(false);
 #endif
 }
 
-void MainWindow::addDrawPresetButtons() {
+void MainWindow::showSubToolsBuffer() {
 #if KA_HGIS_HAS_QGIS
   if (!m_subToolbar) return;
-  FeaturePresets& presets = FeaturePresets::instance();
-  presets.ensureLoaded();
-  if (m_drawKind.isEmpty()) m_drawKind = presets.defaultKindLabel();
-  if (m_drawPeriod.isEmpty()) m_drawPeriod = presets.defaultPeriodLabel();
-
-  auto* kindBtn = new QToolButton(m_subToolbar);
-  kindBtn->setObjectName(QStringLiteral("drawKindBtn"));
-  kindBtn->setPopupMode(QToolButton::InstantPopup);
-  kindBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
-  kindBtn->setText(QStringLiteral("종류 · %1").arg(m_drawKind));
-  kindBtn->setToolTip(QStringLiteral("유구 종류. 그린 면에 바로 들어갑니다"));
-  auto* kindMenu = new QMenu(kindBtn);
-  for (const FeaturePresets::Kind& k : presets.kinds()) {
-    const QString lab = k.label;
-    kindMenu->addAction(lab, this, [this, kindBtn, lab]() {
-      m_drawKind = lab;
-      kindBtn->setText(QStringLiteral("종류 · %1").arg(lab));
-      statusBar()->showMessage(QStringLiteral("종류: %1").arg(lab), 3000);
-    });
+  if (m_subToolsMode == QLatin1String("align")) stopAlignSession();
+  if (m_subToolsMode == QLatin1String("buffer") && m_subToolbar->isVisible()) {
+    hideSubTools();
+    return;
   }
-  kindBtn->setMenu(kindMenu);
-  m_subToolbar->addWidget(kindBtn);
+  clearSubToolbar();
+  m_subToolsMode = QStringLiteral("buffer");
+  auto* lab = new QLabel(QStringLiteral("  주변유적경계 › "));
+  lab->setObjectName(QStringLiteral("subToolbarCaption"));
+  m_subToolbar->addWidget(lab);
+  m_subToolbar->addAction(KaIcons::icon(QStringLiteral("buffer")), QStringLiteral("500m"),
+                          this, &MainWindow::runSiteBuffer500);
+  m_subToolbar->addAction(KaIcons::icon(QStringLiteral("buffer")), QStringLiteral("1000m"),
+                          this, &MainWindow::runSiteBuffer1000);
+  auto* closeAct = m_subToolbar->addAction(QStringLiteral("닫기"));
+  connect(closeAct, &QAction::triggered, this, &MainWindow::hideSubTools);
+  m_subToolbar->setVisible(true);
+  statusBar()->showMessage(
+      QStringLiteral("면 레이어를 고른 뒤 500m 또는 1000m를 누르세요. 점선은 도형 색에서 바꿉니다."),
+      8000);
+#endif
+}
 
-  auto* periodBtn = new QToolButton(m_subToolbar);
-  periodBtn->setObjectName(QStringLiteral("drawPeriodBtn"));
-  periodBtn->setPopupMode(QToolButton::InstantPopup);
-  periodBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
-  periodBtn->setText(QStringLiteral("시대 · %1").arg(m_drawPeriod));
-  periodBtn->setToolTip(QStringLiteral("시대. 면 색이 이 색으로 바뀝니다"));
-  auto* periodMenu = new QMenu(periodBtn);
-  for (const FeaturePresets::Period& p : presets.periods()) {
-    const QString lab = p.label;
-    QPixmap sw(14, 14);
-    sw.fill(QColor(p.color));
-    periodMenu->addAction(QIcon(sw), lab, this, [this, periodBtn, lab]() {
-      m_drawPeriod = lab;
-      periodBtn->setText(QStringLiteral("시대 · %1").arg(lab));
-      statusBar()->showMessage(QStringLiteral("시대: %1").arg(lab), 3000);
-    });
+void MainWindow::runSiteBuffer500() {
+#if KA_HGIS_HAS_QGIS
+  QgsVectorLayer* layer = m_layerTree ? qobject_cast<QgsVectorLayer*>(m_layerTree->currentLayer())
+                                      : nullptr;
+  QString err;
+  if (!BufferAnalysis::addDistanceRing(QgsProject::instance(), m_canvas, layer, 500.0, &err)) {
+    QMessageBox::information(this, QStringLiteral("주변유적경계"), err);
+    return;
   }
-  periodBtn->setMenu(periodMenu);
-  m_subToolbar->addWidget(periodBtn);
+  statusBar()->showMessage(QStringLiteral("주변 500m 경계를 그렸습니다"), 6000);
+#endif
+}
+
+void MainWindow::runSiteBuffer1000() {
+#if KA_HGIS_HAS_QGIS
+  QgsVectorLayer* layer = m_layerTree ? qobject_cast<QgsVectorLayer*>(m_layerTree->currentLayer())
+                                      : nullptr;
+  QString err;
+  if (!BufferAnalysis::addDistanceRing(QgsProject::instance(), m_canvas, layer, 1000.0, &err)) {
+    QMessageBox::information(this, QStringLiteral("주변유적경계"), err);
+    return;
+  }
+  statusBar()->showMessage(QStringLiteral("주변 1000m 경계를 그렸습니다"), 6000);
 #endif
 }
 
@@ -574,7 +595,6 @@ void MainWindow::showSubToolsDraw() {
                                 : QStringLiteral("자석 꺼짐"),
                              4000);
   });
-  addDrawPresetButtons();
   m_subToolbar->addAction(KaIcons::icon(QStringLiteral("easy_draw")), QStringLiteral("쉽게그리기"),
                           this, &MainWindow::startEasyDraw);
   m_subToolbar->addAction(KaIcons::icon(QStringLiteral("draw_area")), QStringLiteral("조사구역"),
@@ -1214,6 +1234,17 @@ void MainWindow::newSurvey() {
   m_workCrs = btn5187->isChecked() ? QStringLiteral("EPSG:5187") : QStringLiteral("EPSG:5186");
   const QString dir = QFileDialog::getExistingDirectory(this, QStringLiteral("저장 폴더"));
   if (dir.isEmpty()) return;
+#if KA_HGIS_HAS_QGIS
+  // Drop the previous survey from the legend before creating the GPKG so
+  // open layers do not lock the old file, and 새 조사 always starts clean.
+  hideSubTools();
+  stopAlignSession();
+  stopCaptureTool();
+  m_editLayer = nullptr;
+  m_committedUndo.clear();
+  LayerOps::removeSurveyDomainLayers(QgsProject::instance());
+  refreshLayerEmptyState();
+#endif
   QString err;
   const QString path = SurveyProjectFactory::createNewSurvey(dir, name, &err, m_workCrs);
   if (path.isEmpty()) {
@@ -1231,7 +1262,7 @@ void MainWindow::newSurvey() {
     b86->setChecked(!m_workCrs.contains(QLatin1String("5187")));
   if (auto* b87 = findChild<QToolButton*>(QStringLiteral("btnCrs5187")))
     b87->setChecked(m_workCrs.contains(QLatin1String("5187")));
-  setWindowTitle(QStringLiteral("고고학 전용 HGIS — %1").arg(name));
+  setWindowTitle(QStringLiteral("유적 HGIS — %1").arg(name));
   updateNextActionStatus();
   refreshWorkPanel();
 }
@@ -1316,13 +1347,6 @@ void MainWindow::zoomSelectedLayerMax() {
   }
   if (!layer) {
     zoomMapToFullMax();
-    return;
-  }
-  if (GeorefService::isAlignableLayer(layer)
-      && (LayerOps::isAlignPending(layer)
-          || (qobject_cast<QgsRasterLayer*>(layer)
-              && GeorefService::looksUnreferencedRaster(qobject_cast<QgsRasterLayer*>(layer))))) {
-    startAlignSession(layer);
     return;
   }
   if (!LayerOps::zoomToLayerMax(m_canvas, layer)) {
@@ -1892,6 +1916,9 @@ void MainWindow::loadSurveyLayers(const QString& gpkgOrStub) {
 #if KA_HGIS_HAS_QGIS
   if (gpkgOrStub.endsWith(QLatin1String(".stub"))) return;
   QgsProject* proj = QgsProject::instance();
+  stopAlignSession();
+  m_editLayer = nullptr;
+  m_committedUndo.clear();
   LayerOps::removeSurveyDomainLayers(proj);
   proj->setCrs(QgsCoordinateReferenceSystem(m_workCrs));
   if (m_canvas) m_canvas->setDestinationCrs(QgsCoordinateReferenceSystem(m_workCrs));
@@ -2235,7 +2262,9 @@ void MainWindow::editCurrentLayerStyle() {
   double markerMm = 3.5;
   bool noFill = false;
   bool noStroke = false;
-  LayerOps::readSimpleVectorStyle(layer, &fill, &stroke, &widthMm, &markerMm, &noFill, &noStroke);
+  bool dashed = false;
+  LayerOps::readSimpleVectorStyle(layer, &fill, &stroke, &widthMm, &markerMm, &noFill, &noStroke,
+                                  &dashed);
 
   const Qgis::GeometryType gt = layer->geometryType();
   const bool isPoly = gt == Qgis::GeometryType::Polygon;
@@ -2275,6 +2304,13 @@ void MainWindow::editCurrentLayerStyle() {
   noStrokeCheck->setChecked(noStroke);
   root->addWidget(noStrokeCheck);
 
+  QCheckBox* dashCheck = nullptr;
+  if (isLine || isPoly) {
+    dashCheck = new QCheckBox(QStringLiteral("점선"), &dlg);
+    dashCheck->setChecked(dashed);
+    root->addWidget(dashCheck);
+  }
+
   auto* strokeBtn = kaMakeColorButton(&dlg, stroke.alpha() == 0 ? QColor(21, 128, 61) : stroke,
                                       QStringLiteral("클릭해서 색 고르기"),
                                       isLine ? QStringLiteral("선 색") : QStringLiteral("외곽선 색"));
@@ -2301,7 +2337,7 @@ void MainWindow::editCurrentLayerStyle() {
     root->addWidget(catCheck);
   }
 
-  auto applyLive = [this, layer, fillBtn, strokeBtn, noFillCheck, noStrokeCheck, widthSpin,
+  auto applyLive = [this, layer, fillBtn, strokeBtn, noFillCheck, noStrokeCheck, dashCheck, widthSpin,
                     markerSpin, markerMm, catCheck]() {
     if (catCheck && catCheck->isChecked()) {
       LayerOps::applyFeaturePolyStyle(layer);
@@ -2311,7 +2347,8 @@ void MainWindow::editCurrentLayerStyle() {
       LayerOps::applySimpleVectorStyle(layer, outFill, outStroke, widthSpin->value(),
                                        markerSpin ? markerSpin->value() : markerMm,
                                        noFillCheck && noFillCheck->isChecked(),
-                                       noStrokeCheck && noStrokeCheck->isChecked());
+                                       noStrokeCheck && noStrokeCheck->isChecked(),
+                                       dashCheck && dashCheck->isChecked());
     }
     if (m_canvas) m_canvas->refresh();
     if (m_drawingStudio) m_drawingStudio->refreshMapFromProject();
@@ -2324,17 +2361,21 @@ void MainWindow::editCurrentLayerStyle() {
   connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
   connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
 
-  auto syncVisible = [&dlg, fillBox, strokeBox, widthBox, noFillCheck, noStrokeCheck, applyLive]() {
+  auto syncVisible = [&dlg, fillBox, strokeBox, widthBox, noFillCheck, noStrokeCheck, dashCheck,
+                      applyLive]() {
     const bool nf = noFillCheck && noFillCheck->isChecked();
     const bool ns = noStrokeCheck && noStrokeCheck->isChecked();
     if (fillBox) fillBox->setVisible(!nf);
     if (strokeBox) strokeBox->setVisible(!ns);
     if (widthBox) widthBox->setVisible(!ns);
+    if (dashCheck) dashCheck->setVisible(!ns);
     dlg.adjustSize();
     applyLive();
   };
   if (noFillCheck) connect(noFillCheck, &QCheckBox::toggled, &dlg, syncVisible);
   connect(noStrokeCheck, &QCheckBox::toggled, &dlg, syncVisible);
+  if (dashCheck)
+    connect(dashCheck, &QCheckBox::toggled, &dlg, [applyLive](bool) { applyLive(); });
   connect(widthSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), &dlg,
           [applyLive](double) { applyLive(); });
   if (markerSpin)
@@ -2348,7 +2389,7 @@ void MainWindow::editCurrentLayerStyle() {
   syncVisible();
 
   if (dlg.exec() != QDialog::Accepted) {
-    LayerOps::applySimpleVectorStyle(layer, fill, stroke, widthMm, markerMm, noFill, noStroke);
+    LayerOps::applySimpleVectorStyle(layer, fill, stroke, widthMm, markerMm, noFill, noStroke, dashed);
     if (m_canvas) m_canvas->refresh();
     if (m_drawingStudio) m_drawingStudio->refreshMapFromProject();
     return;
@@ -2644,10 +2685,6 @@ void MainWindow::onGeometryCaptured(const QgsGeometry& geom) {
     const QgsFeatureIds beforeIds = layer->allFeatureIds();
     QgsFeature feat(layer->fields());
     feat.setGeometry(geom);
-    FeaturePresets::instance().ensureLoaded();
-    if (m_drawKind.isEmpty()) m_drawKind = FeaturePresets::instance().defaultKindLabel();
-    if (m_drawPeriod.isEmpty()) m_drawPeriod = FeaturePresets::instance().defaultPeriodLabel();
-    FeaturePresets::instance().applyAttributes(&feat, m_drawKind, m_drawPeriod);
     if (!layer->addFeature(feat)) {
       QMessageBox::warning(this, QStringLiteral("오류"),
                            QStringLiteral("피처 추가 실패\n%1").arg(layer->commitErrors().join(QLatin1Char('\n'))));
@@ -2689,12 +2726,8 @@ void MainWindow::onGeometryCaptured(const QgsGeometry& geom) {
                         || drawnKey == QLatin1String("section_line")
                         || drawnKey == QLatin1String("control_points")
                         || drawnKey == QLatin1String("artifact_point");
-    if (drawnKey == QLatin1String("feature_poly") || drawnKey == QLatin1String("feature_line")
-        || drawnKey == QLatin1String("artifact_point")) {
-      FeaturePresets::instance().applyRenderer(layer);
-    } else if (domain) {
+    if (domain)
       LayerOps::applyDomainDrawStyle(layer, drawnKey);
-    }
     if (layer->geometryType() == Qgis::GeometryType::Polygon
         && (domain || drawnKey.startsWith(QLatin1String("user_poly"))))
       LayerOps::applyAreaM2Labels(layer);
@@ -2780,10 +2813,6 @@ void MainWindow::beginEdit(QgsVectorLayer* layer) {
     m_captureTool->setTargetLayer(layer);
     m_captureTool->setMode(mode);
     m_captureTool->setEasyDraw(false);
-    const QString editKey = LayerOps::layerKeyOf(layer);
-    if (editKey == QLatin1String("feature_poly") || editKey == QLatin1String("feature_line")
-        || editKey == QLatin1String("artifact_point"))
-      FeaturePresets::instance().applyRenderer(layer);
     m_canvas->setMapTool(m_captureTool);
     m_canvas->setFocus(Qt::OtherFocusReason);
     m_canvas->setCursor(Qt::CrossCursor);
@@ -3727,7 +3756,7 @@ void MainWindow::openProject() {
   LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, m_workCrs);
   LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, true);
   if (m_canvas) m_canvas->refresh();
-  setWindowTitle(QStringLiteral("고고학 전용 HGIS — %1").arg(QFileInfo(path).completeBaseName()));
+  setWindowTitle(QStringLiteral("유적 HGIS — %1").arg(QFileInfo(path).completeBaseName()));
   updateNextActionStatus();
 #else
   QMessageBox::information(this, QStringLiteral("스텁"), QStringLiteral("프로젝트 열기 시뮬레이션"));
@@ -4164,7 +4193,7 @@ void MainWindow::exportReportLayout() {
 
 void MainWindow::showAbout() {
   QMessageBox::about(this, QStringLiteral("정보"),
-    QStringLiteral("고고학 전용 HGIS (ka-hgis) 0.3.0\n"
+    QStringLiteral("유적 HGIS (ka-hgis) 0.3.0\n"
                    "C++/Qt6 + QGIS 4.x libraries\n"
                    "작업 CRS: 5186/5187 | 업로드: 5179\n"
                    "위치검색: 주소·지번·지역·상호\n"

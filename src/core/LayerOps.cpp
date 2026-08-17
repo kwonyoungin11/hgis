@@ -228,7 +228,7 @@ bool LayerOps::applyAreaM2Labels(QgsVectorLayer* layer) {
 
 bool LayerOps::applySimpleVectorStyle(QgsVectorLayer* layer, const QColor& fillIn, const QColor& strokeIn,
                                       double strokeWidthMm, double markerSizeMm, bool noFill,
-                                      bool noStroke) {
+                                      bool noStroke, bool dashed) {
   if (!layer || !layer->isValid()) return false;
   QColor fill = fillIn.isValid() ? fillIn : QColor(37, 99, 235, 90);
   QColor stroke = strokeIn.isValid() ? strokeIn : QColor(37, 99, 235, 255);
@@ -251,7 +251,8 @@ bool LayerOps::applySimpleVectorStyle(QgsVectorLayer* layer, const QColor& fillI
         {QStringLiteral("outline_color"), stroke.name(QColor::HexArgb)},
         {QStringLiteral("outline_width"), QString::number(noStroke ? 0.0 : strokeWidthMm)},
         {QStringLiteral("outline_width_unit"), QStringLiteral("MM")},
-        {QStringLiteral("outline_style"), noStroke ? QStringLiteral("no") : QStringLiteral("solid")},
+        {QStringLiteral("outline_style"),
+         noStroke ? QStringLiteral("no") : (dashed ? QStringLiteral("dash") : QStringLiteral("solid"))},
     };
     auto fs = QgsFillSymbol::createSimple(props);
     sym = fs.release();
@@ -260,7 +261,8 @@ bool LayerOps::applySimpleVectorStyle(QgsVectorLayer* layer, const QColor& fillI
         {QStringLiteral("line_color"), stroke.name(QColor::HexArgb)},
         {QStringLiteral("line_width"), QString::number(noStroke ? 0.0 : strokeWidthMm)},
         {QStringLiteral("line_width_unit"), QStringLiteral("MM")},
-        {QStringLiteral("line_style"), noStroke ? QStringLiteral("no") : QStringLiteral("solid")},
+        {QStringLiteral("line_style"),
+         noStroke ? QStringLiteral("no") : (dashed ? QStringLiteral("dash") : QStringLiteral("solid"))},
     });
     sym = ls.release();
   } else if (gt == Qgis::GeometryType::Point) {
@@ -285,6 +287,7 @@ bool LayerOps::applySimpleVectorStyle(QgsVectorLayer* layer, const QColor& fillI
   layer->setCustomProperty(QStringLiteral("ka_hgis/style_marker_mm"), markerSizeMm);
   layer->setCustomProperty(QStringLiteral("ka_hgis/style_no_fill"), noFill);
   layer->setCustomProperty(QStringLiteral("ka_hgis/style_no_stroke"), noStroke);
+  layer->setCustomProperty(QStringLiteral("ka_hgis/style_dashed"), dashed);
   layer->setRenderer(new QgsSingleSymbolRenderer(sym));
   layer->triggerRepaint();
   return true;
@@ -292,7 +295,7 @@ bool LayerOps::applySimpleVectorStyle(QgsVectorLayer* layer, const QColor& fillI
 
 bool LayerOps::readSimpleVectorStyle(const QgsVectorLayer* layer, QColor* fill, QColor* stroke,
                                      double* strokeWidthMm, double* markerSizeMm, bool* noFill,
-                                     bool* noStroke) {
+                                     bool* noStroke, bool* dashed) {
   if (!layer) return false;
 
   QColor f(37, 99, 235, 90);
@@ -301,6 +304,7 @@ bool LayerOps::readSimpleVectorStyle(const QgsVectorLayer* layer, QColor* fill, 
   double m = 3.5;
   bool nf = false;
   bool ns = false;
+  bool dash = false;
 
   const QString key = layerKeyOf(layer);
   if (key == QLatin1String("survey_area")) {
@@ -333,6 +337,7 @@ bool LayerOps::readSimpleVectorStyle(const QgsVectorLayer* layer, QColor* fill, 
   const QVariant cm = layer->customProperty(QStringLiteral("ka_hgis/style_marker_mm"));
   const QVariant cnf = layer->customProperty(QStringLiteral("ka_hgis/style_no_fill"));
   const QVariant cns = layer->customProperty(QStringLiteral("ka_hgis/style_no_stroke"));
+  const QVariant cd = layer->customProperty(QStringLiteral("ka_hgis/style_dashed"));
   if (cf.isValid()) {
     const QColor parsed(cf.toString());
     if (parsed.isValid()) f = parsed;
@@ -345,6 +350,7 @@ bool LayerOps::readSimpleVectorStyle(const QgsVectorLayer* layer, QColor* fill, 
   if (cm.isValid()) m = cm.toDouble();
   if (cnf.isValid()) nf = cnf.toBool();
   if (cns.isValid()) ns = cns.toBool();
+  if (cd.isValid()) dash = cd.toBool();
   if (f.alpha() == 0) nf = true;
   if (s.alpha() == 0) ns = true;
 
@@ -367,6 +373,7 @@ bool LayerOps::readSimpleVectorStyle(const QgsVectorLayer* layer, QColor* fill, 
   if (markerSizeMm) *markerSizeMm = m;
   if (noFill) *noFill = nf;
   if (noStroke) *noStroke = ns;
+  if (dashed) *dashed = dash;
   return true;
 }
 
@@ -642,6 +649,13 @@ bool LayerOps::isReferenceLayer(const QgsMapLayer* layer) {
          n == QLatin1String("위성") || n.startsWith(QLatin1String("지적"));
 }
 
+bool LayerOps::isBasemapLayer(const QgsMapLayer* layer) {
+  if (!layer) return false;
+  // Live tiles only. A user SHP named "지적…" must not survive 새 조사.
+  const QString p = layer->providerType();
+  return p == QLatin1String("wms") || p == QLatin1String("xyz") || p == QLatin1String("vectortile");
+}
+
 QgsVectorLayer* LayerOps::findByLayerKey(QgsProject* project, const QString& layerKey) {
   if (!project || layerKey.isEmpty()) return nullptr;
   for (QgsMapLayer* l : project->mapLayers()) {
@@ -675,15 +689,15 @@ void LayerOps::removeSurveyDomainLayers(QgsProject* project) {
   QStringList ids;
   for (QgsMapLayer* l : project->mapLayers()) {
     if (!l) continue;
-    const QString key = layerKeyOf(l);
-    if (!key.isEmpty() && domainLayerKeys().contains(key))
-      ids.append(l->id());
-    else if (l->customProperty(QString::fromUtf8(kPropLayerRole)).toString() ==
-             QLatin1String(kRoleSurvey))
-      ids.append(l->id());
+    if (isBasemapLayer(l)) continue;
+    if (auto* v = qobject_cast<QgsVectorLayer*>(l)) {
+      if (v->isEditable())
+        v->rollBack();
+    }
+    ids.append(l->id());
   }
-  for (const QString& id : ids)
-    project->removeMapLayer(id);
+  if (!ids.isEmpty())
+    project->removeMapLayers(ids);
   pruneEmptyLegendGroups(project);
 }
 

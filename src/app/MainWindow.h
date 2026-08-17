@@ -111,10 +111,12 @@ private slots:
   void applyMapScaleFromUi();
   void refreshMapCanvasNow();
   void showSubToolsDraw();
-  void addDrawPresetButtons();
+  void showSubToolsBuffer();
   void showSubToolsBasemap();
   void showSubToolsSubmit();
   void hideSubTools();
+  void runSiteBuffer500();
+  void runSiteBuffer1000();
   void applySnapConfig();
   void openLayoutDesigner();
   void undoLastAction();
@@ -217,8 +219,6 @@ private:
   QToolBar* m_subToolbar = nullptr;
   QString m_subToolsMode;
   bool m_snapEnabled = true;
-  QString m_drawKind;
-  QString m_drawPeriod;
   KaDrawingStudio* m_drawingStudio = nullptr;
   QVector<QPair<QString, qint64>> m_committedUndo;
 #endif

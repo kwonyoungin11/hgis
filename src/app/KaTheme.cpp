@@ -66,8 +66,10 @@ public:
       const bool on = opt->state.testFlag(State_On);
       const bool part = opt->state.testFlag(State_NoChange);
       const bool dis = !opt->state.testFlag(State_Enabled);
-      p->setPen(QPen(dis ? QColor(0x94, 0xA3, 0xB8) : QColor(0x94, 0xA3, 0xB8), 1.0));
-      p->setBrush(on || part ? QColor(0x0F, 0x76, 0x6E) : QColor(255, 255, 255));
+      p->setPen(QPen(dis ? QColor(0xA8, 0xA2, 0x9E)
+                         : (on || part ? QColor(0x7F, 0x1D, 0x1D) : QColor(0x57, 0x53, 0x4E)),
+                     1.5));
+      p->setBrush(on || part ? QColor(0xDC, 0x26, 0x26) : QColor(255, 255, 255));
       p->drawRoundedRect(r, 2.0, 2.0);
       if (on) {
         QPainterPath tick;

@@ -73,15 +73,15 @@ void dSave(QPainter& p) {
 }
 
 void dLayer(QPainter& p) {
-  prep(p, 2.6);
+  prep(p, 2.4);
   auto plate = [](qreal y) {
     QPolygonF a;
-    a << QPointF(32, y) << QPointF(50, y + 8) << QPointF(32, y + 16) << QPointF(14, y + 8);
+    a << QPointF(32, y) << QPointF(48, y + 7) << QPointF(32, y + 14) << QPointF(16, y + 7);
     return a;
   };
-  p.drawPolygon(plate(14));
-  p.drawPolygon(plate(24));
-  p.drawPolygon(plate(34));
+  p.drawPolygon(plate(16));
+  p.drawPolygon(plate(26));
+  p.drawPolygon(plate(36));
 }
 
 void dMap(QPainter& p) {
@@ -96,12 +96,10 @@ void dMap(QPainter& p) {
 }
 
 void dSatellite(QPainter& p) {
-  prep(p, 2.8);
-  p.drawEllipse(QPointF(32, 34), 14, 14);
-  p.drawEllipse(QPointF(32, 34), 6, 14);
-  p.drawLine(18, 34, 46, 34);
-  p.drawLine(20, 16, 28, 24);
-  p.drawLine(44, 16, 36, 24);
+  prep(p, 2.5);
+  p.drawEllipse(QPointF(32, 32), 16, 16);
+  p.drawEllipse(QPointF(32, 32), 7, 16);
+  p.drawLine(16, 32, 48, 32);
 }
 
 void dPolygon(QPainter& p) {
@@ -146,10 +144,17 @@ void dExport(QPainter& p) {
 }
 
 void dPdf(QPainter& p) {
-  prep(p, 2.8);
-  p.drawRoundedRect(QRectF(16, 10, 32, 44), 4, 4);
-  p.setFont(QFont(QStringLiteral("Malgun Gothic"), 10, QFont::Bold));
-  p.drawText(QRectF(16, 24, 32, 20), Qt::AlignCenter, QStringLiteral("PDF"));
+  prep(p, 2.5);
+  QPainterPath page;
+  page.moveTo(20, 12);
+  page.lineTo(38, 12);
+  page.lineTo(46, 20);
+  page.lineTo(46, 52);
+  page.lineTo(20, 52);
+  page.closeSubpath();
+  p.drawPath(page);
+  p.drawLine(38, 12, 38, 20);
+  p.drawLine(38, 20, 46, 20);
 }
 
 void dCrs(QPainter& p) {
@@ -189,20 +194,18 @@ void dTrash(QPainter& p) {
 
 void dGeoref(QPainter& p) {
   prep(p, 2.6);
-  p.drawRect(QRectF(14, 16, 28, 28));
-  fillInk(p);
-  p.drawEllipse(QPointF(20, 22), 2.6, 2.6);
-  p.drawEllipse(QPointF(36, 22), 2.6, 2.6);
-  p.drawEllipse(QPointF(20, 38), 2.6, 2.6);
-  p.drawEllipse(QPointF(40, 40), 2.6, 2.6);
+  p.drawLine(16, 28, 16, 16);
+  p.drawLine(16, 16, 28, 16);
+  p.drawLine(48, 36, 48, 48);
+  p.drawLine(48, 48, 36, 48);
 }
 
 void dPalette(QPainter& p) {
   prep(p, 2.4);
-  p.drawEllipse(QPointF(24, 26), 8, 8);
-  p.drawEllipse(QPointF(40, 26), 8, 8);
-  p.drawEllipse(QPointF(24, 42), 8, 8);
-  p.drawEllipse(QPointF(40, 42), 8, 8);
+  p.drawRoundedRect(QRectF(16, 18, 10, 10), 2, 2);
+  p.drawLine(32, 23, 48, 23);
+  p.drawRoundedRect(QRectF(16, 36, 10, 10), 2, 2);
+  p.drawLine(32, 41, 48, 41);
 }
 
 void dStop(QPainter& p) {
@@ -211,46 +214,48 @@ void dStop(QPainter& p) {
 }
 
 void dHelp(QPainter& p) {
-  prep(p, 3.0);
-  p.drawEllipse(QPointF(32, 32), 18, 18);
-  p.setFont(QFont(QStringLiteral("Malgun Gothic"), 22, QFont::Bold));
-  p.drawText(QRectF(4, 4, 56, 56), Qt::AlignCenter, QStringLiteral("?"));
+  prep(p, 2.5);
+  p.drawEllipse(QPointF(32, 32), 16, 16);
+  p.drawArc(QRectF(24, 20, 16, 16), 40 * 16, 200 * 16);
+  fillInk(p);
+  p.drawEllipse(QPointF(32, 42), 1.8, 1.8);
+}
+
+void dMore(QPainter& p) {
+  fillInk(p);
+  p.setPen(Qt::NoPen);
+  p.drawEllipse(QPointF(16, 32), 3.2, 3.2);
+  p.drawEllipse(QPointF(32, 32), 3.2, 3.2);
+  p.drawEllipse(QPointF(48, 32), 3.2, 3.2);
 }
 
 void dSearch(QPainter& p) {
-  prep(p, 3.2);
-  p.drawEllipse(QPointF(28, 28), 13, 13);
-  p.drawLine(QPointF(38, 38), QPointF(50, 50));
+  prep(p, 2.6);
+  p.drawEllipse(QPointF(28, 28), 12, 12);
+  p.drawLine(QPointF(37, 37), QPointF(48, 48));
 }
 
 void dSelect(QPainter& p) {
-  prep(p, 2.6);
-  QPainterPath arrow;
-  arrow.moveTo(18, 12);
-  arrow.lineTo(18, 48);
-  arrow.lineTo(28, 36);
-  arrow.lineTo(36, 52);
-  arrow.lineTo(44, 48);
-  arrow.lineTo(34, 32);
-  arrow.lineTo(48, 32);
-  arrow.closeSubpath();
-  p.drawPath(arrow);
+  prep(p, 2.5);
+  QPolygonF a;
+  a << QPointF(20, 14) << QPointF(20, 46) << QPointF(28, 36) << QPointF(38, 50) << QPointF(44, 46)
+    << QPointF(32, 32) << QPointF(44, 32);
+  p.drawPolygon(a);
 }
 
 void dCadastral(QPainter& p) {
-  prep(p, 2.6);
-  p.drawRect(QRectF(14, 14, 36, 36));
-  p.drawLine(14, 26, 50, 26);
-  p.drawLine(14, 38, 50, 38);
-  p.drawLine(26, 14, 26, 50);
-  p.drawLine(38, 14, 38, 50);
+  prep(p, 2.4);
+  p.drawRect(QRectF(16, 16, 32, 32));
+  p.drawLine(16, 26.7, 48, 26.7);
+  p.drawLine(16, 37.3, 48, 37.3);
+  p.drawLine(26.7, 16, 26.7, 48);
+  p.drawLine(37.3, 16, 37.3, 48);
 }
 
 void dContour(QPainter& p) {
   prep(p, 2.4);
-  p.drawArc(QRectF(12, 12, 40, 40), 20 * 16, 140 * 16);
-  p.drawArc(QRectF(18, 20, 28, 28), 20 * 16, 140 * 16);
-  p.drawArc(QRectF(24, 28, 16, 16), 20 * 16, 140 * 16);
+  p.drawArc(QRectF(14, 18, 36, 28), 20 * 16, 140 * 16);
+  p.drawArc(QRectF(20, 26, 24, 20), 20 * 16, 140 * 16);
 }
 
 void dDark(QPainter& p) {
@@ -260,11 +265,10 @@ void dDark(QPainter& p) {
 }
 
 void dToolPoly(QPainter& p) {
-  prep(p, 2.8);
+  prep(p, 2.5);
   QPolygonF poly;
-  poly << QPointF(14, 42) << QPointF(20, 16) << QPointF(40, 14) << QPointF(48, 34) << QPointF(30, 48);
+  poly << QPointF(18, 44) << QPointF(20, 18) << QPointF(44, 16) << QPointF(48, 36) << QPointF(32, 48);
   p.drawPolygon(poly);
-  p.drawLine(QPointF(38, 40), QPointF(52, 52));
 }
 
 void dToolLine(QPainter& p) {
@@ -402,6 +406,13 @@ void dCenter(QPainter& p) {
   p.drawEllipse(QPointF(32, 32), 3, 3);
 }
 
+void dBuffer(QPainter& p) {
+  prep(p, 2.4);
+  p.drawRoundedRect(QRectF(24, 24, 16, 16), 2, 2);
+  p.setPen(QPen(tInk, 2.2, Qt::DashLine, Qt::RoundCap));
+  p.drawRoundedRect(QRectF(14, 14, 36, 36), 4, 4);
+}
+
 void dEasyDraw(QPainter& p) {
   prep(p, 3.0);
   QPolygonF path;
@@ -417,6 +428,37 @@ void dEasyDraw(QPainter& p) {
 }  // namespace
 
 namespace KaIcons {
+
+QIcon appIcon() {
+  static QIcon cached;
+  if (!cached.isNull()) return cached;
+  QIcon ic;
+  for (int s : {16, 20, 24, 32, 48, 64, 128, 256}) {
+    QPixmap pm(s, s);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    const qreal m = s * 0.07;
+    const QRectF tile(m, m, s - 2 * m, s - 2 * m);
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(0x0F, 0x76, 0x6E));
+    p.drawRoundedRect(tile, s * 0.18, s * 0.18);
+    p.setBrush(QColor(0xF6, 0xF1, 0xE8));
+    const qreal cx = s * 0.50;
+    const qreal cy = s * 0.54;
+    const qreal w = s * 0.26;
+    const qreal h = s * 0.20;
+    QPolygonF site;
+    site << QPointF(cx - w, cy + h) << QPointF(cx - w * 0.65, cy - h)
+         << QPointF(cx + w * 0.88, cy - h * 0.55) << QPointF(cx + w * 0.42, cy + h);
+    p.drawPolygon(site);
+    p.setPen(QPen(QColor(0xF6, 0xF1, 0xE8), qMax(1.2, s * 0.055), Qt::SolidLine, Qt::RoundCap));
+    p.drawLine(QPointF(cx, m + s * 0.11), QPointF(cx, m + s * 0.22));
+    ic.addPixmap(pm);
+  }
+  cached = ic;
+  return cached;
+}
 
 QIcon icon(const QString& id) {
   static QHash<QString, QIcon> cache;
@@ -451,11 +493,13 @@ QIcon icon(const QString& id) {
   else if (id == QLatin1String("palette")) ic = bake(dPalette);
   else if (id == QLatin1String("stop")) ic = bake(dStop);
   else if (id == QLatin1String("help")) ic = bake(dHelp);
+  else if (id == QLatin1String("more")) ic = bake(dMore);
   else if (id == QLatin1String("search")) ic = bake(dSearch);
   else if (id == QLatin1String("draw_line")) ic = bake(dToolLine);
   else if (id == QLatin1String("draw_area")) ic = bake(dToolArea);
   else if (id == QLatin1String("snap")) ic = bake(dSnap);
   else if (id == QLatin1String("easy_draw")) ic = bake(dEasyDraw);
+  else if (id == QLatin1String("buffer")) ic = bake(dBuffer);
   else if (id == QLatin1String("artifact")) ic = bake(dArtifact);
   else if (id == QLatin1String("select") || id == QLatin1String("arrow")) ic = bake(dSelect);
   else if (id == QLatin1String("layout_map_frame")) ic = bake(dLayoutFrame);

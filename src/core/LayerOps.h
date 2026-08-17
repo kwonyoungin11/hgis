@@ -42,10 +42,11 @@ public:
   static bool applyAreaM2Labels(QgsVectorLayer* layer);
   static bool applySimpleVectorStyle(QgsVectorLayer* layer, const QColor& fill, const QColor& stroke,
                                      double strokeWidthMm, double markerSizeMm = 3.5,
-                                     bool noFill = false, bool noStroke = false);
+                                     bool noFill = false, bool noStroke = false, bool dashed = false);
   static bool readSimpleVectorStyle(const QgsVectorLayer* layer, QColor* fill, QColor* stroke,
                                     double* strokeWidthMm, double* markerSizeMm,
-                                    bool* noFill = nullptr, bool* noStroke = nullptr);
+                                    bool* noFill = nullptr, bool* noStroke = nullptr,
+                                    bool* dashed = nullptr);
   static bool mergePolygonFeatures(QgsVectorLayer* layer, QString* errorOut = nullptr);
 
   struct FieldBasemapPackResult {
@@ -121,6 +122,7 @@ public:
   static void markReferenceLayer(QgsMapLayer* layer);
   static QString layerKeyOf(const QgsMapLayer* layer);
   static bool isReferenceLayer(const QgsMapLayer* layer);
+  static bool isBasemapLayer(const QgsMapLayer* layer);
   static QgsVectorLayer* findByLayerKey(QgsProject* project, const QString& layerKey);
   // Current layer is used only when its ka_hgis/layer_key equals requiredKey.
   // 유구면 must not fall back to survey_area just because it is the current polygon.

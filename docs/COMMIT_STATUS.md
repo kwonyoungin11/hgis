@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-17 10:48:59 +09:00 |
+| Updated (local) | 2026-08-17 14:04:34 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `3bd6ff8` |
-| HEAD full | `3bd6ff8294c7852cc6688e52ad242f501bc35a91` |
-| HEAD date | 2026-08-16 15:35:45 +0900 |
+| HEAD short | `e896fce` |
+| HEAD full | `e896fce31712859a971b9a81dcf960e46733f2d1` |
+| HEAD date | 2026-08-17 10:48:58 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Refresh COMMIT_STATUS after teal chrome and digitize ship. |
-| Total commits | 23 |
+| HEAD subject | Ship georef split-align, easy-draw layer, and feature kind/period presets. |
+| Total commits | 24 |
 | Upstream | `origin/main` |
-| Sync | up to date with origin/main |
+| Sync | ahead 1 of origin/main (push pending) |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (27 paths) |
+| Working tree dirty | **yes** (19 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Refresh COMMIT_STATUS after teal chrome and digitize ship. (`3bd6ff8` @ 2026-08-16 15:35:45 +0900)
-- **Remote sync at write time:** up to date with origin/main
-- **Uncommitted local changes at write time:** yes (27 paths)
+- **Recorded tip when this file was written:** Ship georef split-align, easy-draw layer, and feature kind/period presets. (`e896fce` @ 2026-08-17 10:48:58 +0900)
+- **Remote sync at write time:** ahead 1 of origin/main (push pending)
+- **Uncommitted local changes at write time:** yes (19 paths)
 
 ### Read this correctly
 
@@ -52,6 +52,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `e896fce` | 2026-08-17T10:48:58+09:00 | Ship georef split-align, easy-draw layer, and feature kind/period presets. |
 | `3bd6ff8` | 2026-08-16T15:35:45+09:00 | Refresh COMMIT_STATUS after teal chrome and digitize ship. |
 | `74abc32` | 2026-08-16T15:35:36+09:00 | Ship teal chrome, artifact digitize, snap, and studio layer-center. |
 | `ef06bf1` | 2026-08-16T12:37:19+09:00 | Refresh COMMIT_STATUS after chrome and folder-import ship. |
@@ -81,30 +82,22 @@
 ```
 M	CMakeLists.txt
 M	HANDOFF.md
-A	data/styles/feature_presets.json
 M	data/theme/ka-hgis.qss
 M	docs/COMMIT_STATUS.md
 M	docs/HANDOFF.md
-M	"docs/user/job-cards/arcgis-\354\232\251\354\226\264.md"
-A	src/app/KaAlignMapTool.cpp
-A	src/app/KaAlignMapTool.h
-M	src/app/KaCaptureMapTool.cpp
-M	src/app/KaCaptureMapTool.h
+M	"ka-hgis-\354\213\244\355\226\211.bat"
+M	src/app/KaApplication.cpp
 M	src/app/KaIcons.cpp
-A	src/app/KaImageView.cpp
-A	src/app/KaImageView.h
+M	src/app/KaIcons.h
 M	src/app/KaTheme.cpp
 M	src/app/MainWindow.cpp
 M	src/app/MainWindow.h
-A	src/core/FeaturePresets.cpp
-A	src/core/FeaturePresets.h
-A	src/core/GeorefService.cpp
-A	src/core/GeorefService.h
+A	src/core/BufferAnalysis.cpp
+A	src/core/BufferAnalysis.h
 M	src/core/LayerOps.cpp
 M	src/core/LayerOps.h
-M	src/core/SurveyProjectFactory.h
-A	tests/test_georef.cpp
-A	tests/test_presets.cpp
+A	tests/test_buffer.cpp
+M	tests/test_workflow.cpp
 ```
 ## Other PC checklist
 

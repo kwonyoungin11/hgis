@@ -1,5 +1,6 @@
 ﻿#include "KaApplication.h"
 #include "KaTheme.h"
+#include "KaIcons.h"
 #include "MainWindow.h"
 #include <QApplication>
 #include <QPalette>
@@ -435,7 +436,8 @@ int KaApplication::run(int argc, char** argv) {
 #endif
 
   app.setApplicationName(QStringLiteral("ka-hgis"));
-  app.setApplicationDisplayName(QStringLiteral("고고학 전용 HGIS"));
+  app.setApplicationDisplayName(QStringLiteral("유적 HGIS"));
+  app.setWindowIcon(KaIcons::appIcon());
   app.setOrganizationName(QStringLiteral("ka-hgis"));
   app.setApplicationVersion(QStringLiteral("0.3.0"));
   app.setStyle(QStringLiteral("Fusion"));

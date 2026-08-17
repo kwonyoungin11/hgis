@@ -264,12 +264,12 @@ QCheckBox::indicator, QTreeView::indicator, QgsLayerTreeView::indicator {
   background: #FFFFFF;
 }
 QCheckBox::indicator:checked, QTreeView::indicator:checked, QgsLayerTreeView::indicator:checked {
-  background: #0F766E;
-  border-color: #0F766E;
+  background: #DC2626;
+  border: 1.5px solid #7F1D1D;
 }
 QCheckBox::indicator:unchecked, QTreeView::indicator:unchecked, QgsLayerTreeView::indicator:unchecked {
   background: #FFFFFF;
-  border: 1.5px solid #78716C;
+  border: 1.5px solid #57534E;
 }
 
 QMenu {

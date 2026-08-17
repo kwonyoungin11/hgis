@@ -40,6 +40,7 @@ add_library(ka_core STATIC
   src/core/VworldSettings.cpp
   src/core/GeorefService.cpp
   src/core/FeaturePresets.cpp
+  src/core/BufferAnalysis.cpp
   src/core/ChecklistEngine.h
   src/core/SurveyProjectFactory.h
   src/core/ExportService.h
@@ -51,6 +52,7 @@ add_library(ka_core STATIC
   src/core/VworldSettings.h
   src/core/GeorefService.h
   src/core/FeaturePresets.h
+  src/core/BufferAnalysis.h
 )
 target_include_directories(ka_core PUBLIC ${KA_INCLUDES})
 target_link_directories(ka_core PUBLIC ${KA_LIBDIRS})
@@ -146,6 +148,13 @@ if(KA_HGIS_BUILD_TESTS)
   target_compile_definitions(ka_preset_tests PRIVATE ${KA_TEST_DEFS})
   add_test(NAME feature_presets COMMAND ka_preset_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+  add_executable(ka_buffer_tests tests/test_buffer.cpp)
+  target_link_libraries(ka_buffer_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_buffer_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_buffer_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_buffer_tests PRIVATE ${KA_TEST_DEFS})
+  add_test(NAME buffer_ring COMMAND ka_buffer_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
   add_executable(ka_theme_tests
     tests/test_theme.cpp
     src/app/KaTheme.cpp
@@ -158,16 +167,19 @@ if(KA_HGIS_BUILD_TESTS)
   )
   add_test(NAME theme_qss COMMAND ka_theme_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
-  # Windows: ctest without OSGeo4W PATH → 0xc0000135 (DLL not found)
-  if(WIN32)
-    set(_ka_osgeo_bin "")
-    if(EXISTS "${OSGEO4W_ROOT}/apps/qgis-dev/bin")
-      set(_ka_osgeo_bin
-        "${OSGEO4W_ROOT}/apps/qgis-dev/bin;${OSGEO4W_ROOT}/apps/Qt6/bin;${OSGEO4W_ROOT}/apps/gdal-dev/bin;${OSGEO4W_ROOT}/apps/pdal-dev/bin;${OSGEO4W_ROOT}/bin")
-    endif()
-    if(_ka_osgeo_bin)
-      set_tests_properties(checklist_engine workflow_engine georef_engine feature_presets theme_qss PROPERTIES
-        ENVIRONMENT "PATH=${_ka_osgeo_bin};$ENV{PATH};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
-    endif()
+  # Windows: ctest without OSGeo4W PATH → 0xc0000135 (DLL not found).
+  # ENVIRONMENT is a CMake list, so unescaped ';' would truncate PATH to the
+  # first bin dir. Escape path separators; keep ';' only between VAR=value.
+  if(WIN32 AND EXISTS "${OSGEO4W_ROOT}/apps/qgis-dev/bin")
+    set(_ka_path
+      "${OSGEO4W_ROOT}/apps/qgis-dev/bin"
+      "${OSGEO4W_ROOT}/apps/Qt6/bin"
+      "${OSGEO4W_ROOT}/apps/gdal-dev/bin"
+      "${OSGEO4W_ROOT}/apps/pdal-dev/bin"
+      "${OSGEO4W_ROOT}/bin"
+    )
+    string(JOIN "\\;" _ka_path_esc ${_ka_path})
+    set_tests_properties(checklist_engine workflow_engine georef_engine feature_presets buffer_ring theme_qss PROPERTIES
+      ENVIRONMENT "PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
   endif()
 endif()

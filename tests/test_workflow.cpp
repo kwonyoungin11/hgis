@@ -88,6 +88,7 @@ private slots:
   void legendTitlesHideEpsgAndUseShortKorean();
   void drawSubToolbarWiresEachDomainSlot();
   void digitizeTargetLayer_featurePolyIgnoresSurveyAreaCurrent();
+  void newSurvey_removesUserLayersKeepsXyzBasemap();
 };
 
 static bool projectHasLayerNamedLike(QgsProject* proj, const QString& base) {
@@ -1334,6 +1335,45 @@ void TestWorkflow::digitizeTargetLayer_featurePolyIgnoresSurveyAreaCurrent() {
   QCOMPARE(LayerOps::layerKeyOf(got), QStringLiteral("feature_poly"));
   QCOMPARE(LayerOps::digitizeTargetLayer(&proj, feat, QStringLiteral("feature_poly")), feat);
   QCOMPARE(LayerOps::digitizeTargetLayer(&proj, nullptr, QStringLiteral("feature_poly")), feat);
+}
+
+void TestWorkflow::newSurvey_removesUserLayersKeepsXyzBasemap() {
+  QgsProject proj;
+  auto* easy = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5187"),
+                                  QStringLiteral("쉽게그리기"), QStringLiteral("memory"));
+  auto* namedCad = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5187"),
+                                      QStringLiteral("지적경계"), QStringLiteral("memory"));
+  auto* ring = new QgsVectorLayer(QStringLiteral("LineString?crs=EPSG:5187"),
+                                  QStringLiteral("주변 500m"), QStringLiteral("memory"));
+  QVERIFY(easy->isValid() && namedCad->isValid() && ring->isValid());
+  LayerOps::markSurveyLayer(easy, QStringLiteral("user:쉽게그리기"));
+  LayerOps::markSurveyLayer(namedCad, QStringLiteral("user:지적경계"));
+  LayerOps::markSurveyLayer(ring, QStringLiteral("user:buffer_ring_500"));
+  QVERIFY(easy->startEditing());
+  proj.addMapLayer(easy);
+  proj.addMapLayer(namedCad);
+  proj.addMapLayer(ring);
+
+  QString err;
+  const bool osmOk = LayerOps::addOsmBasemap(&proj, nullptr, &err);
+
+  QVERIFY(LayerOps::isBasemapLayer(namedCad) == false);
+
+  LayerOps::removeSurveyDomainLayers(&proj);
+
+  QStringList leftover;
+  bool hasBasemap = false;
+  for (QgsMapLayer* l : proj.mapLayers()) {
+    if (!l) continue;
+    if (LayerOps::isBasemapLayer(l)) {
+      hasBasemap = true;
+      continue;
+    }
+    leftover << l->name();
+  }
+  QVERIFY2(leftover.isEmpty(), qPrintable(leftover.join(QLatin1Char(','))));
+  if (osmOk)
+    QVERIFY2(hasBasemap, "OSM xyz/wms must remain after 새 조사");
 }
 
 #include "test_workflow.moc"
