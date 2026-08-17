@@ -38,6 +38,8 @@ add_library(ka_core STATIC
   src/core/LocationSearch.cpp
   src/core/WorkflowGuide.cpp
   src/core/VworldSettings.cpp
+  src/core/GeorefService.cpp
+  src/core/FeaturePresets.cpp
   src/core/ChecklistEngine.h
   src/core/SurveyProjectFactory.h
   src/core/ExportService.h
@@ -47,6 +49,8 @@ add_library(ka_core STATIC
   src/core/LocationSearch.h
   src/core/WorkflowGuide.h
   src/core/VworldSettings.h
+  src/core/GeorefService.h
+  src/core/FeaturePresets.h
 )
 target_include_directories(ka_core PUBLIC ${KA_INCLUDES})
 target_link_directories(ka_core PUBLIC ${KA_LIBDIRS})
@@ -72,6 +76,8 @@ add_executable(ka-hgis
   src/app/KaAttributeMapTool.cpp
   src/app/KaLayoutWindow.cpp
   src/app/KaDrawingStudio.cpp
+  src/app/KaAlignMapTool.cpp
+  src/app/KaImageView.cpp
   src/app/MainWindow.h
   src/app/KaApplication.h
   src/app/KaTheme.h
@@ -80,6 +86,8 @@ add_executable(ka-hgis
   src/app/KaAttributeMapTool.h
   src/app/KaLayoutWindow.h
   src/app/KaDrawingStudio.h
+  src/app/KaAlignMapTool.h
+  src/app/KaImageView.h
 )
 target_include_directories(ka-hgis PRIVATE ${KA_INCLUDES} ${CMAKE_BINARY_DIR}/generated)
 target_link_directories(ka-hgis PRIVATE ${KA_LIBDIRS})
@@ -91,6 +99,10 @@ add_custom_command(TARGET ka-hgis POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${CMAKE_SOURCE_DIR}/data/rules/drawing_checklist.v1.json"
     "$<TARGET_FILE_DIR:ka-hgis>/data/rules/drawing_checklist.v1.json"
+  COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:ka-hgis>/data/styles"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_SOURCE_DIR}/data/styles/feature_presets.json"
+    "$<TARGET_FILE_DIR:ka-hgis>/data/styles/feature_presets.json"
   COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:ka-hgis>/data/theme"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${CMAKE_SOURCE_DIR}/data/theme/ka-hgis.qss"
@@ -120,6 +132,20 @@ if(KA_HGIS_BUILD_TESTS)
   target_compile_definitions(ka_workflow_tests PRIVATE ${KA_TEST_DEFS})
   add_test(NAME workflow_engine COMMAND ka_workflow_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+  add_executable(ka_georef_tests tests/test_georef.cpp)
+  target_link_libraries(ka_georef_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_georef_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_georef_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_georef_tests PRIVATE ${KA_TEST_DEFS})
+  add_test(NAME georef_engine COMMAND ka_georef_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+  add_executable(ka_preset_tests tests/test_presets.cpp)
+  target_link_libraries(ka_preset_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_preset_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_preset_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_preset_tests PRIVATE ${KA_TEST_DEFS})
+  add_test(NAME feature_presets COMMAND ka_preset_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
   add_executable(ka_theme_tests
     tests/test_theme.cpp
     src/app/KaTheme.cpp
@@ -140,7 +166,7 @@ if(KA_HGIS_BUILD_TESTS)
         "${OSGEO4W_ROOT}/apps/qgis-dev/bin;${OSGEO4W_ROOT}/apps/Qt6/bin;${OSGEO4W_ROOT}/apps/gdal-dev/bin;${OSGEO4W_ROOT}/apps/pdal-dev/bin;${OSGEO4W_ROOT}/bin")
     endif()
     if(_ka_osgeo_bin)
-      set_tests_properties(checklist_engine workflow_engine theme_qss PROPERTIES
+      set_tests_properties(checklist_engine workflow_engine georef_engine feature_presets theme_qss PROPERTIES
         ENVIRONMENT "PATH=${_ka_osgeo_bin};$ENV{PATH};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
     endif()
   endif()

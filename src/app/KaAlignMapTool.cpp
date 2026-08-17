@@ -1,0 +1,557 @@
+#include "KaAlignMapTool.h"
+#include "core/LayerOps.h"
+
+#include <qgsmapcanvas.h>
+#include <qgsmaplayer.h>
+#include <qgsvectorlayer.h>
+#include <qgsrasterlayer.h>
+#include <qgsrubberband.h>
+#include <qgsvertexmarker.h>
+#include <qgssnappingutils.h>
+#include <qgspointlocator.h>
+#include <qgsgeometry.h>
+#include <qgsproject.h>
+#include <qgslayertree.h>
+#include <qgslayertreelayer.h>
+#include <qgsmapmouseevent.h>
+#include <qgsrectangle.h>
+#include <qgsfeature.h>
+#include <QFileInfo>
+#include <QDir>
+#include <QKeyEvent>
+#include <QColor>
+
+KaAlignPickTool::KaAlignPickTool(QgsMapCanvas* canvas)
+    : QgsMapTool(canvas) {
+  setCursor(Qt::CrossCursor);
+}
+
+KaAlignPickTool::~KaAlignPickTool() {
+  delete m_snapMark;
+  m_snapMark = nullptr;
+}
+
+QgsPointXY KaAlignPickTool::snapPoint(QgsMapMouseEvent* e, bool* snapped) {
+  if (snapped) *snapped = false;
+  QgsPointXY pt = e->mapPoint();
+  if (canvas() && canvas()->snappingUtils()) {
+    const QgsPointLocator::Match hit = canvas()->snappingUtils()->snapToMap(e->pos());
+    if (hit.isValid()) {
+      pt = hit.point();
+      if (snapped) *snapped = true;
+    }
+  }
+  return pt;
+}
+
+void KaAlignPickTool::updateSnapMark(const QgsPointXY& pt, bool snapped) {
+  if (!canvas() || !snapped) {
+    if (m_snapMark) m_snapMark->hide();
+    return;
+  }
+  if (!m_snapMark) {
+    m_snapMark = new QgsVertexMarker(canvas());
+    m_snapMark->setIconType(QgsVertexMarker::ICON_CIRCLE);
+    m_snapMark->setIconSize(16);
+    m_snapMark->setPenWidth(2);
+    m_snapMark->setColor(QColor(15, 118, 110));
+    m_snapMark->setFillColor(QColor(255, 255, 255, 220));
+  }
+  m_snapMark->setCenter(pt);
+  m_snapMark->show();
+}
+
+void KaAlignPickTool::canvasPressEvent(QgsMapMouseEvent* e) {
+  if (e->button() != Qt::LeftButton) return;
+  bool snapped = false;
+  emit picked(snapPoint(e, &snapped));
+}
+
+void KaAlignPickTool::canvasMoveEvent(QgsMapMouseEvent* e) {
+  bool snapped = false;
+  const QgsPointXY pt = snapPoint(e, &snapped);
+  updateSnapMark(pt, snapped);
+}
+
+void KaAlignPickTool::deactivate() {
+  if (m_snapMark) m_snapMark->hide();
+  QgsMapTool::deactivate();
+}
+
+KaAlignMapTool::KaAlignMapTool(QgsMapCanvas* canvas)
+    : QgsMapTool(canvas) {
+  setCursor(Qt::CrossCursor);
+}
+
+KaAlignMapTool::~KaAlignMapTool() {
+  clearMarks();
+  delete m_snapMark;
+  m_snapMark = nullptr;
+}
+
+QgsMapTool::Flags KaAlignMapTool::flags() const {
+  return QgsMapTool::EditTool;
+}
+
+QgsCoordinateReferenceSystem KaAlignMapTool::workCrs() const {
+  if (m_workCrs.isValid()) return m_workCrs;
+  if (canvas()) return canvas()->mapSettings().destinationCrs();
+  return {};
+}
+
+bool KaAlignMapTool::beginLayer(QgsMapLayer* layer, const QgsCoordinateReferenceSystem& workCrs,
+                                QString* errorOut) {
+  endSession();
+  if (!GeorefService::isAlignableLayer(layer)) {
+    if (errorOut) *errorOut = QStringLiteral("이 레이어는 맞출 수 없습니다");
+    return false;
+  }
+  m_workCrs = workCrs;
+  m_layer = layer;
+  m_pairs.clear();
+  m_affine = {};
+  m_haveFrom = false;
+  m_phase = Phase::WaitFrom;
+
+  if (auto* rl = qobject_cast<QgsRasterLayer*>(layer)) {
+    m_raster = true;
+    m_rasterPath = rl->source();
+    m_pixelW = rl->width();
+    m_pixelH = rl->height();
+    if (m_pixelW < 2 || m_pixelH < 2) {
+      if (errorOut) *errorOut = QStringLiteral("그림이 너무 작습니다");
+      endSession();
+      return false;
+    }
+  } else if (auto* vl = qobject_cast<QgsVectorLayer*>(layer)) {
+    m_raster = false;
+    if (vl->providerType() != QLatin1String("memory")) {
+      QString err;
+      auto* mem = GeorefService::cloneToMemory(
+          vl, vl->name() + QStringLiteral(" 맞춤"), &err);
+      if (!mem) {
+        if (errorOut) *errorOut = err;
+        endSession();
+        return false;
+      }
+      LayerOps::markReferenceLayer(mem);
+      LayerOps::applySimpleVectorStyle(mem, QColor(0, 0, 0, 0), QColor(0, 0, 0), 0.2, 3.5, true,
+                                       false);
+      if (QgsProject* proj = QgsProject::instance()) {
+        proj->addMapLayer(mem, true);
+        if (QgsLayerTreeLayer* node = proj->layerTreeRoot()->findLayer(vl->id()))
+          node->setItemVisibilityChecked(false);
+      }
+      m_hiddenSource = vl;
+      m_layer = mem;
+      vl = mem;
+    } else {
+      QString err;
+      m_displayClone = GeorefService::cloneToMemory(
+          vl, vl->name() + QStringLiteral(" 원본"), &err);
+    }
+    LayerOps::markReferenceLayer(vl);
+    captureOriginals(vl);
+    if (m_originals.isEmpty()) {
+      if (errorOut) *errorOut = QStringLiteral("도면에 도형이 없습니다");
+      endSession();
+      return false;
+    }
+  }
+  if (m_layer) m_layer->setOpacity(0.72);
+  emit statusChanged(statusText());
+  return true;
+}
+
+void KaAlignMapTool::captureOriginals(QgsVectorLayer* vl) {
+  m_originals.clear();
+  if (!vl) return;
+  QgsFeatureIterator it = vl->getFeatures();
+  QgsFeature f;
+  while (it.nextFeature(f)) {
+    if (f.hasGeometry()) m_originals.insert(f.id(), f.geometry());
+  }
+}
+
+void KaAlignMapTool::endSession() {
+  clearMarks();
+  if (m_displayClone) {
+    delete m_displayClone;
+    m_displayClone = nullptr;
+  }
+  m_layer.clear();
+  m_hiddenSource.clear();
+  m_pairs.clear();
+  m_originals.clear();
+  m_affine = {};
+  m_haveFrom = false;
+  m_phase = Phase::Idle;
+  m_raster = false;
+  m_rasterPath.clear();
+}
+
+QgsMapLayer* KaAlignMapTool::sourceDisplayLayer() const {
+  if (m_hiddenSource) return m_hiddenSource;
+  if (m_displayClone) return m_displayClone;
+  return nullptr;
+}
+
+void KaAlignMapTool::setMapHint(double mx, double my, bool valid) {
+  m_hintX = mx;
+  m_hintY = my;
+  m_hasHint = valid;
+}
+
+void KaAlignMapTool::setSourcePoint(double sx, double sy) {
+  m_srcX = sx;
+  m_srcY = sy;
+  m_haveFrom = true;
+  m_phase = Phase::WaitTo;
+  emit statusChanged(statusText());
+  emit pairsChanged();
+}
+
+bool KaAlignMapTool::hasSession() const {
+  return m_layer && m_phase != Phase::Idle;
+}
+
+void KaAlignMapTool::clearMarks() {
+  if (m_rubber) {
+    m_rubber->reset(Qgis::GeometryType::Line);
+    delete m_rubber;
+    m_rubber = nullptr;
+  }
+  for (QgsVertexMarker* m : m_marks) delete m;
+  m_marks.clear();
+}
+
+void KaAlignMapTool::rebuildPairMarks() {
+  for (QgsVertexMarker* m : m_marks) delete m;
+  m_marks.clear();
+  QgsMapCanvas* c = canvas();
+  if (!c) return;
+  auto addMark = [&](const QgsPointXY& p, const QColor& col) {
+    auto* mk = new QgsVertexMarker(c);
+    mk->setIconType(QgsVertexMarker::ICON_CROSS);
+    mk->setIconSize(12);
+    mk->setPenWidth(2);
+    mk->setColor(col);
+    mk->setCenter(p);
+    mk->show();
+    m_marks.append(mk);
+  };
+  for (int i = 0; i < m_pairs.size(); ++i) {
+    addMark(QgsPointXY(m_pairs[i].mapX, m_pairs[i].mapY), QColor(220, 38, 38));
+  }
+}
+
+bool KaAlignMapTool::fitToDisplay() {
+  if (!m_layer || !canvas()) return false;
+  const QgsRectangle ext = canvas()->extent();
+  if (ext.isEmpty() || !ext.isFinite()) return false;
+  if (m_raster) {
+    m_affine = GeorefService::fitRasterToExtent(m_pixelW, m_pixelH, ext);
+  } else {
+    QgsRectangle srcBox;
+    bool first = true;
+    for (auto it = m_originals.constBegin(); it != m_originals.constEnd(); ++it) {
+      const QgsRectangle b = it.value().boundingBox();
+      if (b.isEmpty()) continue;
+      if (first) {
+        srcBox = b;
+        first = false;
+      } else {
+        srcBox.combineExtentWith(b);
+      }
+    }
+    if (first) return false;
+    m_affine = GeorefService::fitSrcBoxToExtent(srcBox.xMinimum(), srcBox.yMinimum(),
+                                                srcBox.xMaximum(), srcBox.yMaximum(), ext);
+  }
+  applyPreview();
+  emit statusChanged(statusText());
+  return m_affine.valid;
+}
+
+void KaAlignMapTool::applyPreview() {
+  if (!m_layer || !m_affine.valid) return;
+  if (canvas()) {
+    canvas()->stopRendering();
+    canvas()->freeze(true);
+  }
+  QString err;
+  bool ok = true;
+  if (m_raster) {
+    auto* rl = qobject_cast<QgsRasterLayer*>(m_layer.data());
+    ok = rl && GeorefService::applyWorldFileToRaster(rl, m_affine, workCrs(), &err);
+  } else {
+    auto* vl = qobject_cast<QgsVectorLayer*>(m_layer.data());
+    ok = vl && GeorefService::applyAffineToVector(vl, m_affine, m_originals, workCrs(), &err);
+  }
+  if (canvas()) {
+    canvas()->freeze(false);
+    canvas()->refresh();
+  }
+  rebuildPairMarks();
+  if (!ok && !err.isEmpty()) emit statusChanged(err);
+}
+
+bool KaAlignMapTool::removeLastPair() {
+  if (m_haveFrom) {
+    m_haveFrom = false;
+    m_phase = Phase::WaitFrom;
+    emit statusChanged(statusText());
+    emit pairsChanged();
+    return true;
+  }
+  if (m_pairs.isEmpty()) return false;
+  return removePairAt(m_pairs.size() - 1);
+}
+
+bool KaAlignMapTool::removePairAt(int index) {
+  if (index < 0 || index >= m_pairs.size()) return false;
+  m_pairs.removeAt(index);
+  m_haveFrom = false;
+  m_phase = Phase::WaitFrom;
+  m_affine = {};
+  rebuildPairMarks();
+  emit statusChanged(statusText());
+  emit pairsChanged();
+  return true;
+}
+
+bool KaAlignMapTool::restoreOriginals() {
+  m_pairs.clear();
+  m_haveFrom = false;
+  m_phase = Phase::WaitFrom;
+  m_affine = {};
+  if (!m_raster) {
+    auto* vl = qobject_cast<QgsVectorLayer*>(m_layer.data());
+    if (vl && vl->startEditing()) {
+      for (auto it = m_originals.constBegin(); it != m_originals.constEnd(); ++it) {
+        QgsGeometry g = it.value();
+        vl->changeGeometry(it.key(), g);
+      }
+      vl->commitChanges();
+      vl->triggerRepaint();
+    }
+  }
+  clearMarks();
+  if (canvas()) canvas()->refresh();
+  emit statusChanged(statusText());
+  emit pairsChanged();
+  return true;
+}
+
+bool KaAlignMapTool::applyMove(QString* errorOut) {
+  if (m_pairs.size() < 2) {
+    if (errorOut) *errorOut = QStringLiteral("점을 2개 이상 찍은 뒤 「이동」을 누르세요");
+    return false;
+  }
+  m_affine = GeorefService::fromPairs(m_pairs);
+  if (!m_affine.valid) {
+    if (errorOut) *errorOut = QStringLiteral("점 배치로 변환을 만들 수 없습니다");
+    return false;
+  }
+  applyPreview();
+  if (m_raster) {
+    auto* old = qobject_cast<QgsRasterLayer*>(m_layer.data());
+    if (!old) {
+      if (errorOut) *errorOut = QStringLiteral("그림 레이어가 없습니다");
+      return false;
+    }
+    const QString src = old->source();
+    const QString name = old->name();
+    if (!GeorefService::writeWorldFile(src, m_affine, errorOut)) return false;
+    GeorefService::writeSidecarPrj(src, workCrs(), nullptr);
+    QgsProject* proj = QgsProject::instance();
+    if (proj) {
+      LayerOps::setAlignPending(old, false);
+      proj->removeMapLayer(old->id());
+      m_layer = nullptr;
+      auto* rl = new QgsRasterLayer(src, name, QStringLiteral("gdal"));
+      if (!rl->isValid()) {
+        delete rl;
+        if (errorOut) *errorOut = QStringLiteral("맞춰진 그림을 다시 열지 못했습니다");
+        return false;
+      }
+      if (workCrs().isValid()) rl->setCrs(workCrs());
+      LayerOps::markReferenceLayer(rl);
+      LayerOps::setAlignPending(rl, false);
+      LayerOps::applyLegendCrsLabel(rl);
+      proj->addMapLayer(rl, true);
+      m_layer = rl;
+    }
+  }
+  if (auto* l = m_layer.data()) {
+    LayerOps::setAlignPending(l, false);
+    if (QgsProject* proj = QgsProject::instance()) {
+      if (QgsLayerTreeLayer* n = proj->layerTreeRoot()->findLayer(l->id()))
+        n->setItemVisibilityChecked(true);
+    }
+  }
+  if (canvas()) {
+    canvas()->freeze(false);
+    if (m_layer) LayerOps::zoomToLayerMax(canvas(), m_layer);
+    canvas()->refresh();
+  }
+  rebuildPairMarks();
+  emit statusChanged(QStringLiteral("이동 완료 · %1점").arg(m_pairs.size()));
+  emit pairsChanged();
+  return true;
+}
+
+bool KaAlignMapTool::saveAligned(QString* savedPath, QString* errorOut) {
+  if (!m_layer) {
+    if (errorOut) *errorOut = QStringLiteral("맞출 도면이 없습니다");
+    return false;
+  }
+  if (m_pairs.size() < 2 && !m_affine.valid) {
+    if (errorOut) *errorOut = QStringLiteral("점을 두 곳 이상 찍거나 화면에 가져오기를 하세요");
+    return false;
+  }
+  if (m_pairs.size() >= 2) {
+    m_affine = GeorefService::fromPairs(m_pairs);
+    applyPreview();
+  }
+  if (m_raster) {
+    auto* rl = qobject_cast<QgsRasterLayer*>(m_layer.data());
+    if (!rl) return false;
+    if (!GeorefService::applyWorldFileToRaster(rl, m_affine, workCrs(), errorOut))
+      return false;
+    LayerOps::markReferenceLayer(rl);
+    LayerOps::applyLegendCrsLabel(rl);
+    if (savedPath) *savedPath = GeorefService::worldFilePathFor(rl->source());
+    return true;
+  }
+  auto* vl = qobject_cast<QgsVectorLayer*>(m_layer.data());
+  if (!vl) return false;
+  QString base = vl->name();
+  base.replace(QStringLiteral(" 맞춤"), QString());
+  QString dir;
+  if (m_hiddenSource && !m_hiddenSource->source().isEmpty())
+    dir = QFileInfo(m_hiddenSource->source().section(QLatin1Char('|'), 0, 0)).absolutePath();
+  if (dir.isEmpty()) dir = QFileInfo(vl->source()).absolutePath();
+  if (dir.isEmpty() || dir == QLatin1String(".")) dir = QDir::tempPath();
+  const QString out = dir + QLatin1Char('/') + QFileInfo(base).completeBaseName()
+                      + QStringLiteral("_aligned.gpkg");
+  if (QFile::exists(out)) QFile::remove(out);
+  const QString written = GeorefService::saveVectorCopyGpkg(vl, out, workCrs(), errorOut);
+  if (written.isEmpty()) return false;
+  if (savedPath) *savedPath = written;
+  LayerOps::markReferenceLayer(vl);
+  LayerOps::applyLegendCrsLabel(vl);
+  return true;
+}
+
+QString KaAlignMapTool::statusText() const {
+  if (!m_layer) return QStringLiteral("맞출 도면을 고르세요");
+  if (m_phase == Phase::WaitTo)
+    return QStringLiteral("오른쪽 지도에서 같은 모서리를 찍으세요");
+  if (m_pairs.isEmpty())
+    return QStringLiteral("왼쪽 도면 모서리 → 오른쪽 지적 모서리");
+  QString s = QStringLiteral("왼쪽 → 오른쪽 · %1점").arg(m_pairs.size());
+  if (m_pairs.size() >= 3 && m_affine.valid)
+    s += QStringLiteral(" · 어긋남 %1 m").arg(m_affine.rmsMeters, 0, 'f', 2);
+  else if (m_pairs.size() == 2)
+    s += QStringLiteral(" · 한 점 더 찍으면 기울기도 맞습니다");
+  return s;
+}
+
+void KaAlignMapTool::updateSnapMark(const QgsPointXY& pt, bool snapped) {
+  QgsMapCanvas* c = canvas();
+  if (!c || !snapped) {
+    if (m_snapMark) m_snapMark->hide();
+    return;
+  }
+  if (!m_snapMark) {
+    m_snapMark = new QgsVertexMarker(c);
+    m_snapMark->setIconType(QgsVertexMarker::ICON_CIRCLE);
+    m_snapMark->setIconSize(16);
+    m_snapMark->setPenWidth(2);
+    m_snapMark->setColor(QColor(15, 118, 110));
+    m_snapMark->setFillColor(QColor(255, 255, 255, 220));
+  }
+  m_snapMark->setCenter(pt);
+  m_snapMark->show();
+}
+
+bool KaAlignMapTool::mapPointFromEvent(QgsMapMouseEvent* e, QgsPointXY* out, bool* snapped) {
+  if (!out) return false;
+  if (snapped) *snapped = false;
+  *out = e->mapPoint();
+  bool did = false;
+  QgsMapCanvas* c = canvas();
+  if (c && c->snappingUtils()) {
+    const QgsPointLocator::Match m = c->snappingUtils()->snapToMap(e->pos());
+    if (m.isValid()) {
+      *out = m.point();
+      did = true;
+      if (snapped) *snapped = true;
+    }
+  }
+  updateSnapMark(*out, did);
+  return did;
+}
+
+void KaAlignMapTool::canvasPressEvent(QgsMapMouseEvent* e) {
+  if (!m_layer || e->button() != Qt::LeftButton) {
+    if (e->button() == Qt::RightButton) {
+      m_haveFrom = false;
+      m_phase = Phase::WaitFrom;
+      emit statusChanged(statusText());
+    }
+    return;
+  }
+  if (m_phase != Phase::WaitTo || !m_haveFrom) {
+    emit statusChanged(QStringLiteral("왼쪽 도면에서 먼저 모서리를 찍으세요"));
+    return;
+  }
+  QgsPointXY mapPt;
+  if (m_hasHint)
+    mapPt = QgsPointXY(m_hintX, m_hintY);
+  else
+    mapPointFromEvent(e, &mapPt, nullptr);
+  GeorefService::Pair pr;
+  pr.srcX = m_srcX;
+  pr.srcY = m_srcY;
+  pr.mapX = mapPt.x();
+  pr.mapY = mapPt.y();
+  m_pairs.append(pr);
+  m_haveFrom = false;
+  m_phase = Phase::WaitFrom;
+  rebuildPairMarks();
+  emit statusChanged(statusText());
+  emit pairsChanged();
+}
+
+void KaAlignMapTool::canvasMoveEvent(QgsMapMouseEvent* e) {
+  QgsPointXY mapPt;
+  mapPointFromEvent(e, &mapPt, nullptr);
+  if (m_haveFrom && m_rubber) m_rubber->movePoint(mapPt);
+  emit cursorMoved(mapPt);
+}
+
+void KaAlignMapTool::keyPressEvent(QKeyEvent* e) {
+  if (e->key() == Qt::Key_Escape) {
+    if (m_haveFrom) {
+      m_haveFrom = false;
+      m_phase = Phase::WaitFrom;
+      if (m_rubber) m_rubber->reset(Qgis::GeometryType::Line);
+      emit statusChanged(statusText());
+      e->accept();
+      return;
+    }
+  }
+  if (e->key() == Qt::Key_Backspace || e->key() == Qt::Key_Delete) {
+    removeLastPair();
+    e->accept();
+    return;
+  }
+  QgsMapTool::keyPressEvent(e);
+}
+
+void KaAlignMapTool::deactivate() {
+  if (m_rubber) m_rubber->reset(Qgis::GeometryType::Line);
+  QgsMapTool::deactivate();
+}

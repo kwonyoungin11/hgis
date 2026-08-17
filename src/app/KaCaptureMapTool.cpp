@@ -12,6 +12,7 @@
 #include <QKeyEvent>
 #include <QKeySequence>
 #include <QColor>
+#include <QWidget>
 #include <cmath>
 
 KaCaptureMapTool::KaCaptureMapTool(QgsMapCanvas* canvas)
@@ -40,6 +41,14 @@ void KaCaptureMapTool::setTargetLayer(QgsVectorLayer* layer) {
 void KaCaptureMapTool::setSnapEnabled(bool on) {
   m_snapEnabled = on;
   if (!on) destroySnapMarker();
+}
+
+void KaCaptureMapTool::setEasyDraw(bool on) {
+  m_easyDraw = on;
+  if (on) {
+    m_snapEnabled = true;
+    setCursor(Qt::CrossCursor);
+  }
 }
 
 void KaCaptureMapTool::resetSession() {
@@ -78,7 +87,23 @@ void KaCaptureMapTool::updateSnapMarker(const QgsPointXY& mapPt, bool snapped) {
   m_snapMark->show();
 }
 
-bool KaCaptureMapTool::mapPointFromEvent(QgsMapMouseEvent* e, QgsPointXY* out) {
+bool KaCaptureMapTool::nearPoint(const QgsPointXY& a, const QgsPointXY& b) const {
+  double tol = 0.15;
+  if (canvas()) {
+    const double mupp = canvas()->mapUnitsPerPixel();
+    if (mupp > 0) tol = std::max(mupp * 10.0, 0.05);
+  }
+  return a.sqrDist(b) <= tol * tol;
+}
+
+int KaCaptureMapTool::indexOfSketchVertex(const QgsPointXY& pt) const {
+  for (int i = 0; i < m_points.size(); ++i) {
+    if (nearPoint(m_points.at(i), pt)) return i;
+  }
+  return -1;
+}
+
+bool KaCaptureMapTool::mapPointFromEvent(QgsMapMouseEvent* e, QgsPointXY* out, bool* snappedOut) {
   if (!e || !out || !canvas()) return false;
   bool snapped = false;
   try {
@@ -99,6 +124,7 @@ bool KaCaptureMapTool::mapPointFromEvent(QgsMapMouseEvent* e, QgsPointXY* out) {
   }
   if (std::isnan(out->x()) || std::isnan(out->y())) return false;
   updateSnapMarker(*out, snapped);
+  if (snappedOut) *snappedOut = snapped;
   return true;
 }
 
@@ -139,15 +165,20 @@ void KaCaptureMapTool::activate() {
     canvas()->setMouseTracking(true);
     canvas()->freeze(false);
     canvas()->setRenderFlag(true);
+    m_savedMenuPolicy = canvas()->contextMenuPolicy();
+    canvas()->setContextMenuPolicy(Qt::PreventContextMenu);
   }
   QgsMapTool::activate();
   setCursor(Qt::CrossCursor);
 }
 
 void KaCaptureMapTool::deactivate() {
+  if (canvas())
+    canvas()->setContextMenuPolicy(m_savedMenuPolicy);
   destroyRubber();
   destroySnapMarker();
-  m_points.clear();
+  if (!m_finishing)
+    m_points.clear();
   m_finishing = false;
   QgsMapTool::deactivate();
 }
@@ -155,8 +186,15 @@ void KaCaptureMapTool::deactivate() {
 void KaCaptureMapTool::canvasPressEvent(QgsMapMouseEvent* e) {
   if (!e || !canvas() || m_finishing) return;
 
+  if (e->button() == Qt::RightButton) {
+    e->accept();
+    finish();
+    return;
+  }
+
   QgsPointXY mapPt;
-  if (!mapPointFromEvent(e, &mapPt)) return;
+  bool snapped = false;
+  if (!mapPointFromEvent(e, &mapPt, &snapped)) return;
 
   if (e->button() == Qt::LeftButton) {
     e->accept();
@@ -166,7 +204,16 @@ void KaCaptureMapTool::canvasPressEvent(QgsMapMouseEvent* e) {
       finish();
       return;
     }
-    m_points.append(mapPt);
+    if (m_easyDraw && !m_points.isEmpty()) {
+      const int idx = indexOfSketchVertex(mapPt);
+      if (idx >= 0) {
+        m_points.resize(idx + 1);
+        rebuildRubber(&mapPt);
+        return;
+      }
+    }
+    if (m_points.isEmpty() || !nearPoint(m_points.last(), mapPt))
+      m_points.append(mapPt);
     rebuildRubber(&mapPt);
   }
 }
@@ -175,7 +222,8 @@ void KaCaptureMapTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
   if (!e || !canvas() || m_finishing) return;
   if (e->button() != Qt::RightButton) return;
   e->accept();
-  finish();
+  if (!m_points.isEmpty())
+    finish();
 }
 
 void KaCaptureMapTool::canvasDoubleClickEvent(QgsMapMouseEvent* e) {
@@ -192,8 +240,13 @@ void KaCaptureMapTool::canvasDoubleClickEvent(QgsMapMouseEvent* e) {
 void KaCaptureMapTool::canvasMoveEvent(QgsMapMouseEvent* e) {
   if (!e || m_finishing) return;
   QgsPointXY mapPt;
-  if (!mapPointFromEvent(e, &mapPt)) return;
-  if (m_points.isEmpty() || m_mode == Mode::Point) return;
+  bool snapped = false;
+  if (!mapPointFromEvent(e, &mapPt, &snapped)) return;
+  if (m_points.isEmpty() || m_mode == Mode::Point) {
+    return;
+  }
+  if (m_easyDraw && snapped && indexOfSketchVertex(mapPt) < 0)
+    m_points.append(mapPt);
   rebuildRubber(&mapPt);
 }
 
@@ -238,7 +291,8 @@ void KaCaptureMapTool::finish() {
 
   const int need = (m_mode == Mode::Point) ? 1 : (m_mode == Mode::Line ? 2 : 3);
   if (m_points.size() < need) {
-    emit captureCanceled();
+    if (!m_points.isEmpty())
+      emit captureCanceled();
     return;
   }
 
@@ -250,11 +304,20 @@ void KaCaptureMapTool::finish() {
     geom = QgsGeometry::fromPointXY(m_points.first());
     ok = !geom.isEmpty();
   } else if (m_mode == Mode::Line) {
-    geom = QgsGeometry::fromPolylineXY(m_points);
+    QgsPolylineXY line;
+    for (const QgsPointXY& p : m_points) {
+      if (line.isEmpty() || !nearPoint(line.last(), p))
+        line.append(p);
+    }
+    geom = QgsGeometry::fromPolylineXY(line);
     ok = !geom.isEmpty();
   } else {
-    QgsPolylineXY ring = m_points;
-    if (!ring.isEmpty() && ring.first() != ring.last())
+    QgsPolylineXY ring;
+    for (const QgsPointXY& p : m_points) {
+      if (ring.isEmpty() || !nearPoint(ring.last(), p))
+        ring.append(p);
+    }
+    if (ring.size() >= 3 && ring.first() != ring.last())
       ring.append(ring.first());
     geom = QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring);
     ok = !geom.isEmpty();
@@ -263,7 +326,34 @@ void KaCaptureMapTool::finish() {
       if (!fixed.isEmpty())
         geom = fixed;
     }
-    ok = !geom.isEmpty();
+    if (!geom.isEmpty() && (geom.isMultipart() || geom.type() != Qgis::GeometryType::Polygon)) {
+      QgsGeometry best;
+      double bestA = -1;
+      const QVector<QgsGeometry> parts = geom.asGeometryCollection();
+      for (const QgsGeometry& part : parts) {
+        if (part.type() != Qgis::GeometryType::Polygon) continue;
+        if (part.isMultipart()) {
+          const QgsMultiPolygonXY mp = part.asMultiPolygon();
+          for (const QgsPolygonXY& poly : mp) {
+            const QgsGeometry one = QgsGeometry::fromPolygonXY(poly);
+            const double a = one.area();
+            if (a > bestA) {
+              bestA = a;
+              best = one;
+            }
+          }
+        } else {
+          const double a = part.area();
+          if (a > bestA) {
+            bestA = a;
+            best = part;
+          }
+        }
+      }
+      if (!best.isEmpty())
+        geom = best;
+    }
+    ok = !geom.isEmpty() && geom.type() == Qgis::GeometryType::Polygon;
   }
 
   if (!ok) {

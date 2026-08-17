@@ -8,4 +8,7 @@
 | Project (tool) | 좌표 변환 |
 | Layout View | 도면 만들기 |
 | Shapefile export | 제출 패키지 |
+| Georeferencing / Fit To Display | 맞추기 / 화면에 가져오기 |
+| Add Control Points | 점 찍기 (도면 모서리 → 지적 모서리) |
+| Update Georeferencing | 맞추기 저장 |
 

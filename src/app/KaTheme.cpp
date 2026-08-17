@@ -46,7 +46,7 @@ public:
   int pixelMetric(PixelMetric metric, const QStyleOption* opt, const QWidget* w) const override {
     if (metric == PM_IndicatorWidth || metric == PM_IndicatorHeight ||
         metric == PM_ExclusiveIndicatorWidth || metric == PM_ExclusiveIndicatorHeight)
-      return 14;
+      return 16;
     return QProxyStyle::pixelMetric(metric, opt, w);
   }
 
@@ -59,7 +59,10 @@ public:
     if (pe == PE_IndicatorCheckBox || pe == PE_IndicatorItemViewItemCheck) {
       p->save();
       p->setRenderHint(QPainter::Antialiasing, true);
-      const QRectF r = QRectF(opt->rect).adjusted(1.0, 1.0, -1.0, -1.0);
+      QRect box = opt->rect;
+      if (box.width() < 14 || box.height() < 14)
+        box = QRect(box.center().x() - 8, box.center().y() - 8, 16, 16);
+      const QRectF r = QRectF(box).adjusted(1.0, 1.0, -1.0, -1.0);
       const bool on = opt->state.testFlag(State_On);
       const bool part = opt->state.testFlag(State_NoChange);
       const bool dis = !opt->state.testFlag(State_Enabled);

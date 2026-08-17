@@ -1,0 +1,113 @@
+#pragma once
+
+#include "core/GeorefService.h"
+#include <qgsmaptool.h>
+#include <qgsmapmouseevent.h>
+#include <qgspointxy.h>
+#include <qgscoordinatereferencesystem.h>
+#include <QHash>
+#include <QPointer>
+#include <QVector>
+
+class QgsRubberBand;
+class QgsVertexMarker;
+class QgsMapLayer;
+class QgsVectorLayer;
+class QgsRasterLayer;
+class QgsGeometry;
+
+class KaAlignPickTool : public QgsMapTool {
+  Q_OBJECT
+public:
+  explicit KaAlignPickTool(QgsMapCanvas* canvas);
+  ~KaAlignPickTool() override;
+  void canvasPressEvent(QgsMapMouseEvent* e) override;
+  void canvasMoveEvent(QgsMapMouseEvent* e) override;
+  void deactivate() override;
+signals:
+  void picked(const QgsPointXY& pt);
+
+private:
+  QgsPointXY snapPoint(QgsMapMouseEvent* e, bool* snapped);
+  void updateSnapMark(const QgsPointXY& pt, bool snapped);
+  QgsVertexMarker* m_snapMark = nullptr;
+};
+
+class KaAlignMapTool : public QgsMapTool {
+  Q_OBJECT
+public:
+  explicit KaAlignMapTool(QgsMapCanvas* canvas);
+  ~KaAlignMapTool() override;
+
+  bool beginLayer(QgsMapLayer* layer, const QgsCoordinateReferenceSystem& workCrs,
+                  QString* errorOut = nullptr);
+  void endSession();
+  bool hasSession() const;
+  QgsMapLayer* targetLayer() const { return m_layer; }
+  QgsMapLayer* sourceDisplayLayer() const;
+  QString rasterSourcePath() const { return m_rasterPath; }
+  void setSourcePoint(double sx, double sy);
+  void setMapHint(double mx, double my, bool valid);
+  bool hasPendingSource() const { return m_haveFrom; }
+  double pendingSrcX() const { return m_srcX; }
+  double pendingSrcY() const { return m_srcY; }
+  const QVector<GeorefService::Pair>& pairs() const { return m_pairs; }
+
+  bool fitToDisplay();
+  bool removeLastPair();
+  bool removePairAt(int index);
+  bool restoreOriginals();
+  bool applyMove(QString* errorOut = nullptr);
+  bool saveAligned(QString* savedPath, QString* errorOut);
+
+  int pairCount() const { return m_pairs.size(); }
+  double rmsMeters() const { return m_affine.rmsMeters; }
+  QString statusText() const;
+  bool isRasterSession() const { return m_raster; }
+
+  Flags flags() const override;
+  void canvasPressEvent(QgsMapMouseEvent* e) override;
+  void canvasMoveEvent(QgsMapMouseEvent* e) override;
+  void keyPressEvent(QKeyEvent* e) override;
+  void deactivate() override;
+
+signals:
+  void statusChanged(const QString& text);
+  void pairsChanged();
+  void cursorMoved(const QgsPointXY& mapPt);
+  void sessionEnded();
+
+private:
+  enum class Phase { Idle, WaitFrom, WaitTo };
+
+  void clearMarks();
+  void rebuildPairMarks();
+  void applyPreview();
+  void captureOriginals(QgsVectorLayer* vl);
+  bool mapPointFromEvent(QgsMapMouseEvent* e, QgsPointXY* out, bool* snapped);
+  void updateSnapMark(const QgsPointXY& pt, bool snapped);
+  QgsCoordinateReferenceSystem workCrs() const;
+
+  QPointer<QgsMapLayer> m_layer;
+  QPointer<QgsVectorLayer> m_hiddenSource;
+  QPointer<QgsVectorLayer> m_displayClone;
+  bool m_raster = false;
+  int m_pixelW = 0;
+  int m_pixelH = 0;
+  QString m_rasterPath;
+  double m_srcX = 0;
+  double m_srcY = 0;
+  double m_hintX = 0;
+  double m_hintY = 0;
+  bool m_hasHint = false;
+  QgsCoordinateReferenceSystem m_workCrs;
+  QVector<GeorefService::Pair> m_pairs;
+  GeorefService::Affine m_affine;
+  QHash<qint64, QgsGeometry> m_originals;
+  Phase m_phase = Phase::Idle;
+  QgsPointXY m_fromMap;
+  bool m_haveFrom = false;
+  QgsRubberBand* m_rubber = nullptr;
+  QgsVertexMarker* m_snapMark = nullptr;
+  QVector<QgsVertexMarker*> m_marks;
+};

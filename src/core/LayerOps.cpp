@@ -12,6 +12,7 @@
 #include <QPainter>
 #include <QUrl>
 #include <QColor>
+#include <QFont>
 #include <QDir>
 #include <QTemporaryFile>
 
@@ -47,6 +48,10 @@
 #include <qgsnetworkaccessmanager.h>
 #include <qgslayertreegroup.h>
 #include <qgsprojectviewsettings.h>
+#include <qgspallabeling.h>
+#include <qgsvectorlayerlabeling.h>
+#include <qgstextformat.h>
+#include <qgslabelobstaclesettings.h>
 #include <qgsreferencedgeometry.h>
 #include <QNetworkRequest>
 
@@ -178,6 +183,45 @@ bool LayerOps::applyDomainDrawStyle(QgsVectorLayer* layer, const QString& layerK
   layer->setCustomProperty(QStringLiteral("ka_hgis/style_width_mm"), strokeW);
   layer->setCustomProperty(QStringLiteral("ka_hgis/style_marker_mm"), markerSize);
   layer->setRenderer(new QgsSingleSymbolRenderer(sym));
+  if (gt == Qgis::GeometryType::Polygon)
+    applyAreaM2Labels(layer);
+  layer->triggerRepaint();
+  return true;
+}
+
+bool LayerOps::applyAreaM2Labels(QgsVectorLayer* layer) {
+  if (!layer || !layer->isValid()) return false;
+  if (layer->geometryType() != Qgis::GeometryType::Polygon) return false;
+
+  QgsPalLayerSettings s;
+  s.drawLabels = true;
+  s.fieldName = QStringLiteral("format_number(area($geometry), 2) || ' ㎡'");
+  s.isExpression = true;
+  s.placement = Qgis::LabelPlacement::OverPoint;
+  s.setPolygonPlacementFlags(Qgis::LabelPolygonPlacementFlag::AllowPlacementInsideOfPolygon);
+
+  QgsLabelObstacleSettings obs = s.obstacleSettings();
+  obs.setIsObstacle(false);
+  s.setObstacleSettings(obs);
+
+  QgsTextFormat fmt;
+  QFont font = fmt.font();
+  font.setFamily(QStringLiteral("Malgun Gothic"));
+  font.setPointSize(9);
+  font.setBold(true);
+  fmt.setFont(font);
+  fmt.setSize(9);
+  fmt.setSizeUnit(Qgis::RenderUnit::Points);
+  fmt.setColor(QColor(15, 23, 42));
+  QgsTextBufferSettings buf = fmt.buffer();
+  buf.setEnabled(true);
+  buf.setSize(0.8);
+  buf.setColor(QColor(255, 255, 255, 230));
+  fmt.setBuffer(buf);
+  s.setFormat(fmt);
+
+  layer->setLabeling(new QgsVectorLayerSimpleLabeling(s));
+  layer->setLabelsEnabled(true);
   layer->triggerRepaint();
   return true;
 }
@@ -530,6 +574,18 @@ void LayerOps::markReferenceLayer(QgsMapLayer* layer) {
   layer->setCustomProperty(QString::fromUtf8(kPropLayerRole), QString::fromUtf8(kRoleReference));
 }
 
+void LayerOps::setAlignPending(QgsMapLayer* layer, bool pending) {
+  if (!layer) return;
+  if (pending)
+    layer->setCustomProperty(QString::fromUtf8(kPropAlignPending), true);
+  else
+    layer->removeCustomProperty(QString::fromUtf8(kPropAlignPending));
+}
+
+bool LayerOps::isAlignPending(const QgsMapLayer* layer) {
+  return layer && layer->customProperty(QString::fromUtf8(kPropAlignPending)).toBool();
+}
+
 QString LayerOps::layerKeyOf(const QgsMapLayer* layer) {
   if (!layer) return {};
   return layer->customProperty(QString::fromUtf8(kPropLayerKey)).toString();
@@ -769,6 +825,7 @@ QgsVectorLayer* LayerOps::createUserPolygonLayer(QgsProject* project, const QStr
   vl->setName(titleKo);
   markSurveyLayer(vl, key);
   applyLegendCrsLabel(vl);
+  applyAreaM2Labels(vl);
   project->addMapLayer(vl, true);
   placeInLegendGroup(project, vl, QString::fromUtf8(kGroupSurveyData));
   pruneEmptyLegendGroups(project);
@@ -790,6 +847,7 @@ QList<QgsMapLayer*> LayerOps::visibleLayersPaintOrder(QgsProject* project) {
 
   auto pushVisible = [&](QgsMapLayer* l) {
     if (!l || !l->isValid()) return;
+    if (isAlignPending(l)) return;
     if (root) {
       if (QgsLayerTreeLayer* n = root->findLayer(l->id())) {
         if (!n->itemVisibilityChecked()) return;
@@ -808,15 +866,6 @@ QList<QgsMapLayer*> LayerOps::visibleLayersPaintOrder(QgsProject* project) {
 
 void LayerOps::syncMapCanvas(QgsProject* project, QgsMapCanvas* canvas, bool zoomKorea) {
   if (!project || !canvas) return;
-  QgsLayerTree* root = project->layerTreeRoot();
-
-  for (QgsMapLayer* l : project->mapLayers()) {
-    if (!l) continue;
-    if (QgsLayerTreeLayer* n = root->findLayer(l->id())) {
-      n->setItemVisibilityChecked(true);
-      n->setExpanded(true);
-    }
-  }
 
   QList<QgsMapLayer*> visible = visibleLayersPaintOrder(project);
   const bool layersChanged = (visible != canvas->layers());
@@ -1930,6 +1979,8 @@ bool LayerOps::undoCommittedFeature(QgsVectorLayer* layer, qint64 featureId, QSt
     layer->rollBack();
     return false;
   }
+  if (QgsDataProvider* p = layer->dataProvider())
+    p->reloadData();
   if (startedHere)
     layer->startEditing();
   layer->updateExtents();

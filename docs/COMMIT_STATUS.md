@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-16 15:35:46 +09:00 |
+| Updated (local) | 2026-08-17 10:48:59 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `74abc32` |
-| HEAD full | `74abc32cb35517a79051067f853bb39514ddc72c` |
-| HEAD date | 2026-08-16 15:35:36 +0900 |
+| HEAD short | `3bd6ff8` |
+| HEAD full | `3bd6ff8294c7852cc6688e52ad242f501bc35a91` |
+| HEAD date | 2026-08-16 15:35:45 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Ship teal chrome, artifact digitize, snap, and studio layer-center. |
-| Total commits | 22 |
+| HEAD subject | Refresh COMMIT_STATUS after teal chrome and digitize ship. |
+| Total commits | 23 |
 | Upstream | `origin/main` |
-| Sync | ahead 1 of origin/main (push pending) |
+| Sync | up to date with origin/main |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (2 paths) |
+| Working tree dirty | **yes** (27 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Ship teal chrome, artifact digitize, snap, and studio layer-center. (`74abc32` @ 2026-08-16 15:35:36 +0900)
-- **Remote sync at write time:** ahead 1 of origin/main (push pending)
-- **Uncommitted local changes at write time:** yes (2 paths)
+- **Recorded tip when this file was written:** Refresh COMMIT_STATUS after teal chrome and digitize ship. (`3bd6ff8` @ 2026-08-16 15:35:45 +0900)
+- **Remote sync at write time:** up to date with origin/main
+- **Uncommitted local changes at write time:** yes (27 paths)
 
 ### Read this correctly
 
@@ -46,11 +46,13 @@
 - `f4c1901` commit progress ledger ??Sync COMMIT_STATUS to tip after field HGIS push.
 - `cf8c011` commit progress ledger ??Refresh COMMIT_STATUS after theme ship; drop old no-MCP rule.
 - `ef06bf1` commit progress ledger ??Refresh COMMIT_STATUS after chrome and folder-import ship.
+- `3bd6ff8` commit progress ledger ??Refresh COMMIT_STATUS after teal chrome and digitize ship.
 
 ## Recent commits (newest first, max 30)
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `3bd6ff8` | 2026-08-16T15:35:45+09:00 | Refresh COMMIT_STATUS after teal chrome and digitize ship. |
 | `74abc32` | 2026-08-16T15:35:36+09:00 | Ship teal chrome, artifact digitize, snap, and studio layer-center. |
 | `ef06bf1` | 2026-08-16T12:37:19+09:00 | Refresh COMMIT_STATUS after chrome and folder-import ship. |
 | `e5c16ea` | 2026-08-16T12:37:07+09:00 | Ship flat chrome, layout grid/paper, and a fast PC folder import. |
@@ -77,7 +79,32 @@
 ## Staged in this commit
 
 ```
+M	CMakeLists.txt
+M	HANDOFF.md
+A	data/styles/feature_presets.json
+M	data/theme/ka-hgis.qss
 M	docs/COMMIT_STATUS.md
+M	docs/HANDOFF.md
+M	"docs/user/job-cards/arcgis-\354\232\251\354\226\264.md"
+A	src/app/KaAlignMapTool.cpp
+A	src/app/KaAlignMapTool.h
+M	src/app/KaCaptureMapTool.cpp
+M	src/app/KaCaptureMapTool.h
+M	src/app/KaIcons.cpp
+A	src/app/KaImageView.cpp
+A	src/app/KaImageView.h
+M	src/app/KaTheme.cpp
+M	src/app/MainWindow.cpp
+M	src/app/MainWindow.h
+A	src/core/FeaturePresets.cpp
+A	src/core/FeaturePresets.h
+A	src/core/GeorefService.cpp
+A	src/core/GeorefService.h
+M	src/core/LayerOps.cpp
+M	src/core/LayerOps.h
+M	src/core/SurveyProjectFactory.h
+A	tests/test_georef.cpp
+A	tests/test_presets.cpp
 ```
 ## Other PC checklist
 

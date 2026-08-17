@@ -18,6 +18,10 @@ public:
   static constexpr const char* kPropLayerRole = "ka_hgis/layer_role";
   static constexpr const char* kRoleSurvey = "survey";
   static constexpr const char* kRoleReference = "reference";
+  static constexpr const char* kPropAlignPending = "ka_hgis/align_pending";
+
+  static void setAlignPending(QgsMapLayer* layer, bool pending);
+  static bool isAlignPending(const QgsMapLayer* layer);
 
   enum class KoreaBasemap {
     VWorldBase,
@@ -35,6 +39,7 @@ public:
 
   static bool applyFeaturePolyStyle(QgsVectorLayer* featurePoly);
   static bool applyDomainDrawStyle(QgsVectorLayer* layer, const QString& layerKey = {});
+  static bool applyAreaM2Labels(QgsVectorLayer* layer);
   static bool applySimpleVectorStyle(QgsVectorLayer* layer, const QColor& fill, const QColor& stroke,
                                      double strokeWidthMm, double markerSizeMm = 3.5,
                                      bool noFill = false, bool noStroke = false);

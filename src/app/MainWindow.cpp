@@ -3,7 +3,11 @@
 #include "KaIcons.h"
 #include "KaCaptureMapTool.h"
 #include "KaAttributeMapTool.h"
+#include "KaAlignMapTool.h"
+#include "KaImageView.h"
 #include "KaDrawingStudio.h"
+#include "core/GeorefService.h"
+#include "core/FeaturePresets.h"
 #include "core/ChecklistEngine.h"
 #include "core/SurveyProjectFactory.h"
 #include "core/ExportService.h"
@@ -15,8 +19,11 @@
 #include "core/WorkflowGuide.h"
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <QApplication>
+#include <QTimer>
+#include <QCursor>
 #include <QAction>
 #include <QDockWidget>
 #include <QScrollArea>
@@ -45,8 +52,10 @@
 #include <QFile>
 #include <QShortcut>
 #include <QKeySequence>
+#include <QKeySequence>
 #include <QAbstractItemView>
 #include <QMenu>
+#include <QPixmap>
 #include <QAction>
 #include <QSize>
 #include <QListWidgetItem>
@@ -120,6 +129,10 @@
 #include <qgscoordinatetransform.h>
 #include <qgscoordinatetransformcontext.h>
 #include <qgsrectangle.h>
+#include <qgsvertexmarker.h>
+#include <qgsmaptopixel.h>
+#include <qgspoint.h>
+#include <qgspointlocator.h>
 #include <qgsexception.h>
 #include <qgsproviderregistry.h>
 #include <qgsprovidersublayerdetails.h>
@@ -317,6 +330,8 @@ void MainWindow::buildMenus() {
           QStringLiteral("VWorld 위성 사진을 올립니다"), &MainWindow::addBasemapVworldSat);
   addIcon(QStringLiteral("cadastral"), QStringLiteral("지적"),
           QStringLiteral("VWorld 지적도를 올립니다"), &MainWindow::addBasemapVworldCadastral);
+  addIcon(QStringLiteral("georef"), QStringLiteral("맞추기"),
+          QStringLiteral("좌표 없는 그림·CAD를 지적 위에 맞춥니다"), &MainWindow::georefAssistant);
 
   auto* btnDraw = new QToolButton(mainTb);
   btnDraw->setObjectName(QStringLiteral("btnDraw"));
@@ -411,7 +426,7 @@ void MainWindow::buildMenus() {
                       this, &MainWindow::openVectorLayer);
   moreMenu->addAction(KaIcons::icon(QStringLiteral("import")), QStringLiteral("CSV 기준점"),
                       this, &MainWindow::importControlCsv);
-  moreMenu->addAction(KaIcons::icon(QStringLiteral("georef")), QStringLiteral("스캔 맞추기"),
+  moreMenu->addAction(KaIcons::icon(QStringLiteral("georef")), QStringLiteral("맞추기"),
                       this, &MainWindow::georefAssistant);
   moreMenu->addAction(KaIcons::icon(QStringLiteral("map")), QStringLiteral("OSM 배경"),
                       this, &MainWindow::addBasemapOsm);
@@ -465,6 +480,8 @@ void MainWindow::applySnapConfig() {
   QgsProject::instance()->setSnappingConfig(cfg);
   if (m_canvas && m_canvas->snappingUtils())
     m_canvas->snappingUtils()->setConfig(cfg);
+  if (m_alignLeftCanvas && m_alignLeftCanvas->snappingUtils())
+    m_alignLeftCanvas->snappingUtils()->setConfig(cfg);
   if (m_captureTool)
     m_captureTool->setSnapEnabled(m_snapEnabled);
 #endif
@@ -472,6 +489,8 @@ void MainWindow::applySnapConfig() {
 
 void MainWindow::hideSubTools() {
 #if KA_HGIS_HAS_QGIS
+  if (m_subToolsMode == QLatin1String("align"))
+    stopAlignSession();
   clearSubToolbar();
   if (m_subToolbar) m_subToolbar->setVisible(false);
   m_subToolsMode.clear();
@@ -481,9 +500,58 @@ void MainWindow::hideSubTools() {
 #endif
 }
 
+void MainWindow::addDrawPresetButtons() {
+#if KA_HGIS_HAS_QGIS
+  if (!m_subToolbar) return;
+  FeaturePresets& presets = FeaturePresets::instance();
+  presets.ensureLoaded();
+  if (m_drawKind.isEmpty()) m_drawKind = presets.defaultKindLabel();
+  if (m_drawPeriod.isEmpty()) m_drawPeriod = presets.defaultPeriodLabel();
+
+  auto* kindBtn = new QToolButton(m_subToolbar);
+  kindBtn->setObjectName(QStringLiteral("drawKindBtn"));
+  kindBtn->setPopupMode(QToolButton::InstantPopup);
+  kindBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
+  kindBtn->setText(QStringLiteral("종류 · %1").arg(m_drawKind));
+  kindBtn->setToolTip(QStringLiteral("유구 종류. 그린 면에 바로 들어갑니다"));
+  auto* kindMenu = new QMenu(kindBtn);
+  for (const FeaturePresets::Kind& k : presets.kinds()) {
+    const QString lab = k.label;
+    kindMenu->addAction(lab, this, [this, kindBtn, lab]() {
+      m_drawKind = lab;
+      kindBtn->setText(QStringLiteral("종류 · %1").arg(lab));
+      statusBar()->showMessage(QStringLiteral("종류: %1").arg(lab), 3000);
+    });
+  }
+  kindBtn->setMenu(kindMenu);
+  m_subToolbar->addWidget(kindBtn);
+
+  auto* periodBtn = new QToolButton(m_subToolbar);
+  periodBtn->setObjectName(QStringLiteral("drawPeriodBtn"));
+  periodBtn->setPopupMode(QToolButton::InstantPopup);
+  periodBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
+  periodBtn->setText(QStringLiteral("시대 · %1").arg(m_drawPeriod));
+  periodBtn->setToolTip(QStringLiteral("시대. 면 색이 이 색으로 바뀝니다"));
+  auto* periodMenu = new QMenu(periodBtn);
+  for (const FeaturePresets::Period& p : presets.periods()) {
+    const QString lab = p.label;
+    QPixmap sw(14, 14);
+    sw.fill(QColor(p.color));
+    periodMenu->addAction(QIcon(sw), lab, this, [this, periodBtn, lab]() {
+      m_drawPeriod = lab;
+      periodBtn->setText(QStringLiteral("시대 · %1").arg(lab));
+      statusBar()->showMessage(QStringLiteral("시대: %1").arg(lab), 3000);
+    });
+  }
+  periodBtn->setMenu(periodMenu);
+  m_subToolbar->addWidget(periodBtn);
+#endif
+}
+
 void MainWindow::showSubToolsDraw() {
 #if KA_HGIS_HAS_QGIS
   if (!m_subToolbar) return;
+  if (m_subToolsMode == QLatin1String("align")) stopAlignSession();
   if (m_subToolsMode == QLatin1String("draw") && m_subToolbar->isVisible()) {
     hideSubTools();
     return;
@@ -506,6 +574,9 @@ void MainWindow::showSubToolsDraw() {
                                 : QStringLiteral("자석 꺼짐"),
                              4000);
   });
+  addDrawPresetButtons();
+  m_subToolbar->addAction(KaIcons::icon(QStringLiteral("easy_draw")), QStringLiteral("쉽게그리기"),
+                          this, &MainWindow::startEasyDraw);
   m_subToolbar->addAction(KaIcons::icon(QStringLiteral("draw_area")), QStringLiteral("조사구역"),
                           this, &MainWindow::startEditSurveyArea);
   m_subToolbar->addAction(KaIcons::icon(QStringLiteral("draw_poly")), QStringLiteral("유구면"),
@@ -528,6 +599,7 @@ void MainWindow::showSubToolsDraw() {
 void MainWindow::showSubToolsBasemap() {
 #if KA_HGIS_HAS_QGIS
   if (!m_subToolbar) return;
+  if (m_subToolsMode == QLatin1String("align")) stopAlignSession();
   if (m_subToolsMode == QLatin1String("basemap") && m_subToolbar->isVisible()) {
     hideSubTools();
     return;
@@ -671,6 +743,10 @@ void MainWindow::buildUi() {
     if (LayerOps::clampCanvasToKorea(m_canvas))
       m_canvas->refresh();
     m_extentClampGuard = false;
+    if (m_subToolsMode == QLatin1String("align")) {
+      m_alignDstScreen.clear();
+      updateAlignOverlay();
+    }
   });
   connect(QgsProject::instance(), &QgsProject::layersAdded, this, [this](const QList<QgsMapLayer*>&) {
     QTimer::singleShot(0, this, [this]() { refreshMapCanvasNow(); });
@@ -1220,7 +1296,6 @@ void MainWindow::setWorkCrs5187() {
 
 void MainWindow::zoomMapToFullMax() {
 #if KA_HGIS_HAS_QGIS
-  LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
   LayerOps::zoomToFullMax(m_canvas);
   LayerOps::clampCanvasToKorea(m_canvas);
   statusBar()->showMessage(QStringLiteral("한국 전체 범위"), 4000);
@@ -1243,13 +1318,20 @@ void MainWindow::zoomSelectedLayerMax() {
     zoomMapToFullMax();
     return;
   }
-  if (!LayerOps::isolateAndZoomToLayer(QgsProject::instance(), m_canvas, layer, true)) {
+  if (GeorefService::isAlignableLayer(layer)
+      && (LayerOps::isAlignPending(layer)
+          || (qobject_cast<QgsRasterLayer*>(layer)
+              && GeorefService::looksUnreferencedRaster(qobject_cast<QgsRasterLayer*>(layer))))) {
+    startAlignSession(layer);
+    return;
+  }
+  if (!LayerOps::zoomToLayerMax(m_canvas, layer)) {
     statusBar()->showMessage(
         QStringLiteral("이 레이어에 도형이 없습니다. 먼저 그린 뒤 다시 누르세요: %1").arg(layer->name()),
         8000);
     return;
   }
-  statusBar()->showMessage(QStringLiteral("이 레이어만 보기: %1").arg(layer->name()), 5000);
+  statusBar()->showMessage(QStringLiteral("이 레이어로 이동: %1").arg(layer->name()), 5000);
 #endif
 }
 
@@ -1300,7 +1382,7 @@ void MainWindow::onLayerTreeContextMenu(const QPoint& pos) {
   menu.addAction(QStringLiteral("면·외곽선 색"), this, &MainWindow::editCurrentLayerStyle);
   menu.addAction(QStringLiteral("도형 속성"), this, &MainWindow::editCurrentLayerAttributes);
   menu.addSeparator();
-  menu.addAction(QStringLiteral("이 레이어만 보기"), this, &MainWindow::zoomSelectedLayerMax);
+  menu.addAction(QStringLiteral("이 레이어로 이동"), this, &MainWindow::zoomSelectedLayerMax);
   menu.addAction(QStringLiteral("전체 보기"), this, &MainWindow::zoomMapToFullMax);
   menu.addAction(QStringLiteral("폴리곤 묶기"), this, &MainWindow::mergeFeaturePolygons);
   menu.addSeparator();
@@ -1471,11 +1553,22 @@ void MainWindow::undoLastAction() {
     statusBar()->showMessage(QStringLiteral("꼭짓점 하나를 되돌렸습니다."), 4000);
     return;
   }
+  if (m_alignTool && m_canvas && m_canvas->mapTool() == m_alignTool &&
+      m_alignTool->removeLastPair()) {
+    statusBar()->showMessage(m_alignTool->statusText(), 4000);
+    return;
+  }
   while (!m_committedUndo.isEmpty()) {
     const auto rec = m_committedUndo.takeLast();
     auto* vl = qobject_cast<QgsVectorLayer*>(QgsProject::instance()->mapLayer(rec.first));
     QString err;
     if (LayerOps::undoCommittedFeature(vl, rec.second, &err)) {
+      const QString key = LayerOps::layerKeyOf(vl);
+      if (key.startsWith(QLatin1String("user_poly")) && vl->featureCount() <= 0) {
+        if (m_editLayer == vl) m_editLayer = nullptr;
+        QgsProject::instance()->removeMapLayer(vl->id());
+        vl = nullptr;
+      }
       if (m_canvas) {
         m_canvas->clearCache();
         m_canvas->refreshAllLayers();
@@ -1493,6 +1586,14 @@ void MainWindow::undoLastAction() {
 bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
 #if KA_HGIS_HAS_QGIS
   if (!event) return QMainWindow::eventFilter(watched, event);
+  if (m_mapSplitter && watched == m_mapSplitter && event->type() == QEvent::Resize)
+    refreshAlignUi();
+  if (m_subToolsMode == QLatin1String("align") && event->type() == QEvent::MouseMove) {
+    if (auto* me = static_cast<QMouseEvent*>(event)) {
+      QWidget* w = qobject_cast<QWidget*>(watched);
+      if (w) trackAlignPointer(w->mapToGlobal(me->pos()));
+    }
+  }
 
   const bool onCanvas = m_canvas &&
       (watched == m_canvas || watched == m_canvas->viewport());
@@ -2343,6 +2444,7 @@ void MainWindow::addUserLayer() {
   LayerOps::applySimpleVectorStyle(vl, fillBtn->property("kaColor").value<QColor>(),
                                    strokeBtn->property("kaColor").value<QColor>(),
                                    1.2, 3.5, noFill->isChecked(), false);
+  LayerOps::applyAreaM2Labels(vl);
   if (m_layerTree) m_layerTree->setCurrentLayer(vl);
   if (m_canvas) {
     LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
@@ -2539,8 +2641,13 @@ void MainWindow::onGeometryCaptured(const QgsGeometry& geom) {
       return;
     }
 
+    const QgsFeatureIds beforeIds = layer->allFeatureIds();
     QgsFeature feat(layer->fields());
     feat.setGeometry(geom);
+    FeaturePresets::instance().ensureLoaded();
+    if (m_drawKind.isEmpty()) m_drawKind = FeaturePresets::instance().defaultKindLabel();
+    if (m_drawPeriod.isEmpty()) m_drawPeriod = FeaturePresets::instance().defaultPeriodLabel();
+    FeaturePresets::instance().applyAttributes(&feat, m_drawKind, m_drawPeriod);
     if (!layer->addFeature(feat)) {
       QMessageBox::warning(this, QStringLiteral("오류"),
                            QStringLiteral("피처 추가 실패\n%1").arg(layer->commitErrors().join(QLatin1Char('\n'))));
@@ -2559,33 +2666,43 @@ void MainWindow::onGeometryCaptured(const QgsGeometry& geom) {
                            QStringLiteral("도형을 파일에 쓰지 못했습니다.\n%1").arg(errs));
       return;
     }
-    qint64 addedId = static_cast<qint64>(feat.id());
+    qint64 addedId = -1;
     const QgsFeatureIds afterIds = layer->allFeatureIds();
-    if ((addedId < 0 || !afterIds.contains(static_cast<QgsFeatureId>(addedId))) && !afterIds.isEmpty())
-      addedId = static_cast<qint64>(*std::max_element(afterIds.constBegin(), afterIds.constEnd()));
+    for (QgsFeatureId id : afterIds) {
+      if (!beforeIds.contains(id)) {
+        addedId = static_cast<qint64>(id);
+        break;
+      }
+    }
+    if (addedId < 0 && feat.id() >= 0)
+      addedId = static_cast<qint64>(feat.id());
     if (addedId >= 0)
       m_committedUndo.append(qMakePair(layer->id(), addedId));
     if (!layer->isEditable() && !layer->startEditing()) {
       statusBar()->showMessage(QStringLiteral("저장됨 · 편집 모드 재시작 실패 — 그리기 도구를 다시 선택"), 8000);
     }
 
-    LayerOps::applyDomainDrawStyle(layer, LayerOps::layerKeyOf(layer));
+    const QString drawnKey = LayerOps::layerKeyOf(layer);
+    const bool domain = drawnKey == QLatin1String("survey_area")
+                        || drawnKey == QLatin1String("feature_poly")
+                        || drawnKey == QLatin1String("feature_line")
+                        || drawnKey == QLatin1String("section_line")
+                        || drawnKey == QLatin1String("control_points")
+                        || drawnKey == QLatin1String("artifact_point");
+    if (drawnKey == QLatin1String("feature_poly") || drawnKey == QLatin1String("feature_line")
+        || drawnKey == QLatin1String("artifact_point")) {
+      FeaturePresets::instance().applyRenderer(layer);
+    } else if (domain) {
+      LayerOps::applyDomainDrawStyle(layer, drawnKey);
+    }
+    if (layer->geometryType() == Qgis::GeometryType::Polygon
+        && (domain || drawnKey.startsWith(QLatin1String("user_poly"))))
+      LayerOps::applyAreaM2Labels(layer);
     layer->updateExtents();
     layer->triggerRepaint();
     if (m_canvas) {
       m_canvas->freeze(false);
       m_canvas->setRenderFlag(true);
-      LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
-      // Survey vectors above basemap (draw last = on top in QGIS canvas list = first in list).
-      QList<QgsMapLayer*> layers = m_canvas->layers();
-      QList<QgsMapLayer*> ordered;
-      ordered.append(layer);
-      for (QgsMapLayer* l : layers) {
-        if (l && l != layer) ordered.append(l);
-      }
-      m_canvas->setLayers(ordered);
-      m_canvas->clearCache();
-      m_canvas->refreshAllLayers();
       m_canvas->refresh();
     }
     if (m_captureTool && m_canvas && m_canvas->mapTool() != m_captureTool) {
@@ -2615,6 +2732,7 @@ void MainWindow::beginEdit(QgsVectorLayer* layer) {
       return;
     }
     if (!m_canvas) return;
+    if (m_subToolsMode == QLatin1String("align")) stopAlignSession();
 
     m_canvas->freeze(false);
     m_canvas->setRenderFlag(true);
@@ -2654,13 +2772,18 @@ void MainWindow::beginEdit(QgsVectorLayer* layer) {
               Qt::DirectConnection);
       connect(m_captureTool, &KaCaptureMapTool::captureCanceled, this, [this]() {
         statusBar()->showMessage(
-            QStringLiteral("점 부족 또는 취소 — 면≥3·선≥2 남기고 이어서 그리세요 (고무줄 유지/ESC=전체취소)"),
-            6000);
+            QStringLiteral("아직 저장 안 됨 — 면은 점 3개 이상, 선은 2개 이상 필요. 우클릭으로 완료."),
+            8000);
       });
     }
 
     m_captureTool->setTargetLayer(layer);
     m_captureTool->setMode(mode);
+    m_captureTool->setEasyDraw(false);
+    const QString editKey = LayerOps::layerKeyOf(layer);
+    if (editKey == QLatin1String("feature_poly") || editKey == QLatin1String("feature_line")
+        || editKey == QLatin1String("artifact_point"))
+      FeaturePresets::instance().applyRenderer(layer);
     m_canvas->setMapTool(m_captureTool);
     m_canvas->setFocus(Qt::OtherFocusReason);
     m_canvas->setCursor(Qt::CrossCursor);
@@ -2676,6 +2799,53 @@ void MainWindow::beginEdit(QgsVectorLayer* layer) {
   }
 }
 #endif
+
+void MainWindow::startEasyDraw() {
+#if KA_HGIS_HAS_QGIS
+  m_snapEnabled = true;
+  applySnapConfig();
+  if (m_surveyPath.isEmpty()) {
+    QMessageBox::information(this, QStringLiteral("쉽게그리기"),
+                             QStringLiteral("먼저 「새 조사」로 저장 위치를 만드세요."));
+    return;
+  }
+  QgsVectorLayer* layer = nullptr;
+  if (QgsProject* proj = QgsProject::instance()) {
+    for (QgsMapLayer* l : proj->mapLayers()) {
+      auto* vl = qobject_cast<QgsVectorLayer*>(l);
+      if (!vl || !vl->isValid()) continue;
+      if (vl->name() == QLatin1String("쉽게그리기")
+          && LayerOps::layerKeyOf(vl).startsWith(QLatin1String("user_poly"))) {
+        layer = vl;
+        break;
+      }
+    }
+  }
+  if (!layer) {
+    QString err;
+    layer = LayerOps::createUserPolygonLayer(QgsProject::instance(), m_surveyPath,
+                                             QStringLiteral("쉽게그리기"), m_workCrs, &err);
+    if (!layer) {
+      QMessageBox::warning(this, QStringLiteral("쉽게그리기"), err);
+      return;
+    }
+    LayerOps::applySimpleVectorStyle(layer, QColor(15, 118, 110, 70), QColor(15, 118, 110), 1.4, 3.5,
+                                     false, false);
+    LayerOps::applyAreaM2Labels(layer);
+  }
+  if (m_layerTree) m_layerTree->setCurrentLayer(layer);
+  beginEdit(layer);
+  if (m_captureTool) {
+    m_captureTool->setEasyDraw(true);
+    m_captureTool->setSnapEnabled(true);
+  }
+  statusBar()->showMessage(
+      QStringLiteral("쉽게그리기 → 「쉽게그리기」레이어에 저장. 지적은 자석만 사용. 우클릭=완료"),
+      0);
+#else
+  statusBar()->showMessage(QStringLiteral("쉽게그리기 (스텁)"));
+#endif
+}
 
 void MainWindow::startEditSurveyArea() {
 #if KA_HGIS_HAS_QGIS
@@ -3002,23 +3172,501 @@ void MainWindow::crsReproject() {
   QMessageBox::warning(this, QStringLiteral("CRS"), QStringLiteral("QGIS 빌드 필요"));
 #endif
 }
-void MainWindow::georefAssistant() {
-  const QString img = QFileDialog::getOpenFileName(this, QStringLiteral("스캔 평면도"), QString(),
-      QStringLiteral("Images (*.png *.jpg *.jpeg *.tif *.tiff)"));
-  if (img.isEmpty()) return;
 #if KA_HGIS_HAS_QGIS
-  auto* cp = layerByKey(QStringLiteral("control_points"));
-  const int n = cp ? int(cp->featureCount()) : m_stubGcp;
-  if (n < 2) {
-    QMessageBox::warning(this, QStringLiteral("GCP"), QStringLiteral("기준점(GCP)이 2개 미만입니다. 먼저 등록하세요."));
+static bool layerSitsOnWorkMap(QgsMapLayer* layer, const QString& workCrs) {
+  if (!layer) return false;
+  const QgsRectangle e = layer->extent();
+  if (e.isEmpty() || !e.isFinite()) return false;
+  const QgsRectangle kr = LayerOps::koreaExtentForCrs(workCrs);
+  if (kr.isEmpty()) return true;
+  return kr.intersects(e);
+}
+#endif
+
+void MainWindow::ensureAlignSplit() {
+#if KA_HGIS_HAS_QGIS
+  if (m_mapSplitter) return;
+  auto* mapCard = findChild<QFrame*>(QStringLiteral("mapCard"));
+  if (!mapCard || !m_canvas) return;
+  auto* mapLay = qobject_cast<QVBoxLayout*>(mapCard->layout());
+  if (!mapLay) return;
+
+  m_mapSplitter = new QSplitter(Qt::Horizontal, mapCard);
+  m_mapSplitter->setObjectName(QStringLiteral("alignSplitter"));
+  m_mapSplitter->setChildrenCollapsible(false);
+
+  m_alignLeftPane = new QWidget(m_mapSplitter);
+  auto* ll = new QVBoxLayout(m_alignLeftPane);
+  ll->setContentsMargins(0, 0, 0, 0);
+  ll->setSpacing(2);
+  m_alignLeftLabel = new QLabel(QStringLiteral("왼쪽 · 맞출 도면"), m_alignLeftPane);
+  m_alignLeftLabel->setObjectName(QStringLiteral("subToolbarCaption"));
+  ll->addWidget(m_alignLeftLabel);
+
+  m_alignImage = new KaImageView(m_alignLeftPane);
+  m_alignImage->setCursor(Qt::CrossCursor);
+  connect(m_alignImage, &KaImageView::pixelClicked, this, [this](double x, double y) {
+    if (!m_alignTool) return;
+    m_alignTool->setSourcePoint(x, y);
+    if (m_canvas) m_canvas->setMapTool(m_alignTool);
+  });
+  ll->addWidget(m_alignImage, 1);
+
+  m_alignLeftCanvas = new QgsMapCanvas(m_alignLeftPane);
+  KaTheme::excludeMapSurface(m_alignLeftCanvas);
+  m_alignLeftCanvas->setCanvasColor(KaTheme::tokens().canvasNeutral);
+  m_alignLeftCanvas->enableAntiAliasing(true);
+  m_alignPickTool = new KaAlignPickTool(m_alignLeftCanvas);
+  m_alignPickTool->setParent(this);
+  connect(m_alignPickTool, &KaAlignPickTool::picked, this, [this](const QgsPointXY& pt) {
+    if (!m_alignTool) return;
+    m_alignTool->setSourcePoint(pt.x(), pt.y());
+    if (m_canvas) m_canvas->setMapTool(m_alignTool);
+  });
+  m_alignLeftCanvas->setMapTool(m_alignPickTool);
+  ll->addWidget(m_alignLeftCanvas, 1);
+  m_alignLeftCanvas->hide();
+
+  m_alignPointList = new QListWidget(m_alignLeftPane);
+  m_alignPointList->setObjectName(QStringLiteral("alignPointList"));
+  m_alignPointList->setMaximumHeight(130);
+  m_alignPointList->setToolTip(QStringLiteral("찍은 점. Delete로 지웁니다"));
+  auto* delSc = new QShortcut(QKeySequence::Delete, m_alignPointList);
+  connect(delSc, &QShortcut::activated, this, &MainWindow::deleteSelectedAlignPoint);
+  ll->addWidget(m_alignPointList);
+
+  mapLay->removeWidget(m_canvas);
+  m_mapSplitter->addWidget(m_alignLeftPane);
+  m_mapSplitter->addWidget(m_canvas);
+  m_mapSplitter->setStretchFactor(0, 1);
+  m_mapSplitter->setStretchFactor(1, 1);
+  mapLay->insertWidget(0, m_mapSplitter, 1);
+
+  m_alignOverlay = new KaAlignLinkOverlay(m_mapSplitter);
+  m_alignOverlay->setMouseTracking(true);
+  m_alignOverlay->raise();
+  m_mapSplitter->setMouseTracking(true);
+  m_mapSplitter->installEventFilter(this);
+  m_alignOverlay->installEventFilter(this);
+  m_alignLeftPane->setMouseTracking(true);
+  m_alignLeftPane->installEventFilter(this);
+  if (m_alignImage) {
+    m_alignImage->setMouseTracking(true);
+    m_alignImage->installEventFilter(this);
+    if (m_alignImage->viewport()) {
+      m_alignImage->viewport()->setMouseTracking(true);
+      m_alignImage->viewport()->installEventFilter(this);
+    }
+  }
+  if (m_canvas) {
+    m_canvas->setMouseTracking(true);
+    m_canvas->installEventFilter(this);
+    if (m_canvas->viewport()) {
+      m_canvas->viewport()->setMouseTracking(true);
+      m_canvas->viewport()->installEventFilter(this);
+    }
+  }
+  if (m_alignLeftCanvas) {
+    m_alignLeftCanvas->setMouseTracking(true);
+    m_alignLeftCanvas->installEventFilter(this);
+    if (m_alignLeftCanvas->viewport()) {
+      m_alignLeftCanvas->viewport()->setMouseTracking(true);
+      m_alignLeftCanvas->viewport()->installEventFilter(this);
+    }
+  }
+#endif
+}
+
+void MainWindow::showAlignSplit() {
+#if KA_HGIS_HAS_QGIS
+  ensureAlignSplit();
+  if (!m_mapSplitter || !m_alignLeftPane || !m_alignTool) return;
+  m_alignLeftPane->show();
+  if (m_alignTool->isRasterSession()) {
+    if (m_alignImage) {
+      m_alignImage->show();
+      m_alignImage->clearMarks();
+      m_alignImage->loadPath(m_alignTool->rasterSourcePath());
+    }
+    if (m_alignLeftCanvas) m_alignLeftCanvas->hide();
+    if (m_alignLeftLabel)
+      m_alignLeftLabel->setText(QStringLiteral("왼쪽 · 그림 — 여기를 먼저 찍기"));
+  } else {
+    if (m_alignImage) m_alignImage->hide();
+    if (m_alignLeftCanvas) {
+      m_alignLeftCanvas->show();
+      if (QgsMapLayer* src = m_alignTool->sourceDisplayLayer()) {
+        if (src->crs().isValid())
+          m_alignLeftCanvas->setDestinationCrs(src->crs());
+        m_alignLeftCanvas->setLayers(QList<QgsMapLayer*>() << src);
+        const QgsRectangle ext = src->extent();
+        if (!ext.isEmpty() && ext.isFinite())
+          m_alignLeftCanvas->setExtent(ext);
+        m_alignLeftCanvas->refresh();
+      }
+    }
+    if (m_alignLeftLabel)
+      m_alignLeftLabel->setText(QStringLiteral("왼쪽 · CAD — 여기를 먼저 찍기"));
+  }
+  m_mapSplitter->setSizes({1000, 1000});
+#endif
+}
+
+void MainWindow::hideAlignSplit() {
+#if KA_HGIS_HAS_QGIS
+  if (m_alignLeftPane) m_alignLeftPane->hide();
+  if (m_mapSplitter) m_mapSplitter->setSizes({0, 1});
+  if (m_alignOverlay) m_alignOverlay->hide();
+  if (m_alignCursorTimer) m_alignCursorTimer->stop();
+  for (auto* m : m_alignLeftMarks) delete m;
+  m_alignLeftMarks.clear();
+#endif
+}
+
+void MainWindow::refreshAlignUi() {
+#if KA_HGIS_HAS_QGIS
+  if (!m_alignTool) return;
+  QVector<QPointF> pts;
+  for (const GeorefService::Pair& p : m_alignTool->pairs())
+    pts.append(QPointF(p.srcX, p.srcY));
+  QPointF pending;
+  const QPointF* pend = nullptr;
+  if (m_alignTool->hasPendingSource()) {
+    pending = QPointF(m_alignTool->pendingSrcX(), m_alignTool->pendingSrcY());
+    pend = &pending;
+  }
+  if (m_alignImage && m_alignImage->isVisible())
+    m_alignImage->setMarks(pts, pend);
+
+  for (auto* m : m_alignLeftMarks) delete m;
+  m_alignLeftMarks.clear();
+  if (m_alignLeftCanvas && m_alignLeftCanvas->isVisible()) {
+    auto addMk = [&](const QgsPointXY& pt, const QColor& col) {
+      auto* mk = new QgsVertexMarker(m_alignLeftCanvas);
+      mk->setIconType(QgsVertexMarker::ICON_CIRCLE);
+      mk->setIconSize(14);
+      mk->setPenWidth(2);
+      mk->setColor(col);
+      mk->setFillColor(QColor(255, 255, 255, 230));
+      mk->setCenter(pt);
+      mk->show();
+      m_alignLeftMarks.append(mk);
+    };
+    for (const QPointF& p : pts)
+      addMk(QgsPointXY(p.x(), p.y()), QColor(220, 38, 38));
+    if (pend)
+      addMk(QgsPointXY(pend->x(), pend->y()), QColor(234, 179, 8));
+  }
+
+  if (m_alignPointList) {
+    m_alignPointList->clear();
+    const auto& pairs = m_alignTool->pairs();
+    for (int i = 0; i < pairs.size(); ++i) {
+      m_alignPointList->addItem(
+          QStringLiteral("%1번  왼쪽 → 오른쪽").arg(i + 1));
+    }
+    if (m_alignTool->hasPendingSource()) {
+      m_alignPointList->addItem(
+          QStringLiteral("%1번  왼쪽만 — 오른쪽 모서리를 찍으세요").arg(pairs.size() + 1));
+    }
+  }
+
+  updateAlignOverlay();
+  if (m_alignTool->hasPendingSource() && !m_alignApplied) {
+    if (!m_alignCursorTimer) {
+      m_alignCursorTimer = new QTimer(this);
+      m_alignCursorTimer->setInterval(16);
+      connect(m_alignCursorTimer, &QTimer::timeout, this, [this]() {
+        if (m_alignTool && m_alignTool->hasPendingSource() && !m_alignApplied)
+          trackAlignPointer(QCursor::pos());
+        else if (m_alignCursorTimer)
+          m_alignCursorTimer->stop();
+      });
+    }
+    if (!m_alignCursorTimer->isActive()) m_alignCursorTimer->start();
+    trackAlignPointer(QCursor::pos());
+  } else if (m_alignCursorTimer) {
+    m_alignCursorTimer->stop();
+  }
+#endif
+}
+
+void MainWindow::trackAlignPointer(const QPoint& globalPos) {
+#if KA_HGIS_HAS_QGIS
+  if (!m_alignTool || !m_alignTool->hasPendingSource() || m_alignApplied) return;
+  if (!m_alignOverlay) return;
+
+  m_alignLiveScreen = m_alignOverlay->mapFromGlobal(globalPos);
+  m_alignLiveScreenValid = true;
+  m_alignCursorValid = false;
+
+  if (m_canvas) {
+    QWidget* vp = m_canvas->viewport() ? static_cast<QWidget*>(m_canvas->viewport())
+                                       : static_cast<QWidget*>(m_canvas);
+    const QPoint inRight = vp->mapFromGlobal(globalPos);
+    if (vp->rect().contains(inRight)) {
+      const QgsMapToPixel& m2p = m_canvas->mapSettings().mapToPixel();
+      QgsPointXY mapPt = m2p.toMapCoordinates(inRight.x(), inRight.y());
+      const QgsPointXY cursorMap = mapPt;
+      if (m_canvas->snappingUtils()) {
+        const QgsPointLocator::Match hit = m_canvas->snappingUtils()->snapToMap(inRight);
+        if (hit.isValid()) {
+          mapPt = hit.point();
+          const double mupp = m_canvas->mapUnitsPerPixel();
+          if (mupp > 1e-12) {
+            m_alignLiveScreen += QPoint(
+                int(std::lround((mapPt.x() - cursorMap.x()) / mupp)),
+                int(std::lround((cursorMap.y() - mapPt.y()) / mupp)));
+          }
+        }
+      }
+      m_alignCursorX = mapPt.x();
+      m_alignCursorY = mapPt.y();
+      m_alignCursorValid = true;
+      if (m_alignTool) m_alignTool->setMapHint(mapPt.x(), mapPt.y(), true);
+    } else if (m_alignTool) {
+      m_alignTool->setMapHint(0, 0, false);
+    }
+  }
+  updateAlignOverlay();
+#endif
+}
+
+void MainWindow::updateAlignOverlay() {
+#if KA_HGIS_HAS_QGIS
+  if (!m_alignOverlay || !m_mapSplitter || !m_alignTool || !m_alignLeftPane
+      || !m_alignLeftPane->isVisible() || m_alignApplied) {
+    if (m_alignOverlay) m_alignOverlay->hide();
     return;
   }
+  m_alignOverlay->setGeometry(m_mapSplitter->rect());
+  m_alignOverlay->show();
+  m_alignOverlay->raise();
+
+  auto mapToOverlay = [this](QgsMapCanvas* c, double mx, double my) -> QPoint {
+    if (!c || !m_alignOverlay) return {};
+    const QgsPointXY xy = c->mapSettings().mapToPixel().transform(QgsPointXY(mx, my));
+    QWidget* from = c->viewport() ? static_cast<QWidget*>(c->viewport()) : static_cast<QWidget*>(c);
+    const qreal dpr = from->devicePixelRatioF();
+    const qreal s = (dpr > 0.1) ? dpr : 1.0;
+    return from->mapTo(m_alignOverlay,
+                       QPoint(int(std::lround(xy.x() / s)), int(std::lround(xy.y() / s))));
+  };
+  auto srcToOverlay = [this](double sx, double sy) -> QPoint {
+    if (m_alignImage && m_alignImage->isVisible())
+      return m_alignImage->mapTo(m_alignOverlay, m_alignImage->viewPosForPixel(sx, sy));
+    if (m_alignLeftCanvas && m_alignLeftCanvas->isVisible()) {
+      const QgsPointXY xy =
+          m_alignLeftCanvas->mapSettings().mapToPixel().transform(QgsPointXY(sx, sy));
+      QWidget* from = m_alignLeftCanvas->viewport()
+                          ? static_cast<QWidget*>(m_alignLeftCanvas->viewport())
+                          : static_cast<QWidget*>(m_alignLeftCanvas);
+      const qreal dpr = from->devicePixelRatioF();
+      const qreal s = (dpr > 0.1) ? dpr : 1.0;
+      return from->mapTo(m_alignOverlay,
+                         QPoint(int(std::lround(xy.x() / s)), int(std::lround(xy.y() / s))));
+    }
+    return {};
+  };
+
+  const auto& pairs = m_alignTool->pairs();
+  if (pairs.size() < m_alignDstScreen.size())
+    m_alignDstScreen.resize(pairs.size());
+  while (m_alignDstScreen.size() < pairs.size()) {
+    if (m_alignLiveScreenValid)
+      m_alignDstScreen.append(m_alignLiveScreen);
+    else
+      m_alignDstScreen.append(mapToOverlay(m_canvas, pairs[m_alignDstScreen.size()].mapX,
+                                           pairs[m_alignDstScreen.size()].mapY));
+  }
+
+  QVector<QLine> done;
+  for (int i = 0; i < pairs.size(); ++i) {
+    const QPoint a = srcToOverlay(pairs[i].srcX, pairs[i].srcY);
+    const QPoint b = (i < m_alignDstScreen.size() && !m_alignDstScreen[i].isNull())
+                         ? m_alignDstScreen[i]
+                         : mapToOverlay(m_canvas, pairs[i].mapX, pairs[i].mapY);
+    if (!a.isNull() && !b.isNull())
+      done.append(QLine(a, b));
+  }
+  QLine live;
+  bool hasLive = false;
+  if (m_alignTool->hasPendingSource() && m_alignLiveScreenValid) {
+    const QPoint a = srcToOverlay(m_alignTool->pendingSrcX(), m_alignTool->pendingSrcY());
+    if (!a.isNull()) {
+      live = QLine(a, m_alignLiveScreen);
+      hasLive = true;
+    }
+  }
+  m_alignOverlay->setLinks(done, live, hasLive);
+#endif
+}
+
+void MainWindow::deleteSelectedAlignPoint() {
+#if KA_HGIS_HAS_QGIS
+  if (!m_alignTool || !m_alignPointList) return;
+  const int row = m_alignPointList->currentRow();
+  if (row < 0) {
+    m_alignTool->removeLastPair();
+    return;
+  }
+  if (row >= m_alignTool->pairCount()) {
+    m_alignTool->removeLastPair();
+    return;
+  }
+  m_alignTool->removePairAt(row);
+#endif
+}
+
+void MainWindow::applyAlignMove() {
+#if KA_HGIS_HAS_QGIS
+  if (!m_alignTool) return;
   QString err;
-  const QString wf = LayerOps::georeferenceImageSimple(img, cp, QgsProject::instance(), m_canvas, &err);
-  if (wf.isEmpty()) QMessageBox::warning(this, QStringLiteral("지오레퍼런스"), err);
-  else statusBar()->showMessage(QStringLiteral("월드파일 작성: %1 (간단 아핀 — 정밀작업은 추가 GCP 권장)").arg(wf), 8000);
+  if (!m_alignTool->applyMove(&err)) {
+    QMessageBox::warning(this, QStringLiteral("이동"), err);
+    return;
+  }
+  m_alignApplied = true;
+  if (m_alignOverlay) m_alignOverlay->hide();
+  applySnapConfig();
+  LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
+  if (QgsMapLayer* l = m_alignTool->targetLayer()) {
+    LayerOps::setAlignPending(l, false);
+    if (QgsLayerTreeLayer* n = QgsProject::instance()->layerTreeRoot()->findLayer(l->id()))
+      n->setItemVisibilityChecked(true);
+    LayerOps::zoomToLayerMax(m_canvas, l);
+  }
+  refreshAlignUi();
+  statusBar()->showMessage(QStringLiteral("왼쪽 도면을 오른쪽 지도로 옮겼습니다. 꼭짓점에 자석이 붙습니다."), 8000);
+#endif
+}
+
+void MainWindow::stopAlignSession() {
+#if KA_HGIS_HAS_QGIS
+  hideAlignSplit();
+  if (!m_alignTool) return;
+  if (m_canvas && m_canvas->mapTool() == m_alignTool)
+    m_canvas->unsetMapTool(m_alignTool);
+  m_alignTool->endSession();
+  if (m_panTool && m_canvas) m_canvas->setMapTool(m_panTool);
+#endif
+}
+
+void MainWindow::showSubToolsAlign() {
+#if KA_HGIS_HAS_QGIS
+  if (!m_subToolbar) return;
+  clearSubToolbar();
+  m_subToolsMode = QStringLiteral("align");
+  auto* lab = new QLabel(QStringLiteral("  맞추기 › "));
+  lab->setObjectName(QStringLiteral("subToolbarCaption"));
+  m_subToolbar->addWidget(lab);
+  m_subToolbar->addAction(KaIcons::icon(QStringLiteral("transform")), QStringLiteral("이동"),
+                          this, &MainWindow::applyAlignMove);
+  m_subToolbar->addAction(QStringLiteral("점 지우기"), this, [this]() {
+    deleteSelectedAlignPoint();
+    if (m_alignTool) statusBar()->showMessage(m_alignTool->statusText(), 4000);
+  });
+  m_subToolbar->addAction(QStringLiteral("되돌리기"), this, [this]() {
+    if (m_alignTool) m_alignTool->restoreOriginals();
+    m_alignApplied = false;
+    refreshAlignUi();
+    statusBar()->showMessage(QStringLiteral("맞추기를 처음 상태로 되돌렸습니다"), 4000);
+  });
+  m_subToolbar->addAction(KaIcons::icon(QStringLiteral("save")), QStringLiteral("맞추기 저장"),
+                          this, [this]() {
+                            if (!m_alignTool) return;
+                            QString path, err;
+                            if (!m_alignTool->saveAligned(&path, &err)) {
+                              QMessageBox::warning(this, QStringLiteral("맞추기"), err);
+                              return;
+                            }
+                            QMessageBox::information(
+                                this, QStringLiteral("맞추기"),
+                                QStringLiteral("맞춰 두었습니다.\n이 도면은 참고입니다. 제출할 구역은 그리기로 직접 그리세요.\n%1")
+                                    .arg(QDir::toNativeSeparators(path)));
+                            statusBar()->showMessage(QStringLiteral("맞춤 저장: %1").arg(path), 8000);
+                          });
+  auto* closeAct = m_subToolbar->addAction(QStringLiteral("닫기"));
+  connect(closeAct, &QAction::triggered, this, &MainWindow::hideSubTools);
+  m_subToolbar->setVisible(true);
+#endif
+}
+
+void MainWindow::startAlignSession(QgsMapLayer* layer) {
+#if KA_HGIS_HAS_QGIS
+  if (!m_canvas || !layer) return;
+  m_alignApplied = false;
+  m_alignCursorValid = false;
+  m_alignDstScreen.clear();
+  if (!m_alignTool) {
+    m_alignTool = new KaAlignMapTool(m_canvas);
+    m_alignTool->setParent(this);
+    connect(m_alignTool, &KaAlignMapTool::statusChanged, this, [this](const QString& t) {
+      statusBar()->showMessage(t, 8000);
+    });
+    connect(m_alignTool, &KaAlignMapTool::pairsChanged, this, &MainWindow::refreshAlignUi);
+    connect(m_alignTool, &KaAlignMapTool::cursorMoved, this, [this](const QgsPointXY& pt) {
+      m_alignCursorX = pt.x();
+      m_alignCursorY = pt.y();
+      m_alignCursorValid = true;
+      updateAlignOverlay();
+    });
+  }
+  stopCaptureTool();
+  QString err;
+  const QgsCoordinateReferenceSystem crs =
+      QgsProject::instance() && QgsProject::instance()->crs().isValid()
+          ? QgsProject::instance()->crs()
+          : QgsCoordinateReferenceSystem(m_workCrs);
+  if (!m_alignTool->beginLayer(layer, crs, &err)) {
+    QMessageBox::warning(this, QStringLiteral("맞추기"), err);
+    return;
+  }
+  if (m_layerTree) m_layerTree->setCurrentLayer(m_alignTool->targetLayer());
+  showAlignSplit();
+  showSubToolsAlign();
+  applySnapConfig();
+  m_canvas->setMapTool(m_alignTool);
+  LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, m_workCrs);
+  LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
+  refreshAlignUi();
+  statusBar()->showMessage(m_alignTool->statusText(), 10000);
 #else
-  Q_UNUSED(img);
+  Q_UNUSED(layer);
+#endif
+}
+
+void MainWindow::georefAssistant() {
+#if KA_HGIS_HAS_QGIS
+  QgsMapLayer* layer = m_layerTree ? m_layerTree->currentLayer() : nullptr;
+  if (!GeorefService::isAlignableLayer(layer)) {
+    const QString path = QFileDialog::getOpenFileName(
+        this, QStringLiteral("맞출 도면"), QString(),
+        QStringLiteral("도면 (*.png *.jpg *.jpeg *.tif *.tiff *.dxf *.dwg)"));
+    if (path.isEmpty()) return;
+    const bool ok = GeorefService::isImagePath(path) ? addRasterFromPath(path)
+                                                     : addVectorFromPath(path);
+    if (!ok) {
+      QMessageBox::warning(this, QStringLiteral("맞추기"),
+                           QStringLiteral("파일을 열 수 없습니다.\nDWG면 DXF로 저장한 뒤 다시 시도하세요."));
+      return;
+    }
+    layer = m_layerTree ? m_layerTree->currentLayer() : nullptr;
+    if (!layer) {
+      const auto layers = QgsProject::instance()->mapLayers();
+      for (auto it = layers.constBegin(); it != layers.constEnd(); ++it) {
+        if (GeorefService::isAlignableLayer(it.value())) layer = it.value();
+      }
+    }
+  }
+  if (!GeorefService::isAlignableLayer(layer)) {
+    QMessageBox::information(this, QStringLiteral("맞추기"),
+                             QStringLiteral("JPG·PNG·DXF 도면을 고르거나, 목록에서 도면을 선택한 뒤 다시 누르세요."));
+    return;
+  }
+  startAlignSession(layer);
+#else
+  QMessageBox::warning(this, QStringLiteral("맞추기"), QStringLiteral("QGIS 빌드 필요"));
 #endif
 }
 
@@ -3037,6 +3685,8 @@ void MainWindow::openVectorLayer() {
     return;
   }
   LayerOps::markSurveyLayer(layer, QStringLiteral("user:%1").arg(title));
+  LayerOps::applySimpleVectorStyle(layer, QColor(0, 0, 0, 0), QColor(0, 0, 0), 0.2, 3.5, true,
+                                   false);
   LayerOps::applyLegendCrsLabel(layer);
   LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, m_workCrs);
   QgsProject::instance()->addMapLayer(layer, true);
@@ -3279,7 +3929,8 @@ void MainWindow::goFileBrowserRoot(const QString& path) {
   dir.setFilter(QDir::Files | QDir::NoSymLinks);
   dir.setNameFilters({QStringLiteral("*.shp"), QStringLiteral("*.dxf"), QStringLiteral("*.dwg"),
                       QStringLiteral("*.gpkg"), QStringLiteral("*.geojson"), QStringLiteral("*.json"),
-                      QStringLiteral("*.tif"), QStringLiteral("*.tiff"), QStringLiteral("*.gtiff")});
+                      QStringLiteral("*.tif"), QStringLiteral("*.tiff"), QStringLiteral("*.gtiff"),
+                      QStringLiteral("*.jpg"), QStringLiteral("*.jpeg"), QStringLiteral("*.png")});
   const QStringList files = dir.entryList();
   for (const QString& name : files) {
     if (n >= 400) break;
@@ -3308,11 +3959,10 @@ void MainWindow::onFileBrowserActivated(QListWidgetItem* item) {
     return;
   }
   const QString low = path.toLower();
-  const bool raster = low.endsWith(QLatin1String(".tif")) || low.endsWith(QLatin1String(".tiff")) ||
-                      low.endsWith(QLatin1String(".gtiff"));
+  const bool raster = GeorefService::isImagePath(path);
   if (raster ? !addRasterFromPath(path) : !addVectorFromPath(path))
     QMessageBox::warning(this, QStringLiteral("파일"),
-                         QStringLiteral("지도 레이어로 열 수 없습니다 (SHP/DXF/DWG/GPKG/GeoTIFF):\n%1")
+                         QStringLiteral("지도 레이어로 열 수 없습니다 (SHP/DXF/DWG/GPKG/GeoTIFF/JPG):\n%1")
                              .arg(QDir::toNativeSeparators(path)));
 }
 
@@ -3343,11 +3993,9 @@ bool MainWindow::tryAddDroppedPaths(const QStringList& paths) {
     if (!(low.endsWith(QLatin1String(".shp")) || low.endsWith(QLatin1String(".dxf")) ||
           low.endsWith(QLatin1String(".dwg")) || low.endsWith(QLatin1String(".gpkg")) ||
           low.endsWith(QLatin1String(".geojson")) || low.endsWith(QLatin1String(".json")) ||
-          low.endsWith(QLatin1String(".tif")) || low.endsWith(QLatin1String(".tiff")) ||
-          low.endsWith(QLatin1String(".gtiff"))))
+          GeorefService::isImagePath(path)))
       continue;
-    const bool raster = low.endsWith(QLatin1String(".tif")) || low.endsWith(QLatin1String(".tiff")) ||
-                        low.endsWith(QLatin1String(".gtiff"));
+    const bool raster = GeorefService::isImagePath(path);
     if (raster ? addRasterFromPath(path) : addVectorFromPath(path))
       ++n;
   }
@@ -3364,41 +4012,60 @@ bool MainWindow::addRasterFromPath(const QString& path) {
     delete rl;
     return false;
   }
-  if (!rl->crs().isValid() && QgsProject::instance() && QgsProject::instance()->crs().isValid()) {
+  const bool unrefImage = GeorefService::isImagePath(path)
+                          && GeorefService::looksUnreferencedRaster(rl);
+  if (unrefImage)
+    LayerOps::setAlignPending(rl, true);
+  else if (!rl->crs().isValid() && QgsProject::instance() && QgsProject::instance()->crs().isValid()) {
     rl->setCrs(QgsProject::instance()->crs());
     statusBar()->showMessage(
         QStringLiteral("GeoTIFF에 좌표계가 없어 작업 좌표계(%1)로 올렸습니다.").arg(m_workCrs), 8000);
   }
-  if (QgsRasterRenderer* rend = rl->renderer()) {
-    auto* trans = new QgsRasterTransparency();
-    if (rl->bandCount() >= 3) {
-      QVector<QgsRasterTransparency::TransparentThreeValuePixel> whites;
-      whites.append(QgsRasterTransparency::TransparentThreeValuePixel(255, 255, 255, 0.0, 12, 12, 12));
-      whites.append(QgsRasterTransparency::TransparentThreeValuePixel(0, 0, 0, 0.0, 1, 1, 1));
-      trans->setTransparentThreeValuePixelList(whites);
-    } else {
-      QVector<QgsRasterTransparency::TransparentSingleValuePixel> vals;
-      vals.append(QgsRasterTransparency::TransparentSingleValuePixel(250, 255, 0.0));
-      vals.append(QgsRasterTransparency::TransparentSingleValuePixel(0, 2, 0.0));
-      trans->setTransparentSingleValuePixelList(vals);
+  const bool geotiff = path.toLower().endsWith(QLatin1String(".tif"))
+                       || path.toLower().endsWith(QLatin1String(".tiff"))
+                       || path.toLower().endsWith(QLatin1String(".gtiff"));
+  if (geotiff && !unrefImage) {
+    if (QgsRasterRenderer* rend = rl->renderer()) {
+      auto* trans = new QgsRasterTransparency();
+      if (rl->bandCount() >= 3) {
+        QVector<QgsRasterTransparency::TransparentThreeValuePixel> whites;
+        whites.append(QgsRasterTransparency::TransparentThreeValuePixel(255, 255, 255, 0.0, 12, 12, 12));
+        whites.append(QgsRasterTransparency::TransparentThreeValuePixel(0, 0, 0, 0.0, 1, 1, 1));
+        trans->setTransparentThreeValuePixelList(whites);
+      } else {
+        QVector<QgsRasterTransparency::TransparentSingleValuePixel> vals;
+        vals.append(QgsRasterTransparency::TransparentSingleValuePixel(250, 255, 0.0));
+        vals.append(QgsRasterTransparency::TransparentSingleValuePixel(0, 2, 0.0));
+        trans->setTransparentSingleValuePixelList(vals);
+      }
+      rend->setRasterTransparency(trans);
     }
-    rend->setRasterTransparency(trans);
-    rl->triggerRepaint();
   }
   LayerOps::markReferenceLayer(rl);
   LayerOps::applyLegendCrsLabel(rl);
   QgsProject::instance()->addMapLayer(rl, true);
+  if (m_layerTree) m_layerTree->setCurrentLayer(rl);
+  if (unrefImage) {
+    if (QgsLayerTreeLayer* n = QgsProject::instance()->layerTreeRoot()->findLayer(rl->id()))
+      n->setItemVisibilityChecked(false);
+  }
   LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, m_workCrs);
   LayerOps::pruneEmptyLegendGroups(QgsProject::instance());
   refreshLayerEmptyState();
-  if (m_canvas) {
+  if (m_canvas)
     LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
+  if (unrefImage) {
+    statusBar()->showMessage(
+        QStringLiteral("좌표 없는 그림입니다. 더보기 → 맞추기로 지적 위에 올리세요."), 10000);
+    return true;
+  }
+  if (m_canvas && geotiff && layerSitsOnWorkMap(rl, m_workCrs)) {
     if (!LayerOps::zoomToLayerMax(m_canvas, rl))
-      statusBar()->showMessage(QStringLiteral("GeoTIFF는 올렸지만 범위를 잡지 못했습니다."), 8000);
+      statusBar()->showMessage(QStringLiteral("그림은 올렸지만 범위를 잡지 못했습니다."), 8000);
   }
   const QString crs = rl->crs().isValid() ? rl->crs().authid() : m_workCrs;
   statusBar()->showMessage(
-      QStringLiteral("GeoTIFF 추가: %1 · %2 · 화면 %3").arg(title, crs, m_workCrs), 10000);
+      QStringLiteral("그림 추가: %1 · %2 · 화면 %3").arg(title, crs, m_workCrs), 10000);
   return true;
 #else
   Q_UNUSED(path);
@@ -3418,8 +4085,12 @@ bool MainWindow::addVectorFromPath(const QString& path) {
       return;
     }
     layer->setName(title);
-    LayerOps::markSurveyLayer(layer, QStringLiteral("user:%1").arg(title));
-    LayerOps::applySimpleVectorStyle(layer, QColor(234, 88, 12, 90), QColor(154, 52, 18), 1.2, 4.0);
+    if (GeorefService::isCadPath(path))
+      LayerOps::markReferenceLayer(layer);
+    else
+      LayerOps::markSurveyLayer(layer, QStringLiteral("user:%1").arg(title));
+    LayerOps::applySimpleVectorStyle(layer, QColor(0, 0, 0, 0), QColor(0, 0, 0), 0.2, 3.5, true,
+                                     false);
     LayerOps::applyLegendCrsLabel(layer);
     QgsProject::instance()->addMapLayer(layer, true);
     added.append(layer);
@@ -3448,6 +4119,7 @@ bool MainWindow::addVectorFromPath(const QString& path) {
   }
   LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, m_workCrs);
   LayerOps::pruneEmptyLegendGroups(QgsProject::instance());
+  if (m_layerTree && !added.isEmpty()) m_layerTree->setCurrentLayer(added.first());
   if (m_canvas) {
     LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
     QgsVectorLayer* zoomLayer = added.first();
@@ -3457,7 +4129,10 @@ bool MainWindow::addVectorFromPath(const QString& path) {
         break;
       }
     }
-    if (!LayerOps::zoomToLayerMax(m_canvas, zoomLayer)) {
+    if (!layerSitsOnWorkMap(zoomLayer, m_workCrs)) {
+      statusBar()->showMessage(
+          QStringLiteral("좌표가 없는 도면입니다. 더보기 → 맞추기로 지적 위에 올리세요."), 10000);
+    } else if (!LayerOps::zoomToLayerMax(m_canvas, zoomLayer)) {
       statusBar()->showMessage(
           QStringLiteral("레이어는 추가됐지만 도형이 없습니다: %1").arg(zoomLayer->name()), 8000);
     }

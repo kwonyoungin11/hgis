@@ -402,6 +402,18 @@ void dCenter(QPainter& p) {
   p.drawEllipse(QPointF(32, 32), 3, 3);
 }
 
+void dEasyDraw(QPainter& p) {
+  prep(p, 3.0);
+  QPolygonF path;
+  path << QPointF(12, 46) << QPointF(22, 30) << QPointF(34, 38) << QPointF(50, 16);
+  p.drawPolyline(path);
+  fillInk(p);
+  p.drawEllipse(QPointF(12, 46), 3.6, 3.6);
+  p.drawEllipse(QPointF(22, 30), 3.6, 3.6);
+  p.drawEllipse(QPointF(34, 38), 3.6, 3.6);
+  p.drawEllipse(QPointF(50, 16), 3.6, 3.6);
+}
+
 }  // namespace
 
 namespace KaIcons {
@@ -443,6 +455,7 @@ QIcon icon(const QString& id) {
   else if (id == QLatin1String("draw_line")) ic = bake(dToolLine);
   else if (id == QLatin1String("draw_area")) ic = bake(dToolArea);
   else if (id == QLatin1String("snap")) ic = bake(dSnap);
+  else if (id == QLatin1String("easy_draw")) ic = bake(dEasyDraw);
   else if (id == QLatin1String("artifact")) ic = bake(dArtifact);
   else if (id == QLatin1String("select") || id == QLatin1String("arrow")) ic = bake(dSelect);
   else if (id == QLatin1String("layout_map_frame")) ic = bake(dLayoutFrame);

@@ -38,7 +38,9 @@ Korean field archaeology HGIS (C++20/Qt6 + OSGeo4W `qgis-dev`, Architecture B, n
 3. **참조 지도** (위성/지적) vs **조사 데이터**
 4. Digitize: startEditing → addFeature → commit (keep tool). **Ctrl+Z** undoes last vertex, then last saved feature
 5. **도면 만들기** = `KaDrawingStudio` (not QGIS Layout Designer). Samples for north/scale/legend/CRS. **Ctrl+Z** removes last placed item
-6. Work CRS EPSG:5186 / 5187; **export SHP+PDF+MANIFEST = EPSG:5179**. Checklist error hard-blocks 제출
+5b. **맞추기** = same-canvas JPG/DXF onto 지적 (Fit To Display + 2–3 pairs). Result is **참조 지도**, not submit geometry. Not GNSS `control_points`.
+5c. **유구 심볼** = 그리기 막대 종류·시대 (`data/styles/feature_presets.json`). `kind`/`period` written on capture; categorized renderer (kind pattern + period color).
+6. Work CRS default **EPSG:5187 (동부)**; 5186 also OK. **export SHP+PDF+MANIFEST = EPSG:5179**. Checklist error hard-blocks 제출
 7. Icon toolbar (새조사/열기/저장/위성/지적/그리기/선택/속성/도면/검수/보내기/찾기). Text menu bar **hidden**. File drawer and 작업 제어 dock hidden by default (**더보기**)
 
 ---

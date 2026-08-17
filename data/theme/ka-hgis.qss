@@ -256,8 +256,20 @@ QLabel#cardCaption { color: #1C1917; font-weight: 700; font-size: 13px; padding:
 QCheckBox { color: #1C1917; spacing: 8px; font-weight: 600; background: transparent; }
 QCheckBox:disabled { color: #A8A29E; }
 QCheckBox::indicator, QTreeView::indicator, QgsLayerTreeView::indicator {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
+  margin: 2px;
+  border: 1.5px solid #78716C;
+  border-radius: 3px;
+  background: #FFFFFF;
+}
+QCheckBox::indicator:checked, QTreeView::indicator:checked, QgsLayerTreeView::indicator:checked {
+  background: #0F766E;
+  border-color: #0F766E;
+}
+QCheckBox::indicator:unchecked, QTreeView::indicator:unchecked, QgsLayerTreeView::indicator:unchecked {
+  background: #FFFFFF;
+  border: 1.5px solid #78716C;
 }
 
 QMenu {
