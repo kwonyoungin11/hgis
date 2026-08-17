@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-17 14:04:34 +09:00 |
+| Updated (local) | 2026-08-17 14:04:45 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `e896fce` |
-| HEAD full | `e896fce31712859a971b9a81dcf960e46733f2d1` |
-| HEAD date | 2026-08-17 10:48:58 +0900 |
+| HEAD short | `2ca17b9` |
+| HEAD full | `2ca17b9b0951419742dc2a03396cd2b1068a8778` |
+| HEAD date | 2026-08-17 14:04:33 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Ship georef split-align, easy-draw layer, and feature kind/period presets. |
-| Total commits | 24 |
+| HEAD subject | Ship site buffer rings, new-survey legend reset, and OSGeo launch PATH. |
+| Total commits | 25 |
 | Upstream | `origin/main` |
-| Sync | ahead 1 of origin/main (push pending) |
+| Sync | ahead 2 of origin/main (push pending) |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (19 paths) |
+| Working tree dirty | **yes** (2 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Ship georef split-align, easy-draw layer, and feature kind/period presets. (`e896fce` @ 2026-08-17 10:48:58 +0900)
-- **Remote sync at write time:** ahead 1 of origin/main (push pending)
-- **Uncommitted local changes at write time:** yes (19 paths)
+- **Recorded tip when this file was written:** Ship site buffer rings, new-survey legend reset, and OSGeo launch PATH. (`2ca17b9` @ 2026-08-17 14:04:33 +0900)
+- **Remote sync at write time:** ahead 2 of origin/main (push pending)
+- **Uncommitted local changes at write time:** yes (2 paths)
 
 ### Read this correctly
 
@@ -52,6 +52,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `2ca17b9` | 2026-08-17T14:04:33+09:00 | Ship site buffer rings, new-survey legend reset, and OSGeo launch PATH. |
 | `e896fce` | 2026-08-17T10:48:58+09:00 | Ship georef split-align, easy-draw layer, and feature kind/period presets. |
 | `3bd6ff8` | 2026-08-16T15:35:45+09:00 | Refresh COMMIT_STATUS after teal chrome and digitize ship. |
 | `74abc32` | 2026-08-16T15:35:36+09:00 | Ship teal chrome, artifact digitize, snap, and studio layer-center. |
@@ -80,24 +81,7 @@
 ## Staged in this commit
 
 ```
-M	CMakeLists.txt
-M	HANDOFF.md
-M	data/theme/ka-hgis.qss
 M	docs/COMMIT_STATUS.md
-M	docs/HANDOFF.md
-M	"ka-hgis-\354\213\244\355\226\211.bat"
-M	src/app/KaApplication.cpp
-M	src/app/KaIcons.cpp
-M	src/app/KaIcons.h
-M	src/app/KaTheme.cpp
-M	src/app/MainWindow.cpp
-M	src/app/MainWindow.h
-A	src/core/BufferAnalysis.cpp
-A	src/core/BufferAnalysis.h
-M	src/core/LayerOps.cpp
-M	src/core/LayerOps.h
-A	tests/test_buffer.cpp
-M	tests/test_workflow.cpp
 ```
 ## Other PC checklist
 
