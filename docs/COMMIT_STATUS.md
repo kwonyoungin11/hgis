@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-17 14:04:45 +09:00 |
+| Updated (local) | 2026-08-18 07:29:19 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `2ca17b9` |
-| HEAD full | `2ca17b9b0951419742dc2a03396cd2b1068a8778` |
-| HEAD date | 2026-08-17 14:04:33 +0900 |
+| HEAD short | `c4cc35c` |
+| HEAD full | `c4cc35c84db3a64dbca533c999d412e7decfb948` |
+| HEAD date | 2026-08-17 14:04:44 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Ship site buffer rings, new-survey legend reset, and OSGeo launch PATH. |
-| Total commits | 25 |
+| HEAD subject | Refresh COMMIT_STATUS after buffer and new-survey reset. |
+| Total commits | 26 |
 | Upstream | `origin/main` |
-| Sync | ahead 2 of origin/main (push pending) |
+| Sync | up to date with origin/main |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (2 paths) |
+| Working tree dirty | **yes** (25 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Ship site buffer rings, new-survey legend reset, and OSGeo launch PATH. (`2ca17b9` @ 2026-08-17 14:04:33 +0900)
-- **Remote sync at write time:** ahead 2 of origin/main (push pending)
-- **Uncommitted local changes at write time:** yes (2 paths)
+- **Recorded tip when this file was written:** Refresh COMMIT_STATUS after buffer and new-survey reset. (`c4cc35c` @ 2026-08-17 14:04:44 +0900)
+- **Remote sync at write time:** up to date with origin/main
+- **Uncommitted local changes at write time:** yes (25 paths)
 
 ### Read this correctly
 
@@ -47,11 +47,13 @@
 - `cf8c011` commit progress ledger ??Refresh COMMIT_STATUS after theme ship; drop old no-MCP rule.
 - `ef06bf1` commit progress ledger ??Refresh COMMIT_STATUS after chrome and folder-import ship.
 - `3bd6ff8` commit progress ledger ??Refresh COMMIT_STATUS after teal chrome and digitize ship.
+- `c4cc35c` commit progress ledger ??Refresh COMMIT_STATUS after buffer and new-survey reset.
 
 ## Recent commits (newest first, max 30)
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `c4cc35c` | 2026-08-17T14:04:44+09:00 | Refresh COMMIT_STATUS after buffer and new-survey reset. |
 | `2ca17b9` | 2026-08-17T14:04:33+09:00 | Ship site buffer rings, new-survey legend reset, and OSGeo launch PATH. |
 | `e896fce` | 2026-08-17T10:48:58+09:00 | Ship georef split-align, easy-draw layer, and feature kind/period presets. |
 | `3bd6ff8` | 2026-08-16T15:35:45+09:00 | Refresh COMMIT_STATUS after teal chrome and digitize ship. |
@@ -81,7 +83,31 @@
 ## Staged in this commit
 
 ```
+M	CMakeLists.txt
+M	data/theme/ka-hgis.qss
 M	docs/COMMIT_STATUS.md
+M	scripts/dev-env.ps1
+M	src/app/KaAlignMapTool.cpp
+M	src/app/KaAlignMapTool.h
+M	src/app/KaApplication.cpp
+A	src/app/KaCoordPointMapTool.cpp
+A	src/app/KaCoordPointMapTool.h
+M	src/app/KaDrawingStudio.cpp
+M	src/app/KaDrawingStudio.h
+M	src/app/KaIcons.cpp
+A	src/app/KaStartPage.cpp
+A	src/app/KaStartPage.h
+M	src/app/KaTheme.cpp
+M	src/app/MainWindow.cpp
+M	src/app/MainWindow.h
+M	src/core/GeorefService.cpp
+M	src/core/GeorefService.h
+M	src/core/LayerOps.cpp
+A	src/core/RecentSurveys.cpp
+A	src/core/RecentSurveys.h
+M	tests/test_georef.cpp
+A	tests/test_recent.cpp
+M	tests/test_workflow.cpp
 ```
 ## Other PC checklist
 

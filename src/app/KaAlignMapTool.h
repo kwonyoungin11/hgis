@@ -82,7 +82,7 @@ private:
 
   void clearMarks();
   void rebuildPairMarks();
-  void applyPreview();
+  bool applyPreview(QString* errorOut = nullptr);
   void captureOriginals(QgsVectorLayer* vl);
   bool mapPointFromEvent(QgsMapMouseEvent* e, QgsPointXY* out, bool* snapped);
   void updateSnapMark(const QgsPointXY& pt, bool snapped);

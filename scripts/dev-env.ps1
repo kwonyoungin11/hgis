@@ -1,5 +1,5 @@
 $ErrorActionPreference = "Stop"
-# Existence-based OSGeo root: env → C:\OSGeo4W → D:\OSGeo4W
+# Existence-based OSGeo root: env → C:\OSGeo4W → D:\OSGeo4W → A:\OSGeo4W
 $OSGEO = $null
 if ($env:OSGEO4W_ROOT -and (Test-Path -LiteralPath $env:OSGEO4W_ROOT)) {
   $OSGEO = $env:OSGEO4W_ROOT
@@ -7,8 +7,10 @@ if ($env:OSGEO4W_ROOT -and (Test-Path -LiteralPath $env:OSGEO4W_ROOT)) {
   $OSGEO = "C:\OSGeo4W"
 } elseif (Test-Path -LiteralPath "D:\OSGeo4W") {
   $OSGEO = "D:\OSGeo4W"
+} elseif (Test-Path -LiteralPath "A:\OSGeo4W") {
+  $OSGEO = "A:\OSGeo4W"
 } else {
-  throw "OSGEO4W_ROOT not found. Set OSGEO4W_ROOT or install OSGeo4W at C:\OSGeo4W (preferred) or D:\OSGeo4W."
+  throw "OSGEO4W_ROOT not found. Set OSGEO4W_ROOT or install OSGeo4W at C:\OSGeo4W (preferred), D:\OSGeo4W, or A:\OSGeo4W."
 }
 $env:OSGEO4W_ROOT = $OSGEO
 $qgis = Join-Path $OSGEO "apps\qgis-dev"

@@ -1,8 +1,12 @@
 #pragma once
 #include <QMainWindow>
+#include <QPoint>
 #include <QPointer>
 #include <QRectF>
+#include <QSize>
 #include <QString>
+#include <QVector>
+#include <qgspointxy.h>
 
 class QAction;
 class QCheckBox;
@@ -16,6 +20,7 @@ class QLabel;
 class QLineEdit;
 class QShowEvent;
 class QSpinBox;
+class QTimer;
 class QWidget;
 class QgsProject;
 class QgsMapCanvas;
@@ -31,8 +36,11 @@ class QgsLayerTreeModel;
 class QgsVectorLayer;
 class QgsCoordinateReferenceSystem;
 class QgsRectangle;
+class QgsPointXY;
+class QgsGeometry;
 class KaLayoutMapDrawTool;
 class KaLayoutMapAdjustTool;
+class KaLayoutCoordPointTool;
 
 class KaDrawingStudio : public QMainWindow {
   Q_OBJECT
@@ -45,6 +53,9 @@ public:
   static bool promptPaper(QWidget* parent, double* widthMm, double* heightMm);
   void resetPaper(double widthMm, double heightMm);
   void refreshMapFromProject();
+  void importMapCoordCallouts(const QVector<QgsPointXY>& pts, const QVector<QString>& letters,
+                              const QVector<QString>& texts, const QgsGeometry& frame);
+  void applyImportedCoordCallouts();
   bool isMapAdjusting() const { return m_adjustingMap; }
   bool eventFilter(QObject* watched, QEvent* event) override;
 
@@ -52,6 +63,8 @@ public slots:
   void beginActivateMap();
   void endActivateMap();
   void centerSurveyInMap();
+  void centerOnMapCanvas();
+  void beginPlaceCoordPoint();
 
 private slots:
   void beginDrawMapFrame();
@@ -73,7 +86,11 @@ private slots:
   void deleteSelectedItems();
   void undoLastChange();
   void syncScaleDecorations();
+  void flushHeavyScaleSync();
   void focusGridSettings();
+  void placeCoordCallout(const QPointF& layoutPt);
+  void panLayoutMapTo(const QgsPointXY& center);
+  void updateCoordFrame();
 
 private:
   void buildUi();
@@ -113,6 +130,9 @@ private:
   void autoPlaceDefaultSheet();
   QRectF defaultMapRect() const;
   void updatePageOutline();
+  void panLayoutView(const QPoint& from, const QPoint& to);
+  void recenterPaper();
+  void setFastLayoutPreview(bool on);
   void showEvent(QShowEvent* event) override;
   void keyPressEvent(QKeyEvent* event) override;
   static int displayScale(double raw);
@@ -126,6 +146,7 @@ private:
   QgsLayoutViewToolPan* m_toolPan = nullptr;
   KaLayoutMapAdjustTool* m_toolMoveContent = nullptr;
   KaLayoutMapDrawTool* m_toolDrawMap = nullptr;
+  KaLayoutCoordPointTool* m_toolCoordPoint = nullptr;
   QgsLayerTreeView* m_layerTree = nullptr;
   QgsLayerTreeModel* m_layerModel = nullptr;
   bool m_gridEnabled = false;
@@ -155,6 +176,17 @@ private:
   QStringList m_placeUndo;
   bool m_adjustingMap = false;
   bool m_paperFitPending = true;
+  bool m_keepPaperCentered = true;
+  bool m_mmbPanning = false;
+  QPoint m_mmbLast;
+  QSize m_lastFitViewport;
+  QTimer* m_scaleSyncTimer = nullptr;
+  double m_savedLayoutDpi = 0.0;
+  QVector<QPointF> m_coordMapPts;
+  QVector<QPointF> m_coordFrameMap;
+  QVector<QgsPointXY> m_importCoordPts;
+  QVector<QString> m_importCoordLetters;
+  QVector<QString> m_importCoordTexts;
   QGraphicsRectItem* m_pageOutline = nullptr;
   QPointer<QgsVectorLayer> m_blankMapLayer;
 };

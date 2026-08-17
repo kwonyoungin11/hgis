@@ -12,6 +12,7 @@ class QToolButton;
 class QLineEdit;
 class QComboBox;
 class QEvent;
+class QTabWidget;
 class ChecklistEngine;
 #if KA_HGIS_HAS_QGIS
 class QgsMapCanvas;
@@ -26,6 +27,8 @@ class KaAlignPickTool;
 class KaImageView;
 class KaAlignLinkOverlay;
 class KaDrawingStudio;
+class KaStartPage;
+class KaCoordPointMapTool;
 class QSplitter;
 class QListWidget;
 class QTimer;
@@ -115,10 +118,16 @@ private slots:
   void showSubToolsBasemap();
   void showSubToolsSubmit();
   void hideSubTools();
+  void startCoordPointTool();
   void runSiteBuffer500();
   void runSiteBuffer1000();
   void applySnapConfig();
   void openLayoutDesigner();
+  void onViewTabCloseRequested(int index);
+  void openRecentSurvey(const QString& path);
+  void showHomePage();
+  void showMapWorkspace();
+  void rememberSurvey(const QString& path, const QString& name);
   void undoLastAction();
 
 private:
@@ -134,7 +143,9 @@ private:
   bool tryAddDroppedPaths(const QStringList& paths);
   QStringList selectedBrowserFiles() const;
   void loadSurveyLayers(const QString& gpkgOrStub);
+  void ensureDefaultBasemaps();
   void applyStartupMap();
+  void ensureStartupViewReady();
   void setWorkCrs(const QString& authId);
   void onLocationResults(const QVector<LocationHit>& hits);
   void onLocationFailed(const QString& message);
@@ -169,6 +180,7 @@ private:
   void refreshLayerEmptyState();
   QLabel* m_layerEmpty = nullptr;
   QLabel* m_help = nullptr;
+  QLabel* m_xyReadout = nullptr;
   QLabel* m_checkView = nullptr;
   QLabel* m_workHint = nullptr;
   QListWidget* m_workList = nullptr;
@@ -189,6 +201,7 @@ private:
   QgsMapCanvas* m_canvas = nullptr;
   QgsLayerTreeView* m_layerTree = nullptr;
   KaCaptureMapTool* m_captureTool = nullptr;
+  KaCoordPointMapTool* m_coordPointTool = nullptr;
   KaAttributeMapTool* m_attributeTool = nullptr;
   KaAlignMapTool* m_alignTool = nullptr;
   KaAlignPickTool* m_alignPickTool = nullptr;
@@ -216,10 +229,14 @@ private:
   QComboBox* m_scaleCombo = nullptr;
   bool m_scaleUiGuard = false;
   bool m_extentClampGuard = false;
+  bool m_startupViewApplied = false;
   QToolBar* m_subToolbar = nullptr;
   QString m_subToolsMode;
   bool m_snapEnabled = true;
   KaDrawingStudio* m_drawingStudio = nullptr;
+  QTabWidget* m_viewTabs = nullptr;
+  KaStartPage* m_startPage = nullptr;
+  QWidget* m_mapPage = nullptr;
   QVector<QPair<QString, qint64>> m_committedUndo;
 #endif
 };

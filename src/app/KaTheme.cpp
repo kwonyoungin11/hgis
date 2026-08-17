@@ -66,21 +66,31 @@ public:
       const bool on = opt->state.testFlag(State_On);
       const bool part = opt->state.testFlag(State_NoChange);
       const bool dis = !opt->state.testFlag(State_Enabled);
-      p->setPen(QPen(dis ? QColor(0xA8, 0xA2, 0x9E)
-                         : (on || part ? QColor(0x7F, 0x1D, 0x1D) : QColor(0x57, 0x53, 0x4E)),
-                     1.5));
-      p->setBrush(on || part ? QColor(0xDC, 0x26, 0x26) : QColor(255, 255, 255));
-      p->drawRoundedRect(r, 2.0, 2.0);
+      const bool hover = opt->state.testFlag(State_MouseOver);
+      const QColor fill(0xC5, 0xE6, 0xE1);
+      const QColor edge(hover ? QColor(0x5B, 0xA8, 0xA2) : QColor(0x8F, 0xC4, 0xBE));
+      const QColor tickInk(0x0F, 0x76, 0x6E);
+      const QColor stone(hover ? QColor(0x8F, 0xC4, 0xBE) : QColor(0xC4, 0xB8, 0xA8));
+      p->setPen(QPen(dis ? QColor(0xD6, 0xCB, 0xB8)
+                         : ((on || part) ? edge : stone),
+                     1.1));
+      p->setBrush(dis ? QColor(0xF6, 0xF1, 0xE8)
+                      : ((on || part) ? fill : QColor(255, 255, 255)));
+      p->drawRoundedRect(r, 3.5, 3.5);
       if (on) {
         QPainterPath tick;
-        tick.moveTo(r.left() + r.width() * 0.20, r.center().y());
-        tick.lineTo(r.left() + r.width() * 0.42, r.bottom() - r.height() * 0.26);
-        tick.lineTo(r.right() - r.width() * 0.18, r.top() + r.height() * 0.24);
-        p->setPen(QPen(QColor(255, 255, 255), 1.7, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        tick.moveTo(r.left() + r.width() * 0.22, r.center().y() + r.height() * 0.02);
+        tick.lineTo(r.left() + r.width() * 0.40, r.bottom() - r.height() * 0.28);
+        tick.lineTo(r.right() - r.width() * 0.20, r.top() + r.height() * 0.26);
+        p->setPen(QPen(tickInk, 1.85, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         p->setBrush(Qt::NoBrush);
         p->drawPath(tick);
       } else if (part) {
-        p->fillRect(r.adjusted(3, 3, -3, -3), QColor(255, 255, 255));
+        const QRectF bar = r.adjusted(r.width() * 0.22, r.height() * 0.42,
+                                      -r.width() * 0.22, -r.height() * 0.42);
+        p->setPen(Qt::NoPen);
+        p->setBrush(QColor(255, 255, 255));
+        p->drawRoundedRect(bar, 1.2, 1.2);
       }
       p->restore();
       return;

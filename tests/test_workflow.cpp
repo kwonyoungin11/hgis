@@ -89,6 +89,9 @@ private slots:
   void drawSubToolbarWiresEachDomainSlot();
   void digitizeTargetLayer_featurePolyIgnoresSurveyAreaCurrent();
   void newSurvey_removesUserLayersKeepsXyzBasemap();
+  void layoutOpensAsMainWindowTabNotSeparateWindow();
+  void startupLoadsSatelliteAndCadastralWithoutToolbarIcons();
+  void layoutCoordPointHasIconAndCallout();
 };
 
 static bool projectHasLayerNamedLike(QgsProject* proj, const QString& base) {
@@ -1374,6 +1377,60 @@ void TestWorkflow::newSurvey_removesUserLayersKeepsXyzBasemap() {
   QVERIFY2(leftover.isEmpty(), qPrintable(leftover.join(QLatin1Char(','))));
   if (osmOk)
     QVERIFY2(hasBasemap, "OSM xyz/wms must remain after 새 조사");
+}
+
+void TestWorkflow::layoutOpensAsMainWindowTabNotSeparateWindow() {
+  QFile f(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text),
+           "run from source tree (ctest WORKING_DIRECTORY)");
+  const QString src = QString::fromUtf8(f.readAll());
+  const int fn = src.indexOf(QLatin1String("void MainWindow::openLayoutDesigner"));
+  QVERIFY2(fn >= 0, "openLayoutDesigner must exist");
+  const int next = src.indexOf(QLatin1String("void MainWindow::"), fn + 10);
+  QVERIFY2(next > fn, "openLayoutDesigner body");
+  const QString body = src.mid(fn, next - fn);
+  QVERIFY2(body.contains(QLatin1String("addTab")),
+           "조판 must add a 레이아웃 tab, not a free window");
+  QVERIFY2(body.contains(QLatin1String("setCurrentWidget")),
+           "조판 must switch to the layout tab");
+  QVERIFY2(!body.contains(QLatin1String("activateWindow")),
+           "must not raise a separate studio window");
+}
+
+void TestWorkflow::startupLoadsSatelliteAndCadastralWithoutToolbarIcons() {
+  QFile f(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text),
+           "run from source tree (ctest WORKING_DIRECTORY)");
+  const QString src = QString::fromUtf8(f.readAll());
+  const int fn = src.indexOf(QLatin1String("void MainWindow::ensureDefaultBasemaps"));
+  QVERIFY2(fn >= 0, "ensureDefaultBasemaps must exist");
+  const int next = src.indexOf(QLatin1String("void MainWindow::"), fn + 10);
+  QVERIFY2(next > fn, "ensureDefaultBasemaps body");
+  const QString body = src.mid(fn, next - fn);
+  QVERIFY2(body.contains(QLatin1String("addVworldSatelliteMap")),
+           "start must add VWorld satellite as reference");
+  QVERIFY2(body.contains(QLatin1String("addVworldCadastralMap")),
+           "start must add VWorld cadastral as reference");
+  QVERIFY2(src.contains(QLatin1String("ensureStartupViewReady")),
+           "map tab must apply Korea view once the canvas has a size");
+  QVERIFY2(!src.contains(QLatin1String("addIcon(QStringLiteral(\"satellite\"), QStringLiteral(\"위성\")")),
+           "main toolbar must not keep 위성 icon");
+  QVERIFY2(!src.contains(QLatin1String("addIcon(QStringLiteral(\"cadastral\"), QStringLiteral(\"지적\")")),
+           "main toolbar must not keep 지적 icon");
+}
+
+void TestWorkflow::layoutCoordPointHasIconAndCallout() {
+  QFile icons(QStringLiteral("src/app/KaIcons.cpp"));
+  QVERIFY2(icons.open(QIODevice::ReadOnly | QIODevice::Text), "KaIcons.cpp");
+  const QString ic = QString::fromUtf8(icons.readAll());
+  QVERIFY2(ic.contains(QLatin1String("layout_coord_point")), "toolbar icon id");
+  QVERIFY2(ic.contains(QLatin1String("dCoordPoint")), "coord-point icon drawing");
+  QFile f(QStringLiteral("src/app/KaDrawingStudio.cpp"));
+  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "KaDrawingStudio.cpp");
+  const QString src = QString::fromUtf8(f.readAll());
+  QVERIFY2(src.contains(QLatin1String("beginPlaceCoordPoint")), "coord tool slot");
+  QVERIFY2(src.contains(QLatin1String("placeCoordCallout")), "callout placement");
+  QVERIFY2(src.contains(QLatin1String("ka_coord_box_")), "label id");
 }
 
 #include "test_workflow.moc"

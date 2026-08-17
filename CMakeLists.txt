@@ -41,6 +41,7 @@ add_library(ka_core STATIC
   src/core/GeorefService.cpp
   src/core/FeaturePresets.cpp
   src/core/BufferAnalysis.cpp
+  src/core/RecentSurveys.cpp
   src/core/ChecklistEngine.h
   src/core/SurveyProjectFactory.h
   src/core/ExportService.h
@@ -53,6 +54,7 @@ add_library(ka_core STATIC
   src/core/GeorefService.h
   src/core/FeaturePresets.h
   src/core/BufferAnalysis.h
+  src/core/RecentSurveys.h
 )
 target_include_directories(ka_core PUBLIC ${KA_INCLUDES})
 target_link_directories(ka_core PUBLIC ${KA_LIBDIRS})
@@ -80,6 +82,8 @@ add_executable(ka-hgis
   src/app/KaDrawingStudio.cpp
   src/app/KaAlignMapTool.cpp
   src/app/KaImageView.cpp
+  src/app/KaStartPage.cpp
+  src/app/KaCoordPointMapTool.cpp
   src/app/MainWindow.h
   src/app/KaApplication.h
   src/app/KaTheme.h
@@ -90,6 +94,8 @@ add_executable(ka-hgis
   src/app/KaDrawingStudio.h
   src/app/KaAlignMapTool.h
   src/app/KaImageView.h
+  src/app/KaStartPage.h
+  src/app/KaCoordPointMapTool.h
 )
 target_include_directories(ka-hgis PRIVATE ${KA_INCLUDES} ${CMAKE_BINARY_DIR}/generated)
 target_link_directories(ka-hgis PRIVATE ${KA_LIBDIRS})
@@ -167,6 +173,15 @@ if(KA_HGIS_BUILD_TESTS)
   )
   add_test(NAME theme_qss COMMAND ka_theme_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+  add_executable(ka_recent_tests
+    tests/test_recent.cpp
+    src/core/RecentSurveys.cpp
+  )
+  set_target_properties(ka_recent_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  target_link_libraries(ka_recent_tests PRIVATE Qt6::Test Qt6::Core)
+  target_include_directories(ka_recent_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  add_test(NAME recent_surveys COMMAND ka_recent_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
   # Windows: ctest without OSGeo4W PATH → 0xc0000135 (DLL not found).
   # ENVIRONMENT is a CMake list, so unescaped ';' would truncate PATH to the
   # first bin dir. Escape path separators; keep ';' only between VAR=value.
@@ -179,7 +194,7 @@ if(KA_HGIS_BUILD_TESTS)
       "${OSGEO4W_ROOT}/bin"
     )
     string(JOIN "\\;" _ka_path_esc ${_ka_path})
-    set_tests_properties(checklist_engine workflow_engine georef_engine feature_presets buffer_ring theme_qss PROPERTIES
+    set_tests_properties(checklist_engine workflow_engine georef_engine feature_presets buffer_ring theme_qss recent_surveys PROPERTIES
       ENVIRONMENT "PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
   endif()
 endif()

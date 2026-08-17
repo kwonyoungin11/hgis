@@ -1427,7 +1427,12 @@ bool LayerOps::addVworldCadastralMap(QgsProject* project, QgsMapCanvas* canvas, 
   if (canvas) {
     LayerOps::ensureOtfEnabled(project, canvas, workCrs);
     for (QgsMapLayer* l : project->mapLayers()) {
-      if (l && l->name().contains(QStringLiteral("지적")))
+      if (!l) continue;
+      const QString n = l->name();
+      const bool vworldCad = (n.contains(QStringLiteral("VWorld")) && n.contains(QStringLiteral("지적"))) ||
+                             n == QLatin1String("지적") || n.startsWith(QLatin1String("지적 본번")) ||
+                             n.startsWith(QLatin1String("지적 부번")) || n.startsWith(QLatin1String("지적("));
+      if (vworldCad)
         l->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:3857")));
     }
     LayerOps::syncMapCanvas(project, canvas, false);

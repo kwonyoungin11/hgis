@@ -61,5 +61,6 @@ bool isDomainSurveyLayer(const QgsMapLayer* layer);
 bool isImagePath(const QString& path);
 bool isCadPath(const QString& path);
 bool looksUnreferencedRaster(const QgsRasterLayer* layer);
+void styleAlignedRasterOverlay(QgsRasterLayer* layer);
 
 }  // namespace GeorefService

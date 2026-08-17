@@ -118,6 +118,7 @@ bool KaAlignMapTool::beginLayer(QgsMapLayer* layer, const QgsCoordinateReference
     m_rasterPath = rl->source();
     m_pixelW = rl->width();
     m_pixelH = rl->height();
+    LayerOps::setAlignPending(rl, true);
     if (m_pixelW < 2 || m_pixelH < 2) {
       if (errorOut) *errorOut = QStringLiteral("그림이 너무 작습니다");
       endSession();
@@ -273,27 +274,39 @@ bool KaAlignMapTool::fitToDisplay() {
   return m_affine.valid;
 }
 
-void KaAlignMapTool::applyPreview() {
-  if (!m_layer || !m_affine.valid) return;
-  if (canvas()) {
-    canvas()->stopRendering();
-    canvas()->freeze(true);
+bool KaAlignMapTool::applyPreview(QString* errorOut) {
+  if (!m_layer || !m_affine.valid) {
+    if (errorOut) *errorOut = QStringLiteral("옮길 변환이 없습니다");
+    return false;
   }
+  if (canvas())
+    canvas()->freeze(true);
   QString err;
   bool ok = true;
   if (m_raster) {
     auto* rl = qobject_cast<QgsRasterLayer*>(m_layer.data());
     ok = rl && GeorefService::applyWorldFileToRaster(rl, m_affine, workCrs(), &err);
+    if (ok && rl)
+      GeorefService::styleAlignedRasterOverlay(rl);
   } else {
     auto* vl = qobject_cast<QgsVectorLayer*>(m_layer.data());
     ok = vl && GeorefService::applyAffineToVector(vl, m_affine, m_originals, workCrs(), &err);
+    if (ok && vl) {
+      LayerOps::applySimpleVectorStyle(vl, QColor(0, 0, 0, 0), QColor(15, 118, 110), 0.9, 4.0,
+                                       true, false);
+      vl->setOpacity(1.0);
+    }
   }
   if (canvas()) {
     canvas()->freeze(false);
     canvas()->refresh();
   }
   rebuildPairMarks();
-  if (!ok && !err.isEmpty()) emit statusChanged(err);
+  if (!ok) {
+    if (errorOut) *errorOut = err.isEmpty() ? QStringLiteral("도면을 옮기지 못했습니다") : err;
+    if (!err.isEmpty()) emit statusChanged(err);
+  }
+  return ok;
 }
 
 bool KaAlignMapTool::removeLastPair() {
@@ -353,7 +366,7 @@ bool KaAlignMapTool::applyMove(QString* errorOut) {
     if (errorOut) *errorOut = QStringLiteral("점 배치로 변환을 만들 수 없습니다");
     return false;
   }
-  applyPreview();
+  if (!applyPreview(errorOut)) return false;
   if (m_raster) {
     auto* old = qobject_cast<QgsRasterLayer*>(m_layer.data());
     if (!old) {
@@ -379,8 +392,14 @@ bool KaAlignMapTool::applyMove(QString* errorOut) {
       LayerOps::markReferenceLayer(rl);
       LayerOps::setAlignPending(rl, false);
       LayerOps::applyLegendCrsLabel(rl);
+      GeorefService::styleAlignedRasterOverlay(rl);
       proj->addMapLayer(rl, true);
       m_layer = rl;
+      if (GeorefService::looksUnreferencedRaster(rl)) {
+        if (errorOut)
+          *errorOut = QStringLiteral("그림을 지도 좌표로 붙이지 못했습니다. 점을 다시 찍고 이동하세요.");
+        return false;
+      }
     }
   }
   if (auto* l = m_layer.data()) {

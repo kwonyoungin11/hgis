@@ -20,6 +20,8 @@
 #include <qgscoordinatetransform.h>
 #include <qgscoordinatetransformcontext.h>
 #include <qgsdataprovider.h>
+#include <qgsrastertransparency.h>
+#include <qgsrasterrenderer.h>
 #include <qgsproject.h>
 #include <qgslayertree.h>
 #include <qgslayertreelayer.h>
@@ -311,6 +313,9 @@ bool applyAffineToVector(QgsVectorLayer* layer, const Affine& a,
     return false;
   }
   if (destCrs.isValid()) layer->setCrs(destCrs);
+  if (QgsDataProvider* p = layer->dataProvider())
+    p->reloadData();
+  layer->updateExtents();
   layer->triggerRepaint();
   return true;
 }
@@ -444,6 +449,20 @@ bool isImagePath(const QString& path) {
 bool isCadPath(const QString& path) {
   const QString low = path.toLower();
   return low.endsWith(QLatin1String(".dxf")) || low.endsWith(QLatin1String(".dwg"));
+}
+
+void styleAlignedRasterOverlay(QgsRasterLayer* layer) {
+  if (!layer || !layer->isValid()) return;
+  layer->setOpacity(0.82);
+  QgsRasterRenderer* rend = layer->renderer();
+  if (!rend) return;
+  auto* tr = new QgsRasterTransparency();
+  QVector<QgsRasterTransparency::TransparentThreeValuePixel> rgb;
+  rgb.append(QgsRasterTransparency::TransparentThreeValuePixel(255, 255, 255, 0.0, 20, 20, 20));
+  rgb.append(QgsRasterTransparency::TransparentThreeValuePixel(248, 248, 242, 0.0, 14, 14, 14));
+  tr->setTransparentThreeValuePixelList(rgb);
+  rend->setRasterTransparency(tr);
+  layer->triggerRepaint();
 }
 
 bool looksUnreferencedRaster(const QgsRasterLayer* layer) {

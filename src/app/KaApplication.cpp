@@ -22,6 +22,12 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QWidget>
+#include <QSplashScreen>
+#include <QPainter>
+#include <QLinearGradient>
+#include <QPixmap>
+#include <QFont>
+#include <QPen>
 #include <functional>
 #include <cstdlib>
 #include "core/VworldSettings.h"
@@ -443,6 +449,30 @@ int KaApplication::run(int argc, char** argv) {
   app.setStyle(QStringLiteral("Fusion"));
   KaTheme::apply(&app);
 
+  QSplashScreen* splash = nullptr;
+  if (!smokeQuit) {
+    QPixmap pm(640, 360);
+    QLinearGradient g(0, 0, 0, pm.height());
+    g.setColorAt(0.0, QColor(11, 58, 74));
+    g.setColorAt(1.0, QColor(15, 118, 110));
+    QPainter p(&pm);
+    p.fillRect(pm.rect(), g);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(QPen(QColor(255, 255, 255, 48), 1));
+    p.drawRect(pm.rect().adjusted(10, 10, -11, -11));
+    p.setPen(Qt::white);
+    p.setFont(QFont(QStringLiteral("Malgun Gothic"), 28, QFont::Bold));
+    p.drawText(pm.rect().adjusted(0, -28, 0, 0), Qt::AlignCenter, QStringLiteral("유적 HGIS"));
+    p.setFont(QFont(QStringLiteral("Malgun Gothic"), 11));
+    p.setPen(QColor(231, 245, 242));
+    p.drawText(pm.rect().adjusted(0, 40, 0, 0), Qt::AlignCenter,
+               QStringLiteral("현장 조사를 불러오는 중…"));
+    p.end();
+    splash = new QSplashScreen(pm);
+    splash->show();
+    app.processEvents();
+  }
+
   if (VworldSettings::loadApiKey().isEmpty()) {
     const QByteArray envKey = qgetenv("VWORLD_API_KEY");
     if (!envKey.isEmpty())
@@ -451,6 +481,11 @@ int KaApplication::run(int argc, char** argv) {
 
   MainWindow w;
   w.show();
+  if (splash) {
+    splash->finish(&w);
+    delete splash;
+    splash = nullptr;
+  }
   if (demoSurvey && openGpkg.isEmpty()) {
     const QString dir = QDir::temp().filePath(QStringLiteral("ka-hgis-survey-verify"));
     QDir().mkpath(dir);

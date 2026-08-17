@@ -395,6 +395,20 @@ void dActivate(QPainter& p) {
   p.drawEllipse(QPointF(40, 22), 3, 3);
 }
 
+void dCoordPoint(QPainter& p) {
+  prep(p, 2.4);
+  p.drawRoundedRect(QRectF(12, 12, 28, 20), 2.5, 2.5);
+  p.setPen(QPen(tInk, 1.8, Qt::SolidLine, Qt::RoundCap));
+  p.drawLine(16, 18, 34, 18);
+  p.drawLine(16, 24, 32, 24);
+  p.setPen(QPen(tInk, 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+  p.drawLine(QPointF(28, 32), QPointF(44, 48));
+  QPolygonF head;
+  head << QPointF(44, 48) << QPointF(35, 46) << QPointF(42, 39);
+  fillInk(p);
+  p.drawPolygon(head);
+}
+
 void dCenter(QPainter& p) {
   prep(p, 2.6);
   p.drawEllipse(QPointF(32, 32), 16, 16);
@@ -512,6 +526,7 @@ QIcon icon(const QString& id) {
   else if (id == QLatin1String("layout_legend")) ic = bake(dLegend);
   else if (id == QLatin1String("layout_activate")) ic = bake(dActivate);
   else if (id == QLatin1String("layout_center")) ic = bake(dCenter);
+  else if (id == QLatin1String("layout_coord_point")) ic = bake(dCoordPoint);
   else ic = bake(dDocPlus);
 
   cache.insert(id, ic);

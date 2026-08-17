@@ -159,6 +159,10 @@ void TestGeoref::vectorAffineDoesNotNeedControlPoints() {
   const QgsPointXY start = out.geometry().asPolyline().first();
   QVERIFY2(nearly(start.x(), 200000, 1e-3), qPrintable(QString::number(start.x())));
   QVERIFY2(nearly(start.y(), 450000, 1e-3), qPrintable(QString::number(start.y())));
+  vl->updateExtents();
+  const QgsRectangle moved = vl->extent();
+  QVERIFY2(moved.xMinimum() > 199990.0, qPrintable(QString::number(moved.xMinimum())));
+  QVERIFY2(moved.yMinimum() > 449990.0, qPrintable(QString::number(moved.yMinimum())));
   QVERIFY(!GeorefService::isDomainSurveyLayer(vl));
   QVERIFY(GeorefService::isAlignableLayer(vl));
   delete vl;

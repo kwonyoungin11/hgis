@@ -40,6 +40,8 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
+#include <QMouseEvent>
+#include <QScrollBar>
 #include <QFont>
 #include <QImage>
 #include <QPainter>
@@ -56,6 +58,7 @@
 #include <QSplitter>
 #include <QStatusBar>
 #include <QTimer>
+#include <QTransform>
 #include <QWheelEvent>
 #include <QToolBar>
 #include <QToolButton>
@@ -75,13 +78,19 @@
 #include <qgslayoutitemlabel.h>
 #include <qgslayoutitemlegend.h>
 #include <qgslayoutitemmap.h>
+#include <qgsmapsettings.h>
 #include <qgslayoutitemmapgrid.h>
 #include <qgstextformat.h>
 #include <qgslayoutitempage.h>
 #include <qgslayoutitempicture.h>
 #include <qgslayoutitemscalebar.h>
+#include <qgslayoutitempolyline.h>
+#include <qgslayoutitempolygon.h>
+#include <qgslinesymbol.h>
+#include <qgsfillsymbol.h>
 #include <qgslayoutmanager.h>
 #include <qgslayoutpagecollection.h>
+#include <qgslayoutrendercontext.h>
 #include <qgslayoutview.h>
 #include <qgslayoutviewmouseevent.h>
 #include <qgslayoutviewtool.h>
@@ -100,6 +109,13 @@
 #include <qgsproject.h>
 #include <qgsrectangle.h>
 #include <qgsvectorlayer.h>
+#include <qgsfeature.h>
+#include <qgsfeaturerequest.h>
+#include <qgsgeometry.h>
+#include <qgssnappingconfig.h>
+#include <qgssnappingutils.h>
+#include <qgspointlocator.h>
+#include <qgswkbtypes.h>
 
 namespace {
 constexpr const char* kSheetName = "user_sheet";
@@ -397,6 +413,25 @@ private:
   QGraphicsRectItem* mBand = nullptr;
 };
 
+class KaLayoutCoordPointTool : public QgsLayoutViewTool {
+  Q_OBJECT
+signals:
+  void pointClicked(const QPointF& layoutPt);
+public:
+  explicit KaLayoutCoordPointTool(QgsLayoutView* view)
+      : QgsLayoutViewTool(view, QStringLiteral("좌표점")) {
+    setCursor(Qt::CrossCursor);
+  }
+  void layoutPressEvent(QgsLayoutViewMouseEvent* event) override {
+    if (!event || event->button() != Qt::LeftButton) {
+      if (event) event->ignore();
+      return;
+    }
+    emit pointClicked(event->layoutPoint());
+    event->accept();
+  }
+};
+
 class KaLayoutMapAdjustTool : public QgsLayoutViewTool {
   Q_OBJECT
 signals:
@@ -406,7 +441,7 @@ public:
       : QgsLayoutViewTool(view, QStringLiteral("지도 조정")) {
     setCursor(Qt::OpenHandCursor);
     mZoomTimer.setSingleShot(true);
-    mZoomTimer.setInterval(90);
+    mZoomTimer.setInterval(280);
     connect(&mZoomTimer, &QTimer::timeout, this, &KaLayoutMapAdjustTool::flushZoom);
   }
 
@@ -474,10 +509,7 @@ public:
     mPendingMap = map;
     mPendingPoint = map->mapFromScene(scenePt);
     mPendingFactor *= factor;
-    if (!mZoomTimer.isActive()) {
-      flushZoom();
-      mZoomTimer.start();
-    }
+    mZoomTimer.start();
   }
 
   void deactivate() override {
@@ -714,6 +746,8 @@ void KaDrawingStudio::ensureBlankLayout() {
     static_cast<QGraphicsView*>(m_view)->setScene(nullptr);
   }
   LayoutService::createBlankSheet(m_project, m_paperW, m_paperH, QString::fromUtf8(kSheetName));
+  m_coordMapPts.clear();
+  m_coordFrameMap.clear();
   attachLayoutToView();
 }
 
@@ -759,42 +793,15 @@ void KaDrawingStudio::buildUi() {
     a->setToolTip(tip);
     return a;
   };
-  addTb(QStringLiteral("layout_map_frame"), QStringLiteral("지도칸 그리기"),
-        QStringLiteral("용지에서 드래그해 지도가 들어갈 칸을 만듭니다"),
-        &KaDrawingStudio::beginDrawMapFrame);
-  addTb(QStringLiteral("layout_select"), QStringLiteral("선택"),
-        QStringLiteral("항목을 고르고, 끌어 옮기거나 모서리로 크기를 바꿉니다"),
-        &KaDrawingStudio::useSelectTool);
-  addTb(QStringLiteral("layout_pan"), QStringLiteral("용지 옮기기"),
-        QStringLiteral("용지 전체를 잡아 화면에서 옮깁니다"),
-        &KaDrawingStudio::usePanTool);
-  addTb(QStringLiteral("layout_zoom_full"), QStringLiteral("용지 전체"),
-        QStringLiteral("용지가 화면에 크게 보이게 합니다"),
-        &KaDrawingStudio::zoomFull);
-  addTb(QStringLiteral("layout_activate"), QStringLiteral("지도 밀기"),
-        QStringLiteral("칸 안의 지도를 밀고 휠로 확대합니다"),
-        &KaDrawingStudio::beginActivateMap);
+  addTb(QStringLiteral("layout_coord_point"), QStringLiteral("좌표점"),
+        QStringLiteral("용지에서 꼭짓점을 찍으면 화살표와 X·Y가 붙습니다"),
+        &KaDrawingStudio::beginPlaceCoordPoint);
   addTb(QStringLiteral("layout_center"), QStringLiteral("레이어를 가운데"),
-        QStringLiteral("지금 축척을 유지한 채, 고른 레이어를 칸 한가운데로 옮깁니다"),
+        QStringLiteral("축척은 두고, 고른 레이어를 조판 한가운데로 옮깁니다"),
         &KaDrawingStudio::centerSurveyInMap);
-  addTb(QStringLiteral("crs"), QStringLiteral("좌표 격자"),
-        QStringLiteral("좌표 격자, 간격, 칸 밖 숫자를 설정합니다"),
-        &KaDrawingStudio::focusGridSettings);
-  m_actEndAdjust = addTb(QStringLiteral("layout_activate_done"), QStringLiteral("밀기 끝"),
-                         QStringLiteral("지도 밀기를 끝냅니다"),
-                         &KaDrawingStudio::endActivateMap);
-  m_actEndAdjust->setVisible(false);
-  tb->addAction(KaIcons::icon(QStringLiteral("trash")), QStringLiteral("지우기"), this,
-                &KaDrawingStudio::deleteSelectedItems)
-      ->setToolTip(QStringLiteral("고른 항목을 지웁니다 (Delete)"));
-  auto* spacer = new QWidget(tb);
-  spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-  tb->addWidget(spacer);
-  QAction* pdfAct = addTb(QStringLiteral("pdf"), QStringLiteral("PDF 저장"),
-                          QStringLiteral("지금 용지를 PDF 파일로 저장합니다"),
-                          &KaDrawingStudio::savePdf);
-  if (auto* b = qobject_cast<QToolButton*>(tb->widgetForAction(pdfAct)))
-    b->setObjectName(QStringLiteral("btnPrimary"));
+  addTb(QStringLiteral("layout_select"), QStringLiteral("선택"),
+        QStringLiteral("좌표 상자를 끌어 옮깁니다"),
+        &KaDrawingStudio::useSelectTool);
 
   auto* leftCol = new QFrame(root);
   leftCol->setObjectName(QStringLiteral("studioLeftCol"));
@@ -879,6 +886,12 @@ void KaDrawingStudio::buildUi() {
   m_view->setFrameShape(QFrame::NoFrame);
   m_view->setBackgroundBrush(QBrush(QColor(232, 228, 220)));
   m_view->setFocusPolicy(Qt::StrongFocus);
+  m_view->setAlignment(Qt::AlignCenter);
+  m_view->setTransformationAnchor(QGraphicsView::AnchorViewCenter);
+  m_view->setResizeAnchor(QGraphicsView::AnchorViewCenter);
+  m_view->setDragMode(QGraphicsView::NoDrag);
+  m_view->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  m_view->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   m_view->setMenuProvider(new KaLayoutMenuProvider(this));
   m_view->installEventFilter(this);
   if (m_view->viewport())
@@ -888,11 +901,19 @@ void KaDrawingStudio::buildUi() {
   m_toolPan = new QgsLayoutViewToolPan(m_view);
   m_toolMoveContent = new KaLayoutMapAdjustTool(m_view);
   m_toolDrawMap = new KaLayoutMapDrawTool(m_view);
+  m_toolCoordPoint = new KaLayoutCoordPointTool(m_view);
   connect(m_toolDrawMap, &KaLayoutMapDrawTool::rectDrawn, this, &KaDrawingStudio::onRectDrawn,
           Qt::QueuedConnection);
+  connect(m_toolCoordPoint, &KaLayoutCoordPointTool::pointClicked, this,
+          &KaDrawingStudio::placeCoordCallout);
   connect(m_toolMoveContent, &KaLayoutMapAdjustTool::mapViewChanged, this,
           &KaDrawingStudio::syncScaleDecorations);
   attachLayoutToView();
+
+  m_scaleSyncTimer = new QTimer(this);
+  m_scaleSyncTimer->setSingleShot(true);
+  m_scaleSyncTimer->setInterval(280);
+  connect(m_scaleSyncTimer, &QTimer::timeout, this, &KaDrawingStudio::flushHeavyScaleSync);
 
   auto* side = new QFrame(root);
   side->setObjectName(QStringLiteral("studioLeftCol"));
@@ -910,13 +931,22 @@ void KaDrawingStudio::buildUi() {
   auto* legendCap = new QLabel(QStringLiteral("범례"), m_cardLegend);
   legendCap->setObjectName(QStringLiteral("cardCaption"));
   legendLay->addWidget(legendCap);
+  auto* legendRow = new QHBoxLayout;
+  legendRow->setSpacing(6);
   auto* legendBtn = makeRailTile(m_cardLegend, KaIcons::icon(QStringLiteral("layout_legend")),
                                  QStringLiteral("범례 넣기"), QSize(22, 22));
   connect(legendBtn, &QToolButton::clicked, this, [this]() {
     beginPlaceLegend();
     if (m_cardLegend) m_cardLegend->setFocus();
   });
-  legendLay->addWidget(legendBtn);
+  auto* pdfBtn = makeRailTile(m_cardLegend, KaIcons::icon(QStringLiteral("pdf")),
+                              QStringLiteral("PDF 저장"), QSize(22, 22));
+  pdfBtn->setObjectName(QStringLiteral("btnPrimary"));
+  pdfBtn->setToolTip(QStringLiteral("지금 용지를 PDF 파일로 저장합니다"));
+  connect(pdfBtn, &QToolButton::clicked, this, &KaDrawingStudio::savePdf);
+  legendRow->addWidget(legendBtn, 1);
+  legendRow->addWidget(pdfBtn, 1);
+  legendLay->addLayout(legendRow);
   m_legendTitle = new QLineEdit(m_cardLegend);
   m_legendTitle->setPlaceholderText(QStringLiteral("제목을 입력하세요"));
   m_legendTitle->setText(QStringLiteral("범례"));
@@ -1062,12 +1092,27 @@ void KaDrawingStudio::buildUi() {
   sideLay->addWidget(m_scaleBar);
   sideLay->addStretch(1);
 
-  rightLay->addWidget(m_adjustBar);
-  rightLay->addWidget(m_view, 1);
+  auto* desk = new QWidget(right);
+  auto* deskGrid = new QGridLayout(desk);
+  deskGrid->setContentsMargins(0, 0, 0, 0);
+  deskGrid->setSpacing(0);
+  deskGrid->addWidget(m_view, 0, 0);
+  deskGrid->addWidget(m_adjustBar, 0, 0, Qt::AlignTop);
+  m_adjustBar->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  rightLay->addWidget(desk, 1);
+
+  auto* sideScroll = new QScrollArea(root);
+  sideScroll->setObjectName(QStringLiteral("studioSideScroll"));
+  sideScroll->setWidgetResizable(true);
+  sideScroll->setFrameShape(QFrame::NoFrame);
+  sideScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  sideScroll->setWidget(side);
+  sideScroll->setMinimumWidth(268);
+  sideScroll->setMaximumWidth(316);
 
   rootLay->addWidget(leftCol, 0);
   rootLay->addWidget(right, 1);
-  rootLay->addWidget(side, 0);
+  rootLay->addWidget(sideScroll, 0);
   setCentralWidget(root);
 
   m_status = new QLabel(this);
@@ -1105,8 +1150,140 @@ void KaDrawingStudio::autoPlaceDefaultSheet() {
 
 void KaDrawingStudio::refreshMapFromProject() {
   syncMapFromLayers();
-  if (auto* map = mapItem())
-    applyCrsGrid(map);
+}
+
+void KaDrawingStudio::importMapCoordCallouts(const QVector<QgsPointXY>& pts,
+                                             const QVector<QString>& letters,
+                                             const QVector<QString>& texts,
+                                             const QgsGeometry& frame) {
+  Q_UNUSED(frame);
+  m_importCoordPts = pts;
+  m_importCoordLetters = letters;
+  m_importCoordTexts = texts;
+  QTimer::singleShot(0, this, [this]() { applyImportedCoordCallouts(); });
+  QTimer::singleShot(80, this, [this]() { applyImportedCoordCallouts(); });
+}
+
+void KaDrawingStudio::applyImportedCoordCallouts() {
+  auto* ly = layout();
+  auto* map = mapItem();
+  const QVector<QgsPointXY>& pts = m_importCoordPts;
+  const QVector<QString>& letters = m_importCoordLetters;
+  const QVector<QString>& texts = m_importCoordTexts;
+  if (!ly || !map || pts.isEmpty()) return;
+  QList<QgsLayoutItem*> all;
+  ly->layoutItems(all);
+  for (QgsLayoutItem* it : all) {
+    if (it && it->id().startsWith(QLatin1String("ka_coord_")))
+      ly->removeLayoutItem(it);
+  }
+  m_coordMapPts.clear();
+  m_coordFrameMap.clear();
+  const QRectF ir = map->rect();
+  const QgsRectangle ext = map->extent();
+  if (ir.width() < 1.0 || ext.isEmpty() || !ext.isFinite()) return;
+  QVector<QRectF> usedBoxes;
+  for (int i = 0; i < pts.size(); ++i) {
+    const QgsPointXY mapPt = pts.at(i);
+    const QPointF item((mapPt.x() - ext.xMinimum()) / ext.width() * ir.width(),
+                       (ext.yMaximum() - mapPt.y()) / ext.height() * ir.height());
+    const QPointF tip = map->mapToScene(item);
+    const QString tag = i < letters.size() ? letters.at(i)
+                                           : QString(QChar(static_cast<char>('A' + (i % 26))));
+    const QString text = i < texts.size()
+                             ? texts.at(i)
+                             : QStringLiteral("X=%1\nY=%2").arg(mapPt.y(), 0, 'f', 3).arg(mapPt.x(), 0, 'f', 3);
+    auto* box = new QgsLayoutItemLabel(ly);
+    box->setId(QStringLiteral("ka_coord_box_%1").arg(tag));
+    box->setText(text);
+    box->setFont(QFont(QStringLiteral("Malgun Gothic"), 6));
+    box->setHAlign(Qt::AlignLeft);
+    box->setVAlign(Qt::AlignVCenter);
+    box->setFrameEnabled(true);
+    box->setBackgroundEnabled(true);
+    box->setBackgroundColor(QColor(255, 255, 255, 235));
+    box->setMarginX(0.4);
+    box->setMarginY(0.3);
+    const qreal bw = 26.0;
+    const qreal bh = 7.2;
+    const qreal gap = 8.0;
+    const QRectF cands[] = {
+        QRectF(tip.x() + gap, tip.y() - bh - 4.0, bw, bh),
+        QRectF(tip.x() + gap, tip.y() + 4.0, bw, bh),
+        QRectF(tip.x() - gap - bw, tip.y() - bh - 4.0, bw, bh),
+        QRectF(tip.x() - gap - bw, tip.y() + 4.0, bw, bh),
+        QRectF(tip.x() - bw * 0.5, tip.y() - bh - gap, bw, bh),
+        QRectF(tip.x() - bw * 0.5, tip.y() + gap, bw, bh),
+    };
+    QRectF boxR = cands[0];
+    for (const QRectF& c : cands) {
+      bool hit = false;
+      for (const QRectF& u : usedBoxes) {
+        if (c.adjusted(-2, -2, 2, 2).intersects(u)) {
+          hit = true;
+          break;
+        }
+      }
+      if (!hit) {
+        boxR = c;
+        break;
+      }
+    }
+    usedBoxes.append(boxR);
+    const bool placeRight = boxR.center().x() >= tip.x();
+    box->attemptSetSceneRect(boxR);
+    ly->addLayoutItem(box);
+    auto* letterLbl = new QgsLayoutItemLabel(ly);
+    letterLbl->setId(QStringLiteral("ka_coord_let_%1").arg(tag));
+    letterLbl->setText(tag);
+    letterLbl->setFont(QFont(QStringLiteral("Malgun Gothic"), 8, QFont::Bold));
+    letterLbl->setHAlign(Qt::AlignCenter);
+    letterLbl->setVAlign(Qt::AlignVCenter);
+    letterLbl->setFrameEnabled(false);
+    letterLbl->setBackgroundEnabled(false);
+    letterLbl->attemptSetSceneRect(QRectF(tip.x() - 2.4, tip.y() - 5.4, 5.2, 4.2));
+    ly->addLayoutItem(letterLbl);
+    const QPointF attach(placeRight ? boxR.left() : boxR.right(), boxR.center().y());
+    QPointF dir(tip.x() - attach.x(), tip.y() - attach.y());
+    const double len = std::hypot(dir.x(), dir.y());
+    if (len > 0.4) {
+      dir.rx() /= len;
+      dir.ry() /= len;
+    } else {
+      dir = QPointF(placeRight ? -1.0 : 1.0, 0.0);
+    }
+    const QPointF nor(-dir.y(), dir.x());
+    const double ah = 2.4;
+    const QPointF neck(tip.x() - dir.x() * ah, tip.y() - dir.y() * ah);
+    QPolygonF shaft;
+    shaft << attach << neck;
+    auto* arr = new QgsLayoutItemPolyline(shaft, ly);
+    arr->setId(QStringLiteral("ka_coord_arr_%1").arg(tag));
+    arr->setStartMarker(QgsLayoutItemPolyline::NoMarker);
+    arr->setEndMarker(QgsLayoutItemPolyline::NoMarker);
+    if (auto sym = QgsLineSymbol::createSimple(
+            {{QStringLiteral("line_color"), QStringLiteral("#1C1917")},
+             {QStringLiteral("line_width"), QStringLiteral("0.22")},
+             {QStringLiteral("line_width_unit"), QStringLiteral("MM")}})) {
+      arr->setSymbol(sym.get());
+    }
+    ly->addLayoutItem(arr);
+    QPolygonF head;
+    head << tip << QPointF(neck.x() + nor.x() * ah * 0.42, neck.y() + nor.y() * ah * 0.42)
+         << QPointF(neck.x() - nor.x() * ah * 0.42, neck.y() - nor.y() * ah * 0.42);
+    auto* headItem = new QgsLayoutItemPolygon(head, ly);
+    headItem->setId(QStringLiteral("ka_coord_head_%1").arg(tag));
+    if (auto fs = QgsFillSymbol::createSimple(
+            {{QStringLiteral("color"), QStringLiteral("#1C1917")},
+             {QStringLiteral("style"), QStringLiteral("solid")},
+             {QStringLiteral("outline_style"), QStringLiteral("no")}})) {
+      headItem->setSymbol(fs.get());
+    }
+    ly->addLayoutItem(headItem);
+    m_coordMapPts.append(QPointF(mapPt.x(), mapPt.y()));
+  }
+  if (m_status)
+    m_status->setText(QStringLiteral("맵에서 찍은 좌표점 %1개를 도면에 올렸습니다.").arg(pts.size()));
 }
 
 void KaDrawingStudio::focusGridSettings() {
@@ -1204,6 +1381,272 @@ void KaDrawingStudio::beginPlaceCrsLabel() {
     m_status->setText(QStringLiteral("좌표계를 넣었습니다. 끌어 옮기세요."));
 }
 
+void KaDrawingStudio::beginPlaceCoordPoint() {
+  endActivateMap();
+  if (!m_view || !m_toolCoordPoint || !mapItem()) {
+    if (m_status)
+      m_status->setText(QStringLiteral("먼저 지도 칸을 그리세요."));
+    return;
+  }
+  if (QgsProject* proj = QgsProject::instance()) {
+    QgsSnappingConfig cfg = proj->snappingConfig();
+    cfg.setEnabled(true);
+    cfg.setMode(Qgis::SnappingMode::AllLayers);
+    cfg.setTypeFlag(Qgis::SnappingType::Vertex);
+    cfg.setTolerance(16.0);
+    cfg.setUnits(Qgis::MapToolUnit::Pixels);
+    proj->setSnappingConfig(cfg);
+    if (m_mapCanvas && m_mapCanvas->snappingUtils())
+      m_mapCanvas->snappingUtils()->setConfig(cfg);
+  }
+  m_view->setTool(m_toolCoordPoint);
+  if (m_status)
+    m_status->setText(QStringLiteral("용지에서 꼭짓점을 찍으세요. 자석이 붙고 X·Y만 생깁니다."));
+}
+
+void KaDrawingStudio::placeCoordCallout(const QPointF& layoutPt) {
+  auto* ly = layout();
+  auto* map = mapItem();
+  if (!ly || !map) return;
+  const QPointF itemPt = map->mapFromScene(layoutPt);
+  const QRectF ir = map->rect();
+  if (ir.width() < 1.0 || ir.height() < 1.0) return;
+  const QgsRectangle ext = map->extent();
+  if (ext.isEmpty() || !ext.isFinite()) return;
+
+  QgsPointXY click(ext.xMinimum() + (itemPt.x() / ir.width()) * ext.width(),
+                   ext.yMaximum() - (itemPt.y() / ir.height()) * ext.height());
+  QgsPointXY mapPt = click;
+  const double px = m_view ? std::max(1e-9, m_view->transform().m11()) : 1.0;
+  const double snapMm = 24.0 / px;
+  const double tol = std::max(ext.width() * snapMm / std::max(1.0, ir.width()),
+                              ext.height() * 0.003);
+  bool snapped = false;
+  QgsGeometry hitGeom;
+  const QgsCoordinateReferenceSystem mapCrs = map->crs();
+  QgsProject* proj = m_project ? m_project.data() : QgsProject::instance();
+  if (m_mapCanvas && m_mapCanvas->snappingUtils()) {
+    QgsMapSettings ms = m_mapCanvas->mapSettings();
+    ms.setDestinationCrs(mapCrs);
+    ms.setExtent(ext);
+    ms.setOutputSize(QSize(std::max(8, int(ir.width())), std::max(8, int(ir.height()))));
+    m_mapCanvas->snappingUtils()->setMapSettings(ms);
+    const QgsPointLocator::Match hit = m_mapCanvas->snappingUtils()->snapToMap(click);
+    if (hit.isValid()) {
+      mapPt = hit.point();
+      snapped = true;
+      if (auto* vl = qobject_cast<QgsVectorLayer*>(hit.layer())) {
+        QgsFeature f = vl->getFeature(hit.featureId());
+        if (f.isValid() && !f.geometry().isEmpty()) {
+          hitGeom = f.geometry();
+          if (vl->crs().isValid() && mapCrs.isValid() && vl->crs() != mapCrs && proj) {
+            try {
+              const QgsCoordinateTransform xf(vl->crs(), mapCrs, proj->transformContext());
+              hitGeom.transform(xf);
+            } catch (...) {
+              hitGeom = QgsGeometry();
+            }
+          }
+        }
+      }
+    }
+  }
+  double bestD = snapped ? 0.0 : tol;
+  QList<QgsMapLayer*> search;
+  if (proj)
+    search = proj->mapLayers().values();
+  for (QgsMapLayer* l : map->layers()) {
+    if (l && !search.contains(l))
+      search.append(l);
+  }
+  for (QgsMapLayer* raw : search) {
+    auto* vl = qobject_cast<QgsVectorLayer*>(raw);
+    if (!vl || !vl->isValid() || vl->geometryType() == Qgis::GeometryType::Null)
+      continue;
+    QgsRectangle req(click.x() - tol, click.y() - tol, click.x() + tol, click.y() + tol);
+    if (vl->crs().isValid() && mapCrs.isValid() && vl->crs() != mapCrs && proj) {
+      try {
+        const QgsCoordinateTransform xf(mapCrs, vl->crs(), proj->transformContext());
+        req = xf.transformBoundingBox(req);
+      } catch (...) {
+        continue;
+      }
+    }
+    QgsFeatureIterator it =
+        vl->getFeatures(QgsFeatureRequest().setFilterRect(req).setNoAttributes());
+    QgsFeature f;
+    while (it.nextFeature(f)) {
+      QgsGeometry g = f.geometry();
+      if (g.isEmpty()) continue;
+      if (vl->crs().isValid() && mapCrs.isValid() && vl->crs() != mapCrs && proj) {
+        try {
+          const QgsCoordinateTransform xf(vl->crs(), mapCrs, proj->transformContext());
+          g.transform(xf);
+        } catch (...) {
+          continue;
+        }
+      }
+      int atV = 0, before = 0, after = 0;
+      double sqr = -1.0;
+      const QgsPointXY v = g.closestVertex(click, atV, before, after, sqr);
+      if (sqr < 0.0) continue;
+      const double d = std::sqrt(sqr);
+      if (d < bestD || (snapped && d < 1e-6)) {
+        if (d < bestD) {
+          bestD = d;
+          mapPt = v;
+          snapped = true;
+          hitGeom = g;
+        }
+      }
+    }
+  }
+
+  const QPointF itemSnap((mapPt.x() - ext.xMinimum()) / ext.width() * ir.width(),
+                         (ext.yMaximum() - mapPt.y()) / ext.height() * ir.height());
+  const QPointF tip = map->mapToScene(itemSnap);
+
+  int n = 0;
+  QList<QgsLayoutItemLabel*> labs;
+  ly->layoutItems(labs);
+  for (QgsLayoutItemLabel* l : labs) {
+    if (l && l->id().startsWith(QLatin1String("ka_coord_box_")))
+      ++n;
+  }
+  const QString tag = QString(QChar(static_cast<char>('A' + (n % 26))));
+
+  auto* box = new QgsLayoutItemLabel(ly);
+  box->setId(QStringLiteral("ka_coord_box_%1").arg(tag));
+  box->setText(QStringLiteral("X=%1\nY=%2").arg(mapPt.y(), 0, 'f', 3).arg(mapPt.x(), 0, 'f', 3));
+  box->setFont(QFont(QStringLiteral("Malgun Gothic"), 6));
+  box->setHAlign(Qt::AlignLeft);
+  box->setVAlign(Qt::AlignVCenter);
+  box->setFrameEnabled(true);
+  box->setBackgroundEnabled(true);
+  box->setBackgroundColor(QColor(255, 255, 255, 235));
+  box->setMarginX(0.4);
+  box->setMarginY(0.3);
+  const bool placeRight = tip.x() + 34.0 < m_paperW - 3.0;
+  const bool placeUp = tip.y() - 10.0 > 3.0;
+  const QRectF boxR(placeRight ? tip.x() + 6.0 : tip.x() - 32.0,
+                    placeUp ? tip.y() - 9.0 : tip.y() + 3.0, 26.0, 7.2);
+  box->attemptSetSceneRect(boxR);
+  ly->addLayoutItem(box);
+
+  auto* letterLbl = new QgsLayoutItemLabel(ly);
+  letterLbl->setId(QStringLiteral("ka_coord_let_%1").arg(tag));
+  letterLbl->setText(tag);
+  letterLbl->setFont(QFont(QStringLiteral("Malgun Gothic"), 8, QFont::Bold));
+  letterLbl->setHAlign(Qt::AlignCenter);
+  letterLbl->setVAlign(Qt::AlignVCenter);
+  letterLbl->setFrameEnabled(false);
+  letterLbl->setBackgroundEnabled(false);
+  letterLbl->attemptSetSceneRect(QRectF(tip.x() - 2.4, tip.y() - 5.4, 5.2, 4.2));
+  ly->addLayoutItem(letterLbl);
+
+  const QPointF attach(placeRight ? boxR.left() : boxR.right(), boxR.center().y());
+  QPointF dir(tip.x() - attach.x(), tip.y() - attach.y());
+  const double len = std::hypot(dir.x(), dir.y());
+  if (len > 0.4) {
+    dir.rx() /= len;
+    dir.ry() /= len;
+  } else {
+    dir = QPointF(placeRight ? -1.0 : 1.0, 0.0);
+  }
+  const QPointF nor(-dir.y(), dir.x());
+  const double ah = 2.4;
+  const QPointF neck(tip.x() - dir.x() * ah, tip.y() - dir.y() * ah);
+  QPolygonF shaft;
+  shaft << attach << neck;
+  auto* arr = new QgsLayoutItemPolyline(shaft, ly);
+  arr->setId(QStringLiteral("ka_coord_arr_%1").arg(tag));
+  arr->setStartMarker(QgsLayoutItemPolyline::NoMarker);
+  arr->setEndMarker(QgsLayoutItemPolyline::NoMarker);
+  if (auto sym = QgsLineSymbol::createSimple(
+          {{QStringLiteral("line_color"), QStringLiteral("#1C1917")},
+           {QStringLiteral("line_width"), QStringLiteral("0.22")},
+           {QStringLiteral("line_width_unit"), QStringLiteral("MM")}})) {
+    arr->setSymbol(sym.get());
+  }
+  ly->addLayoutItem(arr);
+
+  QPolygonF head;
+  head << tip << QPointF(neck.x() + nor.x() * ah * 0.42, neck.y() + nor.y() * ah * 0.42)
+       << QPointF(neck.x() - nor.x() * ah * 0.42, neck.y() - nor.y() * ah * 0.42);
+  auto* headItem = new QgsLayoutItemPolygon(head, ly);
+  headItem->setId(QStringLiteral("ka_coord_head_%1").arg(tag));
+  if (auto fs = QgsFillSymbol::createSimple(
+          {{QStringLiteral("color"), QStringLiteral("#1C1917")},
+           {QStringLiteral("style"), QStringLiteral("solid")},
+           {QStringLiteral("outline_style"), QStringLiteral("no")}})) {
+    headItem->setSymbol(fs.get());
+  }
+  ly->addLayoutItem(headItem);
+  m_placeUndo.append(headItem->id());
+
+  m_placeUndo.append(arr->id());
+  m_placeUndo.append(letterLbl->id());
+  m_placeUndo.append(box->id());
+  m_coordMapPts.append(QPointF(mapPt.x(), mapPt.y()));
+  if (m_status)
+    m_status->setText(QStringLiteral("%1점  X=%2  Y=%3")
+                          .arg(tag)
+                          .arg(mapPt.y(), 0, 'f', 3)
+                          .arg(mapPt.x(), 0, 'f', 3));
+}
+
+void KaDrawingStudio::updateCoordFrame() {
+  auto* ly = layout();
+  auto* map = mapItem();
+  if (!ly || !map) return;
+  const QgsRectangle ext = map->extent();
+  const QRectF ir = map->rect();
+  if (ext.isEmpty() || ir.width() < 1.0 || ir.height() < 1.0) return;
+
+  QVector<QPointF> src = m_coordFrameMap;
+  if (src.size() < 3 && m_coordMapPts.size() >= 2)
+    src = m_coordMapPts;
+  if (src.size() < 2) return;
+
+  auto toLayout = [&](double mx, double my) {
+    const QPointF item((mx - ext.xMinimum()) / ext.width() * ir.width(),
+                       (ext.yMaximum() - my) / ext.height() * ir.height());
+    return map->mapToScene(item);
+  };
+  QPolygonF ring;
+  for (const QPointF& p : src)
+    ring << toLayout(p.x(), p.y());
+  if (ring.size() >= 2 && ring.first() == ring.last())
+    ring.removeLast();
+  if (ring.size() < 2) return;
+
+  QgsLayoutItemPolygon* frame = nullptr;
+  QList<QgsLayoutItemPolygon*> polys;
+  ly->layoutItems(polys);
+  for (QgsLayoutItemPolygon* p : polys) {
+    if (p && p->id() == QLatin1String("ka_coord_frame")) {
+      frame = p;
+      break;
+    }
+  }
+  if (!frame) {
+    frame = new QgsLayoutItemPolygon(ring, ly);
+    frame->setId(QStringLiteral("ka_coord_frame"));
+    if (auto fs = QgsFillSymbol::createSimple(
+            {{QStringLiteral("color"), QStringLiteral("255,255,255,0")},
+             {QStringLiteral("style"), QStringLiteral("no")},
+             {QStringLiteral("outline_color"), QStringLiteral("#C2410C")},
+             {QStringLiteral("outline_width"), QStringLiteral("0.45")},
+             {QStringLiteral("outline_width_unit"), QStringLiteral("MM")}})) {
+      frame->setSymbol(fs.get());
+    }
+    ly->addLayoutItem(frame);
+    m_placeUndo.append(frame->id());
+  } else {
+    frame->setNodes(ring);
+  }
+}
+
 void KaDrawingStudio::useSelectTool() {
   if (m_adjustingMap) return;
   if (m_view && m_toolSelect)
@@ -1214,27 +1657,74 @@ void KaDrawingStudio::useSelectTool() {
 
 void KaDrawingStudio::usePanTool() {
   if (m_adjustingMap) return;
+  m_keepPaperCentered = false;
   if (m_view && m_toolPan)
     m_view->setTool(m_toolPan);
   if (m_status)
-    m_status->setText(QStringLiteral("용지를 잡아 옮기세요."));
+    m_status->setText(QStringLiteral("용지를 잡아 옮기세요. 휠 버튼을 누른 채 끌어도 됩니다."));
 }
 
 void KaDrawingStudio::zoomFull() {
   zoomPaperVisible();
 }
 
-void KaDrawingStudio::zoomPaperVisible() {
+void KaDrawingStudio::recenterPaper() {
   auto* ly = layout();
   if (!m_view || !ly) return;
   QgsLayoutItemPage* page = ly->pageCollection() ? ly->pageCollection()->page(0) : nullptr;
-  QRectF pr = page ? page->sceneBoundingRect() : QRectF(0, 0, m_paperW, m_paperH);
+  QRectF pr = page ? page->rect() : QRectF();
+  if (page)
+    pr = page->mapRectToScene(page->rect());
   if (pr.width() < 8.0 || pr.height() < 8.0)
     pr = QRectF(0, 0, m_paperW, m_paperH);
-  const qreal mx = pr.width() * 0.125;
-  const qreal my = pr.height() * 0.125;
-  m_view->fitInView(pr.adjusted(-mx, -my, mx, my), Qt::KeepAspectRatio);
+  m_view->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  m_view->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  m_view->setAlignment(Qt::AlignCenter);
+  m_view->setTransformationAnchor(QGraphicsView::AnchorViewCenter);
+  m_view->setResizeAnchor(QGraphicsView::AnchorViewCenter);
+  const QRectF desk(pr.left() - pr.width() * 1.5, pr.top() - pr.height() * 1.5,
+                    pr.width() * 4.0, pr.height() * 4.0);
+  m_view->setSceneRect(desk);
+  const qreal pad = std::max(pr.width(), pr.height()) * 0.10;
+  m_view->fitInView(pr.adjusted(-pad, -pad, pad, pad), Qt::KeepAspectRatio);
+  m_view->centerOn(pr.center());
+  if (m_view->viewport())
+    m_lastFitViewport = m_view->viewport()->size();
+}
+
+void KaDrawingStudio::zoomPaperVisible() {
+  m_keepPaperCentered = true;
+  recenterPaper();
   updatePageOutline();
+  QTimer::singleShot(0, this, [this]() {
+    if (m_keepPaperCentered) recenterPaper();
+  });
+  QTimer::singleShot(80, this, [this]() {
+    if (m_keepPaperCentered) recenterPaper();
+  });
+}
+
+void KaDrawingStudio::panLayoutView(const QPoint& from, const QPoint& to) {
+  if (!m_view) return;
+  const QPoint d = to - from;
+  bool moved = false;
+  if (auto* h = m_view->horizontalScrollBar()) {
+    const int before = h->value();
+    h->setValue(before - d.x());
+    moved = moved || (h->value() != before);
+  }
+  if (auto* v = m_view->verticalScrollBar()) {
+    const int before = v->value();
+    v->setValue(before - d.y());
+    moved = moved || (v->value() != before);
+  }
+  if (moved) return;
+  const QTransform t = m_view->transform();
+  const qreal sx = t.m11();
+  const qreal sy = t.m22();
+  if (qAbs(sx) < 1e-12 || qAbs(sy) < 1e-12) return;
+  m_view->setTransformationAnchor(QGraphicsView::NoAnchor);
+  m_view->translate(static_cast<qreal>(d.x()) / sx, static_cast<qreal>(d.y()) / sy);
 }
 
 void KaDrawingStudio::updatePageOutline() {
@@ -1493,12 +1983,14 @@ void KaDrawingStudio::createOrResizeMap(const QRectF& layoutRect) {
     map->setKeepLayerSet(true);
     applyLayersToMap(map, false, true);
     map->zoomToExtent(ext);
+    map->setCacheMode(QGraphicsItem::ItemCoordinateCache);
     if (map->scene() != ly)
       ly->addLayoutItem(map);
   } else {
     map->attemptSetSceneRect(chrome.map);
     map->setCrs(crs);
     map->zoomToExtent(ext);
+    map->setCacheMode(QGraphicsItem::ItemCoordinateCache);
   }
 
   QPointer<QgsLayoutItemMap> held(map);
@@ -1894,15 +2386,24 @@ void KaDrawingStudio::syncScaleDecorations() {
     if (sc > 0)
       lbl->setText(QStringLiteral("축척 1 : %1").arg(sc));
   }
-  if (auto* sb = dynamic_cast<QgsLayoutItemScaleBar*>(findItemById(ly, kIdScaleBar)))
-    applyNiceScaleBar(sb);
   if (auto* crs = dynamic_cast<QgsLayoutItemLabel*>(findItemById(ly, kIdCrs))) {
     const QgsCoordinateReferenceSystem dest =
         map->crs().isValid() ? map->crs() : studioMapCrs(m_mapCanvas, m_project);
     crs->setText(koreanCrsLabel(dest));
   }
-  applyCrsGrid(map);
   syncScaleChips();
+  if (m_scaleSyncTimer)
+    m_scaleSyncTimer->start();
+}
+
+void KaDrawingStudio::flushHeavyScaleSync() {
+  auto* map = mapItem();
+  auto* ly = layout();
+  if (!map || !ly) return;
+  if (auto* sb = dynamic_cast<QgsLayoutItemScaleBar*>(findItemById(ly, kIdScaleBar)))
+    applyNiceScaleBar(sb);
+  if (m_gridEnabled)
+    placeGridCoordinateLabels(map);
 }
 
 void KaDrawingStudio::syncScaleChips() {
@@ -2055,6 +2556,7 @@ void KaDrawingStudio::beginActivateMap() {
     return;
   }
   m_adjustingMap = true;
+  setFastLayoutPreview(true);
   if (m_adjustBar) m_adjustBar->show();
   if (m_actEndAdjust) m_actEndAdjust->setVisible(true);
   ly->setSelectedItem(map);
@@ -2086,12 +2588,51 @@ void KaDrawingStudio::deleteSelectedItems() {
 }
 
 bool KaDrawingStudio::eventFilter(QObject* watched, QEvent* event) {
-  if (event && event->type() == QEvent::Resize && m_paperFitPending && m_view &&
-      (watched == m_view || watched == m_view->viewport())) {
-    QTimer::singleShot(0, this, [this]() { zoomPaperVisible(); });
+  const bool onView = m_view && event && (watched == m_view || watched == m_view->viewport());
+  if (onView && event->type() == QEvent::Resize && m_keepPaperCentered && !m_mmbPanning) {
+    const QSize now = m_view->viewport() ? m_view->viewport()->size() : QSize();
+    const QSize d = now - m_lastFitViewport;
+    if (qAbs(d.width()) + qAbs(d.height()) > 8) {
+      QTimer::singleShot(0, this, [this]() {
+        if (m_keepPaperCentered && !m_mmbPanning)
+          zoomPaperVisible();
+      });
+    }
   }
-  if (event && event->type() == QEvent::KeyPress &&
-      (watched == m_view || (m_view && watched == m_view->viewport()))) {
+  if (onView && event->type() == QEvent::MouseButtonPress) {
+    auto* me = static_cast<QMouseEvent*>(event);
+    if (me->button() == Qt::MiddleButton) {
+      m_mmbPanning = true;
+      m_mmbLast = me->pos();
+      if (m_view->viewport()) {
+        m_view->viewport()->setCursor(Qt::ClosedHandCursor);
+        m_view->viewport()->grabMouse();
+      }
+      return true;
+    }
+  }
+  if (m_mmbPanning && event &&
+      (event->type() == QEvent::MouseMove || event->type() == QEvent::MouseButtonRelease)) {
+    auto* me = static_cast<QMouseEvent*>(event);
+    if (event->type() == QEvent::MouseMove && (me->buttons() & Qt::MiddleButton)) {
+      const QPoint now = me->pos();
+      if (qAbs(now.x() - m_mmbLast.x()) + qAbs(now.y() - m_mmbLast.y()) > 2) {
+        m_keepPaperCentered = false;
+        panLayoutView(m_mmbLast, now);
+        m_mmbLast = now;
+      }
+      return true;
+    }
+    if (event->type() == QEvent::MouseButtonRelease && me->button() == Qt::MiddleButton) {
+      m_mmbPanning = false;
+      if (m_view->viewport()) {
+        m_view->viewport()->releaseMouse();
+        m_view->viewport()->unsetCursor();
+      }
+      return true;
+    }
+  }
+  if (onView && event->type() == QEvent::KeyPress) {
     auto* ke = static_cast<QKeyEvent*>(event);
     if (ke->matches(QKeySequence::Undo) ||
         ((ke->modifiers() & Qt::ControlModifier) && ke->key() == Qt::Key_Z)) {
@@ -2147,9 +2688,31 @@ void KaDrawingStudio::keyPressEvent(QKeyEvent* event) {
   QMainWindow::keyPressEvent(event);
 }
 
+void KaDrawingStudio::setFastLayoutPreview(bool on) {
+  auto* ly = layout();
+  if (!ly) return;
+  if (on) {
+    if (m_savedLayoutDpi <= 1.0)
+      m_savedLayoutDpi = ly->renderContext().dpi();
+    if (m_savedLayoutDpi < 48.0)
+      m_savedLayoutDpi = 300.0;
+    ly->renderContext().setDpi(72.0);
+    return;
+  }
+  if (m_savedLayoutDpi > 1.0) {
+    ly->renderContext().setDpi(m_savedLayoutDpi);
+    m_savedLayoutDpi = 0.0;
+    if (auto* map = mapItem()) {
+      map->invalidateCache();
+      map->refresh();
+    }
+  }
+}
+
 void KaDrawingStudio::endActivateMap() {
   const bool was = m_adjustingMap;
   m_adjustingMap = false;
+  setFastLayoutPreview(false);
   if (m_adjustBar) m_adjustBar->hide();
   if (m_actEndAdjust) m_actEndAdjust->setVisible(false);
   if (was)
@@ -2161,6 +2724,44 @@ void KaDrawingStudio::endActivateMap() {
     useSelectTool();
 }
 
+void KaDrawingStudio::panLayoutMapTo(const QgsPointXY& center) {
+  auto* map = mapItem();
+  if (!map) return;
+  const QgsRectangle cur = map->extent();
+  if (!cur.isFinite() || cur.width() <= 0.0 || cur.height() <= 0.0) return;
+  const double keepScale = map->scale();
+  const QgsRectangle next(center.x() - cur.width() * 0.5, center.y() - cur.height() * 0.5,
+                          center.x() + cur.width() * 0.5, center.y() + cur.height() * 0.5);
+  map->zoomToExtent(next);
+  if (keepScale > 1.0)
+    map->setScale(keepScale, true);
+  map->invalidateCache();
+  map->refresh();
+  if (auto* ly = layout())
+    ly->refresh();
+  refreshScaleWidgets(true);
+  if (auto* sb = dynamic_cast<QgsLayoutItemScaleBar*>(findItemById(layout(), kIdScaleBar)))
+    applyNiceScaleBar(sb);
+}
+
+void KaDrawingStudio::centerOnMapCanvas() {
+  auto* map = mapItem();
+  if (!map || !m_mapCanvas) return;
+  QgsPointXY c = m_mapCanvas->extent().center();
+  const QgsCoordinateReferenceSystem src = m_mapCanvas->mapSettings().destinationCrs();
+  const QgsCoordinateReferenceSystem dst = map->crs().isValid()
+                                               ? map->crs()
+                                               : studioMapCrs(m_mapCanvas, m_project);
+  if (m_project && src.isValid() && dst.isValid() && src != dst) {
+    try {
+      const QgsCoordinateTransform xf(src, dst, m_project->transformContext());
+      c = xf.transform(c);
+    } catch (...) {
+    }
+  }
+  panLayoutMapTo(c);
+}
+
 void KaDrawingStudio::centerSurveyInMap() {
   auto* map = mapItem();
   if (!map) {
@@ -2168,10 +2769,17 @@ void KaDrawingStudio::centerSurveyInMap() {
       m_status->setText(QStringLiteral("먼저 지도 칸을 그리세요."));
     return;
   }
-  QgsRectangle target;
+  QgsPointXY c;
+  bool have = false;
   QgsMapLayer* layer = m_layerTree ? m_layerTree->currentLayer() : nullptr;
   if (layer && layer->isValid()) {
-    target = layer->extent();
+    QgsRectangle target;
+    if (auto* vl = qobject_cast<QgsVectorLayer*>(layer)) {
+      vl->updateExtents();
+      target = vl->extent();
+    }
+    if (target.isNull() || !target.isFinite())
+      target = layer->extent();
     if (m_project && layer->crs().isValid() && map->crs().isValid() && layer->crs() != map->crs()) {
       try {
         const QgsCoordinateTransform xf(layer->crs(), map->crs(), m_project->transformContext());
@@ -2179,32 +2787,26 @@ void KaDrawingStudio::centerSurveyInMap() {
       } catch (...) {
       }
     }
+    if (target.isFinite() && target.width() > 0.0 && target.width() < 2000000.0) {
+      c = target.center();
+      have = true;
+    }
   }
-  if (target.isNull() || !target.isFinite())
-    target = surveyExtentOnMap(map);
-  if (target.isNull() || !target.isFinite()) {
+  if (!have) {
+    const QgsRectangle survey = surveyExtentOnMap(map);
+    if (survey.isFinite() && survey.width() > 0.0) {
+      c = survey.center();
+      have = true;
+    }
+  }
+  if (!have) {
     if (m_status)
       m_status->setText(QStringLiteral("가운데로 둘 레이어를 왼쪽에서 고르세요."));
     return;
   }
-  const double keepScale = map->scale();
-  const QgsRectangle cur = map->extent();
-  const QgsPointXY c = target.center();
-  const double hw = (cur.isFinite() && cur.width() > 0.0) ? cur.width() * 0.5 : target.width() * 0.5;
-  const double hh = (cur.isFinite() && cur.height() > 0.0) ? cur.height() * 0.5 : target.height() * 0.5;
-  map->setExtent(QgsRectangle(c.x() - hw, c.y() - hh, c.x() + hw, c.y() + hh));
-  if (keepScale > 1.0)
-    map->setScale(keepScale);
-  map->invalidateCache();
-  map->refresh();
-  if (auto* ly = layout())
-    ly->refresh();
-  refreshScaleWidgets(true);
-  applyCrsGrid(map);
-  if (auto* sb = dynamic_cast<QgsLayoutItemScaleBar*>(findItemById(layout(), kIdScaleBar)))
-    applyNiceScaleBar(sb);
+  panLayoutMapTo(c);
   if (m_status)
-    m_status->setText(QStringLiteral("축척 1 : %1 을 유지한 채 레이어를 가운데로 옮겼습니다.")
+    m_status->setText(QStringLiteral("축척 1 : %1 을 유지한 채 조판 가운데로 옮겼습니다.")
                           .arg(displayScale(map->scale())));
 }
 
