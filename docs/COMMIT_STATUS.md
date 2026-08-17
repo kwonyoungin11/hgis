@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-18 07:29:19 +09:00 |
+| Updated (local) | 2026-08-18 07:29:56 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `c4cc35c` |
-| HEAD full | `c4cc35c84db3a64dbca533c999d412e7decfb948` |
-| HEAD date | 2026-08-17 14:04:44 +0900 |
-| HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Refresh COMMIT_STATUS after buffer and new-survey reset. |
-| Total commits | 26 |
+| HEAD short | `a057319` |
+| HEAD full | `a057319cd208d209770176ac24e69c3a207aeb3b` |
+| HEAD date | 2026-08-18 07:29:17 +0900 |
+| HEAD author | kwonypungin <kyi25@nate.com> |
+| HEAD subject | Ship start page, recent surveys, splash, auto VWorld basemaps, and layout coordinate callouts. |
+| Total commits | 27 |
 | Upstream | `origin/main` |
 | Sync | up to date with origin/main |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (25 paths) |
+| Working tree dirty | **yes** (1 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Refresh COMMIT_STATUS after buffer and new-survey reset. (`c4cc35c` @ 2026-08-17 14:04:44 +0900)
+- **Recorded tip when this file was written:** Ship start page, recent surveys, splash, auto VWorld basemaps, and layout coordinate callouts. (`a057319` @ 2026-08-18 07:29:17 +0900)
 - **Remote sync at write time:** up to date with origin/main
-- **Uncommitted local changes at write time:** yes (25 paths)
+- **Uncommitted local changes at write time:** yes (1 paths)
 
 ### Read this correctly
 
@@ -53,6 +53,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `a057319` | 2026-08-18T07:29:17+09:00 | Ship start page, recent surveys, splash, auto VWorld basemaps, and layout coordinate callouts. |
 | `c4cc35c` | 2026-08-17T14:04:44+09:00 | Refresh COMMIT_STATUS after buffer and new-survey reset. |
 | `2ca17b9` | 2026-08-17T14:04:33+09:00 | Ship site buffer rings, new-survey legend reset, and OSGeo launch PATH. |
 | `e896fce` | 2026-08-17T10:48:58+09:00 | Ship georef split-align, easy-draw layer, and feature kind/period presets. |
@@ -83,31 +84,7 @@
 ## Staged in this commit
 
 ```
-M	CMakeLists.txt
-M	data/theme/ka-hgis.qss
 M	docs/COMMIT_STATUS.md
-M	scripts/dev-env.ps1
-M	src/app/KaAlignMapTool.cpp
-M	src/app/KaAlignMapTool.h
-M	src/app/KaApplication.cpp
-A	src/app/KaCoordPointMapTool.cpp
-A	src/app/KaCoordPointMapTool.h
-M	src/app/KaDrawingStudio.cpp
-M	src/app/KaDrawingStudio.h
-M	src/app/KaIcons.cpp
-A	src/app/KaStartPage.cpp
-A	src/app/KaStartPage.h
-M	src/app/KaTheme.cpp
-M	src/app/MainWindow.cpp
-M	src/app/MainWindow.h
-M	src/core/GeorefService.cpp
-M	src/core/GeorefService.h
-M	src/core/LayerOps.cpp
-A	src/core/RecentSurveys.cpp
-A	src/core/RecentSurveys.h
-M	tests/test_georef.cpp
-A	tests/test_recent.cpp
-M	tests/test_workflow.cpp
 ```
 ## Other PC checklist
 
