@@ -104,6 +104,8 @@ private slots:
   void startupLoadsSatelliteAndCadastralWithoutToolbarIcons();
   void layoutCoordPointHasIconAndCallout();
   void layoutProfessionalSheet_frameGridTitleBlock();
+  void layoutWheelZoom_keepsPointUnderCursor();
+  void singleInstanceGuardIsWiredIntoBoot();
 };
 
 static bool projectHasLayerNamedLike(QgsProject* proj, const QString& base) {
@@ -1629,6 +1631,49 @@ void TestWorkflow::layoutCoordPointHasIconAndCallout() {
   QVERIFY2(src.contains(QLatin1String("beginPlaceCoordPoint")), "coord tool slot");
   QVERIFY2(src.contains(QLatin1String("placeCoordCallout")), "callout placement");
   QVERIFY2(src.contains(QLatin1String("ka_coord_box_")), "label id");
+}
+
+void TestWorkflow::singleInstanceGuardIsWiredIntoBoot() {
+  // 중복 실행 가드는 정의만 있으면 효과가 없다. run()에서 실제로 불려야 한다.
+  QFile f(QStringLiteral("src/app/KaApplication.cpp"));
+  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "KaApplication.cpp");
+  const QString src = QString::fromUtf8(f.readAll());
+  QVERIFY2(src.contains(QLatin1String("static bool kaActivateExistingInstance()")),
+           "guard helper must exist");
+  const int defAt = src.indexOf(QLatin1String("static bool kaActivateExistingInstance()"));
+  const int runAt = src.indexOf(QLatin1String("int KaApplication::run("));
+  QVERIFY(defAt >= 0 && runAt > defAt);
+  const QString runBody = src.mid(runAt);
+  QVERIFY2(runBody.contains(QLatin1String("kaActivateExistingInstance()")),
+           "run() must call the single-instance guard");
+  // 자동 QA는 항상 자기 프로세스로 끝까지 돌아야 하므로 가드에서 제외한다.
+  const int callAt = runBody.indexOf(QLatin1String("kaActivateExistingInstance()"));
+  const QString around = runBody.mid(std::max(0, callAt - 200), 260);
+  QVERIFY2(around.contains(QLatin1String("smokeQuit")),
+           "smoke/QA runs must bypass the guard");
+}
+
+void TestWorkflow::layoutWheelZoom_keepsPointUnderCursor() {
+  const QgsRectangle ext(200000.0, 450000.0, 200200.0, 450100.0);
+  // 오른쪽 위 1/4 지점을 가리킨 채 2배 확대 → 그 지상 좌표가 같은 화면 위치에 남아야.
+  const double fx = 0.75, fy = 0.25;
+  const double gx = ext.xMinimum() + fx * ext.width();
+  const double gy = ext.yMaximum() - fy * ext.height();
+  const QgsRectangle zin = LayoutService::zoomExtentAtAnchor(ext, fx, fy, 2.0);
+  QVERIFY2(qAbs(zin.width() - ext.width() / 2.0) < 1e-6, "2배 확대는 폭 절반");
+  QVERIFY2(qAbs(zin.height() - ext.height() / 2.0) < 1e-6, "종횡비 유지");
+  QVERIFY2(qAbs((zin.xMinimum() + fx * zin.width()) - gx) < 1e-6, "커서 지점 X 고정");
+  QVERIFY2(qAbs((zin.yMaximum() - fy * zin.height()) - gy) < 1e-6, "커서 지점 Y 고정");
+  // 중심에서 굴리면 중심 기준 확대와 같아야(회귀 방지).
+  const QgsRectangle mid = LayoutService::zoomExtentAtAnchor(ext, 0.5, 0.5, 2.0);
+  QVERIFY(qAbs(mid.center().x() - ext.center().x()) < 1e-6);
+  QVERIFY(qAbs(mid.center().y() - ext.center().y()) < 1e-6);
+  // 축소도 같은 지점을 물고 있어야.
+  const QgsRectangle zout = LayoutService::zoomExtentAtAnchor(ext, fx, fy, 0.5);
+  QVERIFY2(qAbs(zout.width() - ext.width() * 2.0) < 1e-6, "0.5배는 폭 두 배");
+  QVERIFY2(qAbs((zout.xMinimum() + fx * zout.width()) - gx) < 1e-6, "축소도 커서 지점 고정");
+  // 잘못된 입력은 원본 그대로.
+  QCOMPARE(LayoutService::zoomExtentAtAnchor(ext, fx, fy, 0.0), ext);
 }
 
 void TestWorkflow::layoutProfessionalSheet_frameGridTitleBlock() {

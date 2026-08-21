@@ -879,6 +879,24 @@ QgsRectangle LayoutService::extentForPaperScale(const QgsRectangle& currentExten
                       center.x() + groundWidth * 0.5, center.y() + groundHeight * 0.5);
 }
 
+QgsRectangle LayoutService::zoomExtentAtAnchor(const QgsRectangle& extent, double fx, double fy,
+                                               double zoomFactor) {
+  if (!extent.isFinite() || !(extent.width() > 0.0) || !(extent.height() > 0.0) ||
+      !(zoomFactor > 0.0) || !std::isfinite(zoomFactor))
+    return extent;
+  fx = std::clamp(fx, 0.0, 1.0);
+  fy = std::clamp(fy, 0.0, 1.0);
+  // 커서가 가리키는 지상 좌표(고정점).
+  const double gx = extent.xMinimum() + fx * extent.width();
+  const double gy = extent.yMaximum() - fy * extent.height();
+  const double w = extent.width() / zoomFactor;
+  const double h = extent.height() / zoomFactor;
+  // 새 범위에서도 같은 상대 위치에 고정점이 오게 맞춘다.
+  const double xMin = gx - fx * w;
+  const double yMax = gy + fy * h;
+  return QgsRectangle(xMin, yMax - h, xMin + w, yMax);
+}
+
 QString LayoutService::createBlankSheet(QgsProject* project, double widthMm, double heightMm,
                                         const QString& name, QString* errorOut) {
   if (!project) {

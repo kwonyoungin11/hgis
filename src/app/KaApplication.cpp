@@ -564,6 +564,17 @@ int KaApplication::run(int argc, char** argv) {
       openGpkg = QString::fromLocal8Bit(argv[++i]);
   }
 
+#ifdef Q_OS_WIN
+  // 중복 실행 차단: 이미 떠 있으면 그 창을 앞으로 올리고 이 프로세스는 끝낸다.
+  // 같은 조사 GPKG를 두 프로세스가 잡아 잠금 충돌·중복 다운로드가 나는 것을 막는다.
+  // 자동 QA(--smoke-quit/--qa-phase1)는 항상 자기 프로세스로 끝까지 돌아야 하므로 제외.
+  if (!smokeQuit && !qaPhase1 && kaActivateExistingInstance()) {
+    KaCrashGuard::logLine(
+        QStringLiteral("[boot] 이미 실행 중인 ka-hgis 창을 앞으로 올리고 종료합니다."));
+    return 0;
+  }
+#endif
+
 #if KA_HGIS_HAS_QGIS
   // PROJ/GDAL 환경은 QgsApplication이 첫 좌표계 컨텍스트를 만들기 전에 준비돼야 한다.
   applyBundledRuntime();

@@ -1,4 +1,4 @@
-# Build a self-contained Windows folder: USB copy, no OSGeo4W install on the target PC.
+﻿# Build a self-contained Windows folder: USB copy, no OSGeo4W install on the target PC.
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $out = Join-Path $root "dist\ka-hgis-portable"

@@ -83,6 +83,12 @@ public:
   static QgsRectangle extentForPaperScale(const QgsRectangle& currentExtent,
                                           double mapWidthMm, double scaleDenominator);
 
+  // 커서 아래 지점을 고정한 채 확대·축소한 지도 범위.
+  // fx, fy는 지도 칸 안에서 커서의 상대 위치(0~1, fy는 위에서 아래로).
+  // zoomFactor > 1 이면 확대(범위가 좁아짐).
+  static QgsRectangle zoomExtentAtAnchor(const QgsRectangle& extent, double fx, double fy,
+                                         double zoomFactor);
+
   // 지도 칸 아래 고정 띠: 왼쪽 축척자, 그 아래 축척 1:N, 오른쪽 CRS, 맨 오른쪽 방위.
   // 위성/지적 픽셀 위에 올리지 않는다. 도면만들기마다 이 기하를 다시 앉힌다.
   struct SheetChromeRects {

@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-21 22:49:12 +09:00 |
+| Updated (local) | 2026-08-21 23:09:07 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `cursor/pro-drawing-and-map-services` |
-| HEAD short | `6b848c0` |
-| HEAD full | `6b848c09a3562dc6026cadf73429b4322cf6e93d` |
-| HEAD date | 2026-08-21 22:48:49 +0900 |
+| HEAD short | `5735677` |
+| HEAD full | `5735677fcd09d877d8c623e0050672cc1b4d317e` |
+| HEAD date | 2026-08-21 22:49:12 +0900 |
 | HEAD author | kwonypungin <kyi25@nate.com> |
 | HEAD subject | Ship pro survey sheets, Korean map services, trench tools, and crash guard. |
 | Total commits | 29 |
 | Upstream | `(none)` |
 | Sync | no upstream configured |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (10 paths) |
+| Working tree dirty | **yes** (17 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Ship pro survey sheets, Korean map services, trench tools, and crash guard. (`6b848c0` @ 2026-08-21 22:48:49 +0900)
+- **Recorded tip when this file was written:** Ship pro survey sheets, Korean map services, trench tools, and crash guard. (`5735677` @ 2026-08-21 22:49:12 +0900)
 - **Remote sync at write time:** no upstream configured
-- **Uncommitted local changes at write time:** yes (10 paths)
+- **Uncommitted local changes at write time:** yes (17 paths)
 
 ### Read this correctly
 
@@ -54,7 +54,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
-| `6b848c0` | 2026-08-21T22:48:49+09:00 | ﻿Ship pro survey sheets, Korean map services, trench tools, and crash guard. |
+| `5735677` | 2026-08-21T22:48:49+09:00 | Ship pro survey sheets, Korean map services, trench tools, and crash guard. |
 | `cf52276` | 2026-08-18T07:29:54+09:00 | Refresh COMMIT_STATUS after start page and layout coord ship. |
 | `a057319` | 2026-08-18T07:29:17+09:00 | Ship start page, recent surveys, splash, auto VWorld basemaps, and layout coordinate callouts. |
 | `c4cc35c` | 2026-08-17T14:04:44+09:00 | Refresh COMMIT_STATUS after buffer and new-survey reset. |
@@ -84,6 +84,17 @@
 | `99bd664` | 2026-08-09T16:09:56+09:00 | Refresh COMMIT_STATUS for baseline HEAD. |
 | `eac6c9c` | 2026-08-09T16:09:43+09:00 | Initial baseline: ka-hgis v0.3 archaeology HGIS (C++/Qt6 + QGIS libs). |
 
+## Staged in this commit
+
+```
+M	dist/ka-hgis-portable/README.txt
+M	scripts/make-portable.ps1
+M	src/app/KaApplication.cpp
+M	src/app/KaDrawingStudio.cpp
+M	src/core/LayoutService.cpp
+M	src/core/LayoutService.h
+M	tests/test_workflow.cpp
+```
 ## Other PC checklist
 
 ```powershell

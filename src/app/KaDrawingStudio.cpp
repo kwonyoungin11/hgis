@@ -567,8 +567,22 @@ private slots:
       return;
     }
     const double cur = mPendingMap->scale();
-    if (cur > 10.0)
-      mPendingMap->setScale(cur / mPendingFactor, true);
+    if (cur > 10.0) {
+      // 휠 위치(mPendingPoint)를 고정점으로 확대·축소한다. 칸 크기는 그대로 두려고
+      // setExtent가 아니라 zoomToExtent를 쓴다.
+      const QRectF box = mPendingMap->rect();
+      const QgsRectangle ext = mPendingMap->extent();
+      const bool canAnchor = box.width() > 0.0 && box.height() > 0.0 && ext.isFinite() &&
+                             ext.width() > 0.0 && ext.height() > 0.0;
+      if (canAnchor) {
+        const double fx = (mPendingPoint.x() - box.left()) / box.width();
+        const double fy = (mPendingPoint.y() - box.top()) / box.height();
+        mPendingMap->zoomToExtent(
+            LayoutService::zoomExtentAtAnchor(ext, fx, fy, mPendingFactor));
+      } else {
+        mPendingMap->setScale(cur / mPendingFactor, true);
+      }
+    }
     mPendingFactor = 1.0;
     emit mapViewChanged();
   }
