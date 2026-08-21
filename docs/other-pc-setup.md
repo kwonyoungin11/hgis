@@ -133,8 +133,7 @@ git push origin main
 
 ## E) 실행만 (포터블)
 
-`dist\ka-hgis-portable\` 복사 + 대상 PC OSGeo4W 런타임 → `run.bat`.  
-개발 PC에서 `.\scripts\build-all.ps1` 후 portable 폴더 통째 복사.
+실행만: 개발 PC에서 `.\scripts\make-portable.ps1` 후 `dist\ka-hgis-portable\` **통째** 복사 → `start.bat`. 대상 PC에 OSGeo4W 불필요.
 
 ---
 

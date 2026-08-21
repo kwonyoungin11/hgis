@@ -51,6 +51,7 @@ QString SurveyProjectFactory::createNewSurvey(const QString& directory,
     {"section_line", "LineString"},
     {"control_points", "Point"},
     {"artifact_point", "Point"},
+    {"trial_trench", "Polygon"},
   };
 
   bool first = true;
@@ -84,6 +85,10 @@ QString SurveyProjectFactory::createNewSurvey(const QString& directory,
       fields.append(QgsField(QStringLiteral("period"), QMetaType::Type::QString));
       fields.append(QgsField(QStringLiteral("artifact_no"), QMetaType::Type::QString));
       fields.append(QgsField(QStringLiteral("note"), QMetaType::Type::QString));
+    } else if (n == QLatin1String("trial_trench")) {
+      fields.append(QgsField(QStringLiteral("name"), QMetaType::Type::QString));
+      fields.append(QgsField(QStringLiteral("width"), QMetaType::Type::Double));
+      fields.append(QgsField(QStringLiteral("length"), QMetaType::Type::Double));
     } else {
       fields.append(QgsField(QStringLiteral("point_id"), QMetaType::Type::QString));
       fields.append(QgsField(QStringLiteral("x"), QMetaType::Type::Double));

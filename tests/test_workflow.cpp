@@ -20,6 +20,9 @@
 #include "core/WorkflowGuide.h"
 #include "core/VworldSettings.h"
 #include "core/LocationSearch.h"
+#include "core/SoilMapService.h"
+#include "core/GeologyMapService.h"
+#include "core/RiverMapService.h"
 
 #include <qgsapplication.h>
 #include <qgsproject.h>
@@ -39,8 +42,12 @@
 #include <qgslayoutmanager.h>
 #include <qgsmapcanvas.h>
 #include <qgslayertreelayer.h>
+#include <qgscategorizedsymbolrenderer.h>
+#include <qgssinglesymbolrenderer.h>
 #include <qgsprintlayout.h>
 #include <qgslayoutitemmap.h>
+#include <qgslayoutitemmapgrid.h>
+#include <qgslayoutitemlabel.h>
 #include <qgslayoutitemscalebar.h>
 #include <qgslayoutitemlegend.h>
 
@@ -49,6 +56,10 @@ class TestWorkflow : public QObject {
 private slots:
   void fullWorkflowSurveyToPackage();
   void shpKoreanRoundTripUtf8();
+  void soilShpImport_crsOverrideAndCategorizedStyle();
+  void soilTerrainLegend_officialCodesAndStyle();
+  void geologyEraLegend_icsColorsAndStyle();
+  void riverLevelLegend_waterStyleAndNameLabels();
   void reprojectAndMigrateFields();
   void georefWorldfileFromGcp();
   void convert5186PolygonTo5179Shp();
@@ -92,6 +103,7 @@ private slots:
   void layoutOpensAsMainWindowTabNotSeparateWindow();
   void startupLoadsSatelliteAndCadastralWithoutToolbarIcons();
   void layoutCoordPointHasIconAndCallout();
+  void layoutProfessionalSheet_frameGridTitleBlock();
 };
 
 static bool projectHasLayerNamedLike(QgsProject* proj, const QString& base) {
@@ -260,6 +272,183 @@ void TestWorkflow::shpKoreanRoundTripUtf8() {
   QVERIFY2(kind.contains(QStringLiteral("수혈")) || kind.contains(QStringLiteral("주거")) || !kind.isEmpty(),
            qPrintable(QStringLiteral("kind=%1").arg(kind)));
   QVERIFY2(!period.isEmpty(), qPrintable(QStringLiteral("period empty")));
+}
+
+// 흙토람 토양도 SHP 임포트: 좌표계 지정(.prj 유무 모두)과 분류색 렌더러를 검증.
+void TestWorkflow::soilShpImport_crsOverrideAndCategorizedStyle() {
+  const QString dir = QDir::temp().filePath(QStringLiteral("ka_soil_") +
+                                            QString::number(QDateTime::currentMSecsSinceEpoch()));
+  QDir().mkpath(dir);
+
+  QgsVectorLayer mem(QStringLiteral("Polygon?crs=EPSG:5186"), QStringLiteral("soil"),
+                     QStringLiteral("memory"));
+  QVERIFY(mem.isValid());
+  QgsFields fields;
+  fields.append(QgsField(QStringLiteral("TPGRP_NM"), QMetaType::Type::QString));
+  mem.dataProvider()->addAttributes(fields.toList());
+  mem.updateFields();
+  QVERIFY(mem.startEditing());
+  const QStringList terrains = {QStringLiteral("산악지"), QStringLiteral("구릉지"),
+                                QStringLiteral("산악지")};
+  for (int i = 0; i < terrains.size(); ++i) {
+    QgsFeature f(mem.fields());
+    f.setAttribute(QStringLiteral("TPGRP_NM"), terrains.at(i));
+    QgsPolylineXY ring;
+    const double x = 200000.0 + i * 20.0;
+    ring << QgsPointXY(x, 500000.0) << QgsPointXY(x + 10.0, 500000.0)
+         << QgsPointXY(x + 10.0, 500010.0) << QgsPointXY(x, 500010.0)
+         << QgsPointXY(x, 500000.0);
+    f.setGeometry(QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring));
+    QVERIFY(mem.addFeature(f));
+  }
+  QVERIFY(mem.commitChanges());
+
+  const QString shp = QDir(dir).filePath(QStringLiteral("soil_map.shp"));
+  QgsVectorFileWriter::SaveVectorOptions opts;
+  opts.driverName = QStringLiteral("ESRI Shapefile");
+  opts.fileEncoding = QStringLiteral("UTF-8");
+  QString err, nf, nl;
+  const auto we = QgsVectorFileWriter::writeAsVectorFormatV3(
+      &mem, shp, QgsCoordinateTransformContext(), opts, &err, &nf, &nl);
+  QCOMPARE(we, QgsVectorFileWriter::NoError);
+
+  // 1) 사용자가 좌표계를 지정하면 파일 좌표계보다 우선한다 + 분류색 렌더러.
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  QgsVectorLayer* l1 = LayerOps::addSoilShapefile(&proj, nullptr, shp, QStringLiteral("EPSG:5174"),
+                                                  QStringLiteral("TPGRP_NM"), &err);
+  QVERIFY2(l1, qPrintable(err));
+  QCOMPARE(l1->crs().authid(), QStringLiteral("EPSG:5174"));
+  QVERIFY(LayerOps::isReferenceLayer(l1));
+  auto* cat = dynamic_cast<QgsCategorizedSymbolRenderer*>(l1->renderer());
+  QVERIFY2(cat, "categorized renderer expected");
+  // 고유값 2개(산악지·구릉지) + "기타" 캐치올.
+  QVERIFY2(cat->categories().size() >= 3,
+           qPrintable(QStringLiteral("categories=%1").arg(cat->categories().size())));
+
+  // 2) .prj가 없는 배포본은 흙토람 고시 좌표계(EPSG:2097)로 가정한다 + 단색 렌더러.
+  QFile::remove(QDir(dir).filePath(QStringLiteral("soil_map.prj")));
+  QFile::remove(QDir(dir).filePath(QStringLiteral("soil_map.qpj")));
+  QgsVectorLayer* l2 =
+      LayerOps::addSoilShapefile(&proj, nullptr, shp, QString(), QString(), &err);
+  QVERIFY2(l2, qPrintable(err));
+  QCOMPARE(l2->crs().authid(), QStringLiteral("EPSG:2097"));
+  QVERIFY(dynamic_cast<QgsSingleSymbolRenderer*>(l2->renderer()) != nullptr);
+}
+
+// 흙토람 공식 분포지형 범례(코드→이름·색)와 스타일 적용을 검증한다.
+void TestWorkflow::soilTerrainLegend_officialCodesAndStyle() {
+  QCOMPARE(SoilMapService::terrainName(QStringLiteral("01")), QStringLiteral("산악지"));
+  QCOMPARE(SoilMapService::terrainName(QStringLiteral("04")), QStringLiteral("곡간지/선상지"));
+  QCOMPARE(SoilMapService::terrainName(QStringLiteral("06")), QStringLiteral("하성평탄지"));
+  QCOMPARE(SoilMapService::terrainColor(QStringLiteral("01")), QColor(1, 178, 0));
+  QCOMPARE(SoilMapService::terrainColor(QStringLiteral("08")), QColor(254, 160, 0));
+  QCOMPARE(SoilMapService::terrainName(QStringLiteral("77")), QStringLiteral("미분류"));
+
+  QgsVectorLayer mem(QStringLiteral("MultiPolygon?crs=EPSG:5186&field=soil_type_geo:string"),
+                     QStringLiteral("soilwfs"), QStringLiteral("memory"));
+  QVERIFY(mem.isValid());
+  QVERIFY(SoilMapService::applyTerrainStyle(&mem));
+  auto* cat = dynamic_cast<QgsCategorizedSymbolRenderer*>(mem.renderer());
+  QVERIFY2(cat, "categorized renderer expected");
+  QCOMPARE(cat->classAttribute(), QStringLiteral("soil_type_geo"));
+  // 공식 11개 분류 + 미분류 캐치올.
+  QCOMPARE(cat->categories().size(), 12);
+
+  // 분포지형 필드가 없으면 실패를 명확히 알린다.
+  QgsVectorLayer noField(QStringLiteral("MultiPolygon?crs=EPSG:5186"),
+                         QStringLiteral("nofield"), QStringLiteral("memory"));
+  QVERIFY(!SoilMapService::applyTerrainStyle(&noField));
+}
+
+void TestWorkflow::geologyEraLegend_icsColorsAndStyle() {
+  // 서버 시대 문자열 → 정규화 분류(세분 우선).
+  QCOMPARE(GeologyMapService::eraClass(QStringLiteral("현생누대 신생대 제4기")),
+           QStringLiteral("제4기"));
+  QCOMPARE(GeologyMapService::eraClass(QStringLiteral("현생누대 고생대 오르도비스기")),
+           QStringLiteral("오르도비스기"));
+  QCOMPARE(GeologyMapService::eraClass(QStringLiteral("선캄브리아시대")),
+           QStringLiteral("선캄브리아시대"));
+  QCOMPARE(GeologyMapService::eraClass(QString()), QStringLiteral("시대미상"));
+  QCOMPARE(GeologyMapService::eraColor(QStringLiteral("제4기")), QColor(249, 249, 127));
+
+  // 보고서 지질도 관례: 데이터에 실제로 있는 지질단위만 「기호 · 지층명」 범례.
+  QgsVectorLayer mem(QStringLiteral("MultiPolygon?crs=EPSG:5186"), QStringLiteral("geowfs"),
+                     QStringLiteral("memory"));
+  QVERIFY(mem.isValid());
+  mem.dataProvider()->addAttributes(
+      {QgsField(QStringLiteral("시대"), QMetaType::Type::QString),
+       QgsField(QStringLiteral("지층"), QMetaType::Type::QString),
+       QgsField(QStringLiteral("기호"), QMetaType::Type::QString)});
+  mem.updateFields();
+  QgsFeature f1(mem.fields());
+  f1.setAttribute(0, QStringLiteral("현생누대 신생대 제4기"));
+  f1.setAttribute(1, QStringLiteral("충적층"));
+  f1.setAttribute(2, QStringLiteral("Qa"));
+  QgsFeature f2(mem.fields());
+  f2.setAttribute(0, QStringLiteral("선캄브리아시대"));
+  f2.setAttribute(1, QStringLiteral("반상변정편마암"));
+  f2.setAttribute(2, QStringLiteral("PCEpgn"));
+  QVERIFY(mem.dataProvider()->addFeatures(QgsFeatureList() << f1 << f2));
+
+  QHash<QString, QColor> official;
+  official.insert(QStringLiteral("Qa"), QColor(250, 244, 180));
+  QVERIFY(GeologyMapService::applyGeologyStyle(&mem, official));
+  auto* cat = dynamic_cast<QgsCategorizedSymbolRenderer*>(mem.renderer());
+  QVERIFY2(cat, "categorized renderer expected");
+  QCOMPARE(cat->classAttribute(), QStringLiteral("기호"));
+  // 실존 단위 2개 + 기타 캐치올. 젊은 시대(Qa)가 먼저.
+  QCOMPARE(cat->categories().size(), 3);
+  QCOMPARE(cat->categories().at(0).value().toString(), QStringLiteral("Qa"));
+  QCOMPARE(cat->categories().at(0).label(), QStringLiteral("충적층"));
+  QCOMPARE(cat->categories().at(1).label(), QStringLiteral("반상변정편마암"));
+  // 공식 도폭색이 심볼에 반영된다(알파 제외 RGB 비교).
+  const QColor c0 = cat->categories().at(0).symbol()->color();
+  QCOMPARE(QColor(c0.red(), c0.green(), c0.blue()), QColor(250, 244, 180));
+  QVERIFY2(mem.labelsEnabled(), "symbol labels expected");
+
+  QgsVectorLayer noField(QStringLiteral("MultiPolygon?crs=EPSG:5186"),
+                         QStringLiteral("nofield"), QStringLiteral("memory"));
+  QVERIFY(!GeologyMapService::applyGeologyStyle(&noField));
+}
+
+void TestWorkflow::riverLevelLegend_waterStyleAndNameLabels() {
+  // 수계도 관례: 하천 등급별 물색 범례(상위 등급 먼저) + 하천명 라벨.
+  QgsVectorLayer mem(QStringLiteral("MultiPolygon?crs=EPSG:5186"), QStringLiteral("riverwfs"),
+                     QStringLiteral("memory"));
+  QVERIFY(mem.isValid());
+  mem.dataProvider()->addAttributes(
+      {QgsField(QStringLiteral("riv_nm"), QMetaType::Type::QString),
+       QgsField(QStringLiteral("riv_level"), QMetaType::Type::QString)});
+  mem.updateFields();
+  QgsFeature f1(mem.fields());
+  f1.setAttribute(0, QStringLiteral("병성천"));
+  f1.setAttribute(1, QStringLiteral("지방1급하천"));
+  QgsFeature f2(mem.fields());
+  f2.setAttribute(0, QStringLiteral("장산천"));
+  f2.setAttribute(1, QStringLiteral("지방2급하천"));
+  QgsFeature f3(mem.fields());
+  f3.setAttribute(0, QStringLiteral("낙동강"));
+  f3.setAttribute(1, QStringLiteral("국가하천"));
+  QVERIFY(mem.dataProvider()->addFeatures(QgsFeatureList() << f1 << f2 << f3));
+
+  QVERIFY(RiverMapService::applyRiverStyle(&mem));
+  auto* cat = dynamic_cast<QgsCategorizedSymbolRenderer*>(mem.renderer());
+  QVERIFY2(cat, "categorized renderer expected");
+  QCOMPARE(cat->classAttribute(), QStringLiteral("riv_level"));
+  // 실존 등급 3개 + 기타 캐치올. 국가하천이 맨 앞.
+  QCOMPARE(cat->categories().size(), 4);
+  QCOMPARE(cat->categories().at(0).value().toString(), QStringLiteral("국가하천"));
+  QCOMPARE(cat->categories().at(1).value().toString(), QStringLiteral("지방1급하천"));
+  QCOMPARE(cat->categories().at(2).value().toString(), QStringLiteral("지방2급하천"));
+  // 국가하천 물색이 심볼에 반영된다(알파 제외 RGB 비교).
+  const QColor c0 = cat->categories().at(0).symbol()->color();
+  QCOMPARE(QColor(c0.red(), c0.green(), c0.blue()), QColor(42, 111, 176));
+  QVERIFY2(mem.labelsEnabled(), "river name labels expected");
+
+  QgsVectorLayer noField(QStringLiteral("MultiPolygon?crs=EPSG:5186"),
+                         QStringLiteral("nofield"), QStringLiteral("memory"));
+  QVERIFY(!RiverMapService::applyRiverStyle(&noField));
 }
 
 void TestWorkflow::reprojectAndMigrateFields() {
@@ -1210,6 +1399,15 @@ void TestWorkflow::layoutStandardSheetChrome_sitsBelowMap() {
   QVERIFY2(c.map.height() < drag.height() - 0.5, "map height shrinks so chrome fits");
   QVERIFY2(qAbs(c.scaleBar.left() - c.map.left()) < 0.5, "scale bar left-aligned with map");
   QVERIFY2(qAbs(c.north.right() - c.map.right()) < 0.5, "north right-aligned with map");
+  QVERIFY2(c.scaleLabel.top() + 1e-6 >= c.scaleBar.bottom(), "scale label sits under the bar");
+  QVERIFY2(c.crs.top() + 1e-6 >= c.map.bottom(), "crs stays below the map");
+  QVERIFY2(c.crs.bottom() <= c.scaleBar.bottom() + 2.0, "crs stays on the scale-bar row");
+  QVERIFY2(c.crs.right() <= c.north.left() + 1e-6, "crs sits left of north");
+  QVERIFY2(c.scaleBar.right() <= c.crs.left() + 1e-6, "scale bar does not overlap crs");
+  QVERIFY2(c.north.height() <= 22.0, "north fits in the reserved chrome strip");
+  QVERIFY2(c.north.bottom() <= page.bottom() - 7.5, "north stays above the page margin");
+  QVERIFY2(c.scaleBar.height() >= 11.0, "scale bar slot fits QGIS Line Ticks Up minimum");
+  QVERIFY2(c.scaleLabel.top() >= c.scaleBar.bottom() + 2.0, "scale text stays below the bar box");
 }
 
 void TestWorkflow::layoutExtentForPaperScale_keepsTypedDenominator() {
@@ -1431,6 +1629,79 @@ void TestWorkflow::layoutCoordPointHasIconAndCallout() {
   QVERIFY2(src.contains(QLatin1String("beginPlaceCoordPoint")), "coord tool slot");
   QVERIFY2(src.contains(QLatin1String("placeCoordCallout")), "callout placement");
   QVERIFY2(src.contains(QLatin1String("ka_coord_box_")), "label id");
+}
+
+void TestWorkflow::layoutProfessionalSheet_frameGridTitleBlock() {
+  // 도곽 자동 간격: 종이 한 칸 25~70mm가 되는 1-2-5 계열.
+  QVERIFY(qAbs(LayoutService::niceGridIntervalMeters(1000.0, 180.0) - 50.0) < 1e-9);
+  QVERIFY(qAbs(LayoutService::niceGridIntervalMeters(5000.0, 180.0) - 200.0) < 1e-9);
+  QVERIFY(qAbs(LayoutService::niceGridIntervalMeters(100.0, 180.0) - 5.0) < 1e-9);
+
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  auto* sa = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                QStringLiteral("조사구역"), QStringLiteral("memory"));
+  QVERIFY(sa->isValid());
+  LayerOps::markSurveyLayer(sa, QStringLiteral("survey_area"));
+  proj.addMapLayer(sa);
+  QVERIFY(sa->startEditing());
+  QgsFeature sf(sa->fields());
+  QgsPolylineXY ring;
+  ring << QgsPointXY(200000, 450000) << QgsPointXY(200080, 450000)
+       << QgsPointXY(200080, 450080) << QgsPointXY(200000, 450080)
+       << QgsPointXY(200000, 450000);
+  sf.setGeometry(QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring));
+  QVERIFY(sa->addFeature(sf));
+  QVERIFY(sa->commitChanges());
+
+  LayoutService::DrawingOptions opt;
+  QString err;
+  const auto r =
+      LayoutService::buildDrawing(&proj, LayoutService::DrawingKind::SurveyAreaMap, opt, &err);
+  QVERIFY2(r.hasMapContent, qPrintable(r.warningKo));
+  auto* ly = dynamic_cast<QgsPrintLayout*>(
+      proj.layoutManager()->layoutByName(QStringLiteral("survey_area_map")));
+  QVERIFY(ly);
+
+  // 도곽: 지브라 프레임 + 십자 눈금 + 정수 좌표 주기 하나만.
+  QList<QgsLayoutItemMap*> maps;
+  ly->layoutItems(maps);
+  QVERIFY(!maps.isEmpty());
+  QgsLayoutItemMap* map = maps.first();
+  QVERIFY(map->grids());
+  const QList<QgsLayoutItemMapGrid*> grids = map->grids()->asList();
+  QCOMPARE(grids.size(), 1);
+  QgsLayoutItemMapGrid* g = grids.first();
+  QVERIFY(g->enabled());
+  QCOMPARE(g->frameStyle(), Qgis::MapGridFrameStyle::Zebra);
+  QCOMPARE(g->style(), Qgis::MapGridStyle::LineCrosses);
+  QVERIFY(g->annotationEnabled());
+  QCOMPARE(g->annotationPrecision(), 0);
+  QVERIFY(g->intervalX() > 0.0);
+
+  // 표제란: 축척·좌표계가 든 정보 상자.
+  QList<QgsLayoutItemLabel*> labels;
+  ly->layoutItems(labels);
+  QgsLayoutItemLabel* block = nullptr;
+  for (QgsLayoutItemLabel* l : labels) {
+    if (l && l->id() == QStringLiteral("title_block")) block = l;
+  }
+  QVERIFY2(block, "title_block 표제란이 있어야 한다");
+  QVERIFY(block->text().contains(QStringLiteral("축  척")));
+  QVERIFY(block->text().contains(QStringLiteral("EPSG:5186")));
+  QVERIFY(block->frameEnabled());
+
+  // 교호식(Double Box) 축척자.
+  QList<QgsLayoutItemScaleBar*> bars;
+  ly->layoutItems(bars);
+  QVERIFY(!bars.isEmpty());
+  QCOMPARE(bars.first()->style(), QStringLiteral("Double Box"));
+
+  // 실제 렌더가 죽지 않는지 + 육안 점검용 미리보기 저장.
+  const QImage img =
+      LayoutService::renderPreview(&proj, QStringLiteral("survey_area_map"), QSize(1400, 990), &err);
+  QVERIFY2(!img.isNull(), qPrintable(err));
+  img.save(QDir::temp().filePath(QStringLiteral("ka-hgis-layout-pro.png")));
 }
 
 #include "test_workflow.moc"

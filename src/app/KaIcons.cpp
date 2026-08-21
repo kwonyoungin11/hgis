@@ -7,7 +7,7 @@
 
 namespace {
 
-const QColor kInk(0x1E, 0x29, 0x3B);
+const QColor kInk(0x2A, 0x31, 0x38);
 thread_local QColor tInk = kInk;
 
 QPixmap base(int s = 64) {
@@ -363,6 +363,84 @@ void dNorth(QPainter& p) {
   p.drawText(QRectF(18, 40, 28, 16), Qt::AlignCenter, QStringLiteral("N"));
 }
 
+void dDem(QPainter& p) {
+  prep(p, 2.4);
+  p.drawLine(QPointF(12, 46), QPointF(22, 28));
+  p.drawLine(QPointF(22, 28), QPointF(34, 38));
+  p.drawLine(QPointF(34, 38), QPointF(52, 14));
+  p.drawLine(QPointF(12, 50), QPointF(52, 50));
+}
+
+void dMapGrid(QPainter& p) {
+  prep(p, 2.2);
+  for (int i = 0; i < 4; ++i) {
+    const qreal x = 16 + i * 10;
+    p.drawLine(QPointF(x, 14), QPointF(x, 50));
+    p.drawLine(QPointF(14, x + 2), QPointF(50, x + 2));
+  }
+}
+
+void dTrenchGrid(QPainter& p) {
+  prep(p, 2.4);
+  p.drawRect(QRectF(14, 16, 14, 32));
+  p.drawRect(QRectF(36, 16, 14, 32));
+}
+
+// 토양 단면: 지표 풀 + 층위 2단 + 아래층 자갈.
+void dSoil(QPainter& p) {
+  prep(p, 2.4);
+  p.drawRoundedRect(QRectF(14, 16, 36, 34), 3, 3);
+  p.drawLine(QPointF(23, 16), QPointF(23, 9));
+  p.drawLine(QPointF(32, 16), QPointF(32, 8));
+  p.drawLine(QPointF(41, 16), QPointF(41, 9));
+  p.drawLine(QPointF(14, 28), QPointF(50, 28));
+  p.drawLine(QPointF(14, 39), QPointF(50, 39));
+  p.drawEllipse(QPointF(23, 44.5), 1.6, 1.6);
+  p.drawEllipse(QPointF(32, 44.5), 1.6, 1.6);
+  p.drawEllipse(QPointF(41, 44.5), 1.6, 1.6);
+}
+
+void dGeology(QPainter& p) {
+  // 기울어진 지층 단면 + 단층선: 지질도.
+  prep(p, 2.4);
+  p.drawRoundedRect(QRectF(12, 14, 40, 36), 3, 3);
+  p.drawLine(QPointF(12, 26), QPointF(34, 22));
+  p.drawLine(QPointF(34, 22), QPointF(52, 26));
+  p.drawLine(QPointF(12, 36), QPointF(34, 31));
+  p.drawLine(QPointF(34, 31), QPointF(52, 36));
+  p.drawLine(QPointF(12, 45), QPointF(34, 41));
+  p.drawLine(QPointF(34, 41), QPointF(52, 45));
+  p.drawLine(QPointF(36, 14), QPointF(30, 50));
+}
+
+void dRiver(QPainter& p) {
+  // 굽이치는 본류 + 합류하는 지류: 수계도.
+  prep(p, 2.6);
+  QPainterPath main;
+  main.moveTo(20, 8);
+  main.cubicTo(30, 18, 12, 28, 24, 38);
+  main.cubicTo(34, 46, 30, 52, 34, 56);
+  p.drawPath(main);
+  QPainterPath trib;
+  trib.moveTo(50, 14);
+  trib.cubicTo(44, 24, 48, 30, 38, 36);
+  trib.cubicTo(30, 41, 28, 44, 30, 48);
+  p.drawPath(trib);
+}
+
+void dMeasureTape(QPainter& p) {
+  prep(p, 2.6);
+  p.drawRoundedRect(QRectF(12, 22, 40, 16), 3, 3);
+  p.drawLine(QPointF(18, 22), QPointF(18, 30));
+  p.drawLine(QPointF(26, 22), QPointF(26, 28));
+  p.drawLine(QPointF(34, 22), QPointF(34, 30));
+  p.drawLine(QPointF(42, 22), QPointF(42, 28));
+  p.drawLine(QPointF(48, 22), QPointF(48, 30));
+  p.drawLine(QPointF(16, 42), QPointF(48, 42));
+  p.drawLine(QPointF(16, 42), QPointF(22, 48));
+  p.drawLine(QPointF(16, 42), QPointF(22, 36));
+}
+
 void dScaleBar(QPainter& p) {
   prep(p, 2.4);
   p.drawRect(QRectF(12, 26, 40, 12));
@@ -516,6 +594,13 @@ QIcon icon(const QString& id) {
   else if (id == QLatin1String("buffer")) ic = bake(dBuffer);
   else if (id == QLatin1String("artifact")) ic = bake(dArtifact);
   else if (id == QLatin1String("select") || id == QLatin1String("arrow")) ic = bake(dSelect);
+  else if (id == QLatin1String("measure") || id == QLatin1String("tape")) ic = bake(dMeasureTape);
+  else if (id == QLatin1String("dem") || id == QLatin1String("hillshade")) ic = bake(dDem);
+  else if (id == QLatin1String("trench_grid") || id == QLatin1String("trench")) ic = bake(dTrenchGrid);
+  else if (id == QLatin1String("soil")) ic = bake(dSoil);
+  else if (id == QLatin1String("geology")) ic = bake(dGeology);
+  else if (id == QLatin1String("river") || id == QLatin1String("hydro")) ic = bake(dRiver);
+  else if (id == QLatin1String("map_grid") || id == QLatin1String("graticule")) ic = bake(dMapGrid);
   else if (id == QLatin1String("layout_map_frame")) ic = bake(dLayoutFrame);
   else if (id == QLatin1String("layout_select")) ic = bake(dLayoutSelect);
   else if (id == QLatin1String("layout_pan")) ic = bake(dLayoutPan);

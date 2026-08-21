@@ -1,4 +1,4 @@
-﻿#include "KaCaptureMapTool.h"
+#include "KaCaptureMapTool.h"
 #include <qgsmapcanvas.h>
 #include <qgsvectorlayer.h>
 #include <qgsrubberband.h>
@@ -80,7 +80,7 @@ void KaCaptureMapTool::updateSnapMarker(const QgsPointXY& mapPt, bool snapped) {
     m_snapMark->setIconType(QgsVertexMarker::ICON_CIRCLE);
     m_snapMark->setIconSize(14);
     m_snapMark->setPenWidth(2);
-    m_snapMark->setColor(QColor(15, 118, 110));
+    m_snapMark->setColor(QColor(30, 103, 198));
     m_snapMark->setFillColor(QColor(255, 255, 255, 220));
   }
   m_snapMark->setCenter(mapPt);
@@ -139,8 +139,8 @@ void KaCaptureMapTool::rebuildRubber(const QgsPointXY* cursorOrNull) {
     m_rubber = new QgsRubberBand(c, gt);
     m_rubber->setWidth(3);
     m_rubber->setSecondaryStrokeColor(QColor(255, 255, 255, 200));
-    m_rubber->setColor(QColor(15, 118, 110));
-    m_rubber->setFillColor(QColor(15, 118, 110, 80));
+    m_rubber->setColor(QColor(30, 103, 198));
+    m_rubber->setFillColor(QColor(30, 103, 198, 80));
   }
 
   Qgis::GeometryType gt = Qgis::GeometryType::Line;

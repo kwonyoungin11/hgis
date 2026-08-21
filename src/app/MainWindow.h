@@ -3,23 +3,35 @@
 #include <QJsonObject>
 #include <QPair>
 #include <QVector>
+#include <QHash>
+#include <QSet>
+#include <vector>
 #include "core/LocationSearch.h"
+#include "core/TrenchGridGenerator.h"
 class QListWidget;
 class QListWidgetItem;
+class QAction;
 class QLabel;
 class QToolBar;
 class QToolButton;
 class QLineEdit;
 class QComboBox;
+class QCheckBox;
+class QDoubleSpinBox;
 class QEvent;
+class QCloseEvent;
 class QTabWidget;
 class ChecklistEngine;
+class KaStatusBar;
 #if KA_HGIS_HAS_QGIS
 class QgsMapCanvas;
 class QgsLayerTreeView;
 class QgsMapLayer;
 class QgsVectorLayer;
+class QgsRasterLayer;
 class QgsMapTool;
+class QgsMapToolEmitPoint;
+class QgsPointXY;
 class KaCaptureMapTool;
 class KaAttributeMapTool;
 class KaAlignMapTool;
@@ -29,6 +41,7 @@ class KaAlignLinkOverlay;
 class KaDrawingStudio;
 class KaStartPage;
 class KaCoordPointMapTool;
+class KaMeasureMapTool;
 class QSplitter;
 class QListWidget;
 class QTimer;
@@ -38,6 +51,7 @@ class QgsMapToolSelect;
 class QgsGeometry;
 class QgsFeature;
 class QgsLayerTreeMapCanvasBridge;
+class QgsMessageBar;
 #endif
 
 class MainWindow : public QMainWindow {
@@ -46,6 +60,7 @@ public:
   explicit MainWindow(QWidget* parent = nullptr);
   ~MainWindow() override;
   bool eventFilter(QObject* watched, QEvent* event) override;
+  void closeEvent(QCloseEvent* event) override;
   bool openSurveyGpkg(const QString& gpkgPath);
   int domainLayerCount() const;
   QString workCrsAuthId() const { return m_workCrs; }
@@ -56,6 +71,10 @@ public:
 private slots:
   void newSurvey();
   void openVectorLayer();
+  void importSoilShapefile();
+  void downloadSoilTerrain();
+  void downloadGeologyMap();
+  void downloadRiverMap();
   void saveProject();
   void openProject();
   void startEditSurveyArea();
@@ -87,6 +106,21 @@ private slots:
   void convertSelected5187To5179();
   void convertShpFileTo5179();
   void startSelectTool();
+  void startMeasureTool();
+  void runDemHillshade();
+  void startTrenchGrid();
+  void placeTrenchGridAt(const QgsPointXY& origin);
+  // Replaces the previous grid (clearLayer) and reports the excavation ratio
+  // against the survey area when known. areaM2 <= 0 skips the ratio line.
+  bool applyTrenchCells(const std::vector<TrenchGridGenerator::Cell>& cells, double areaM2);
+  // 속성 창의 「적용」: 자동 채움이면 구역 재배치, 아니면 기존 격자 중심을
+  // 유지한 채 회전·간격만 바꿔 재배치. 격자가 없으면 원점 클릭으로 넘어간다.
+  void applyTrenchFromDialog();
+  void beginTrenchOriginPick();
+  void startTrenchGridMove();   // 전체 이동 모드
+  void startTrenchGridEdit();   // 개별 편집 모드(그래픽식 선택·이동·삭제)
+  void activateTrenchTool(bool single);
+  void toggleMapGrid();
   void addBasemapVworld();
   void addBasemapVworldSat();
   void addBasemapVworldCadastral();
@@ -177,11 +211,17 @@ private:
   static QString attributeFieldLabelKo(const QString& fieldName);
 #endif
 
+  // Non-blocking feedback on the canvas. Reserve QMessageBox for questions and
+  // for failures the user must acknowledge before anything else happens.
+  enum class Notice { Info, Success, Warning, Critical };
+  void notify(Notice level, const QString& title, const QString& text,
+              const QString& details = QString());
+
   void refreshLayerEmptyState();
   QLabel* m_layerEmpty = nullptr;
   QLabel* m_help = nullptr;
-  QLabel* m_xyReadout = nullptr;
   QLabel* m_checkView = nullptr;
+  KaStatusBar* m_status = nullptr;
   QLabel* m_workHint = nullptr;
   QListWidget* m_workList = nullptr;
   QLineEdit* m_searchEdit = nullptr;
@@ -191,6 +231,12 @@ private:
   LocationSearch* m_locator = nullptr;
   QString m_surveyPath;
   QString m_workCrs = QStringLiteral("EPSG:5187");
+#if KA_HGIS_HAS_QGIS
+  void healTileLayer(QgsRasterLayer* layer);
+#endif
+  // 타일 자동 복구 상태: 레이어별 재시도 횟수(화면 이동 시 초기화)와 예약 중 표시.
+  QHash<QString, int> m_tileHealCount;
+  QSet<QString> m_tileHealPending;
   int m_stubSurveyArea = 0;
   int m_stubFeatures = 0;
   int m_stubGcp = 0;
@@ -202,6 +248,19 @@ private:
   QgsLayerTreeView* m_layerTree = nullptr;
   KaCaptureMapTool* m_captureTool = nullptr;
   KaCoordPointMapTool* m_coordPointTool = nullptr;
+  KaMeasureMapTool* m_measureTool = nullptr;
+  QAction* m_actMeasure = nullptr;
+  QAction* m_actSelect = nullptr;
+  QToolButton* m_btnDraw = nullptr;
+  QgsMapToolEmitPoint* m_trenchOriginTool = nullptr;
+  class KaTrenchMoveTool* m_trenchMoveTool = nullptr;
+  class KaTrenchDialog* m_trenchDlg = nullptr;
+  class KaCanvasGridOverlay* m_mapGrid = nullptr;
+  QCheckBox* m_mapGridCheck = nullptr;
+  QDoubleSpinBox* m_mapGridStep = nullptr;
+  QDoubleSpinBox* m_mapGridRot = nullptr;
+  QDoubleSpinBox* m_mapGridWidth = nullptr;
+  QComboBox* m_mapGridDash = nullptr;
   KaAttributeMapTool* m_attributeTool = nullptr;
   KaAlignMapTool* m_alignTool = nullptr;
   KaAlignPickTool* m_alignPickTool = nullptr;
@@ -225,6 +284,7 @@ private:
   QgsMapToolSelect* m_selectTool = nullptr;
   QgsVectorLayer* m_editLayer = nullptr;
   QgsLayerTreeMapCanvasBridge* m_bridge = nullptr;
+  QgsMessageBar* m_messageBar = nullptr;
   QLineEdit* m_scaleEdit = nullptr;
   QComboBox* m_scaleCombo = nullptr;
   bool m_scaleUiGuard = false;

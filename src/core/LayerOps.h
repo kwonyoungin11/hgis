@@ -75,6 +75,15 @@ public:
 
   static bool addVworldContourMap(QgsProject* project, QgsMapCanvas* canvas, const QString& apiKey, QString* errorOut = nullptr);
 
+  // 흙토람(농진청) 토양도 신청으로 내려받은 SHP를 참조 지도로 불러온다.
+  // crsOverrideAuthId가 비어 있지 않으면 레이어 좌표계를 그 값으로 지정한다
+  // (.prj 없는 배포본 대응 — 흙토람 고시 좌표계는 EPSG:2097 중부원점/Bessel).
+  // categoryField가 있으면 그 필드 값별 반투명 색으로 구분한다(분포지형 등).
+  // 성공 시 프로젝트에 추가된 레이어를 반환한다.
+  static QgsVectorLayer* addSoilShapefile(QgsProject* project, QgsMapCanvas* canvas,
+                                          const QString& path, const QString& crsOverrideAuthId,
+                                          const QString& categoryField, QString* errorOut = nullptr);
+
   static bool setLayerOpacity(QgsProject* project, QgsMapCanvas* canvas, const QString& name, double opacity);
 
   static bool toggleLayerVisibility(QgsProject* project, QgsMapCanvas* canvas, const QString& name, bool visible);

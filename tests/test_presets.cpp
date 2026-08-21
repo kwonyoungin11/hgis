@@ -22,7 +22,7 @@ private slots:
 };
 
 void TestPresets::loadsJson() {
-  const QString path = QStringLiteral("D:/qgis/data/styles/feature_presets.json");
+  const QString path = QStringLiteral("data/styles/feature_presets.json");
   QVERIFY2(QFile::exists(path), qPrintable(path));
   QVERIFY(FeaturePresets::instance().load(path));
   QVERIFY(FeaturePresets::instance().kinds().size() >= 6);

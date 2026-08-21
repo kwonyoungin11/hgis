@@ -65,12 +65,12 @@ void KaAlignLinkOverlay::drawNumber(QPainter& p, const QPoint& at, int n, const 
 void KaAlignLinkOverlay::paintEvent(QPaintEvent*) {
   QPainter p(this);
   p.setRenderHint(QPainter::Antialiasing);
-  p.setPen(QPen(QColor(15, 118, 110, 240), 2.4));
-  p.setBrush(QColor(15, 118, 110, 240));
+  p.setPen(QPen(QColor(30, 103, 198, 240), 2.4));
+  p.setBrush(QColor(30, 103, 198, 240));
   for (int i = 0; i < m_done.size(); ++i) {
     drawArrow(p, m_done[i]);
-    drawNumber(p, m_done[i].p1(), i + 1, QColor(15, 118, 110));
-    drawNumber(p, m_done[i].p2(), i + 1, QColor(15, 118, 110));
+    drawNumber(p, m_done[i].p1(), i + 1, QColor(30, 103, 198));
+    drawNumber(p, m_done[i].p2(), i + 1, QColor(30, 103, 198));
   }
   if (m_hasLive) {
     QPen live(QColor(234, 88, 12, 240), 2.6, Qt::DashLine);

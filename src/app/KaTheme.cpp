@@ -19,24 +19,25 @@
 namespace KaTheme {
 namespace {
 
+// Anthropic-inspired palette: warm ivory paper, warm ink, terracotta accent.
 const Tokens kTokens = {
-    QColor(0xE7, 0xF5, 0xF2),  // sky0 pale teal
-    QColor(0x0F, 0x76, 0x6E),  // sky1 primary teal
-    QColor(0x11, 0x5E, 0x59),  // sky2
-    QColor(0x13, 0x4E, 0x4A),  // sky3
-    QColor(0xF6, 0xF1, 0xE8),  // sky4 cream
-    QColor(0x0F, 0x76, 0x6E),  // sky5
-    QColor(0x1C, 0x19, 0x17),  // sky6 ink
-    QColor(0x1C, 0x19, 0x17),  // ink
-    QColor(0x78, 0x71, 0x6C),  // inkMuted
-    QColor(0xA8, 0xA2, 0x9E),  // inkDisabled
-    QColor(0xE4, 0xDC, 0xCE),  // border
+    QColor(0xE8, 0xF0, 0xFA),  // sky0 pale blue wash
+    QColor(0x1E, 0x67, 0xC6),  // sky1 primary deep blue
+    QColor(0x17, 0x5A, 0xB0),  // sky2 hover
+    QColor(0x12, 0x4B, 0x94),  // sky3 deep
+    QColor(0xF2, 0xF3, 0xF5),  // sky4 cool light gray
+    QColor(0x1E, 0x67, 0xC6),  // sky5 highlight
+    QColor(0x1F, 0x23, 0x28),  // sky6 ink
+    QColor(0x1F, 0x23, 0x28),  // ink
+    QColor(0x6E, 0x75, 0x7D),  // inkMuted
+    QColor(0xA5, 0xAB, 0xB3),  // inkDisabled
+    QColor(0xD5, 0xD9, 0xDE),  // border
     QColor(0xFF, 0xFF, 0xFF),  // bevelLight
-    QColor(0xD6, 0xCB, 0xB8),  // bevelDark
+    QColor(0xC3, 0xC8, 0xCF),  // bevelDark
     QColor(0xFF, 0xFF, 0xFF),  // canvasNeutral
-    QColor(0xF6, 0xF1, 0xE8),  // desk
-    QColor(0xB4, 0x53, 0x09),  // danger
-    QColor(0x0F, 0x76, 0x6E),  // ok
+    QColor(0xF2, 0xF3, 0xF5),  // desk
+    QColor(0xC0, 0x3A, 0x2B),  // danger
+    QColor(0x2E, 0x7D, 0x4F),  // ok
 };
 
 class ChromeStyle : public QProxyStyle {
@@ -67,14 +68,14 @@ public:
       const bool part = opt->state.testFlag(State_NoChange);
       const bool dis = !opt->state.testFlag(State_Enabled);
       const bool hover = opt->state.testFlag(State_MouseOver);
-      const QColor fill(0xC5, 0xE6, 0xE1);
-      const QColor edge(hover ? QColor(0x5B, 0xA8, 0xA2) : QColor(0x8F, 0xC4, 0xBE));
-      const QColor tickInk(0x0F, 0x76, 0x6E);
-      const QColor stone(hover ? QColor(0x8F, 0xC4, 0xBE) : QColor(0xC4, 0xB8, 0xA8));
-      p->setPen(QPen(dis ? QColor(0xD6, 0xCB, 0xB8)
+      const QColor fill(0x1E, 0x67, 0xC6);
+      const QColor edge(hover ? QColor(0x12, 0x4B, 0x94) : QColor(0x17, 0x5A, 0xB0));
+      const QColor tickInk(0xFF, 0xFF, 0xFF);
+      const QColor stone(hover ? QColor(0x17, 0x5A, 0xB0) : QColor(0xB9, 0xBF, 0xC7));
+      p->setPen(QPen(dis ? QColor(0xC3, 0xC8, 0xCF)
                          : ((on || part) ? edge : stone),
                      1.1));
-      p->setBrush(dis ? QColor(0xF6, 0xF1, 0xE8)
+      p->setBrush(dis ? QColor(0xF2, 0xF3, 0xF5)
                       : ((on || part) ? fill : QColor(255, 255, 255)));
       p->drawRoundedRect(r, 3.5, 3.5);
       if (on) {
@@ -115,8 +116,8 @@ public:
       }
       path.closeSubpath();
       p->setPen(Qt::NoPen);
-      p->setBrush(opt->state.testFlag(State_Enabled) ? QColor(0x1E, 0x29, 0x3B)
-                                                     : QColor(0x94, 0xA3, 0xB8));
+      p->setBrush(opt->state.testFlag(State_Enabled) ? QColor(0x2A, 0x31, 0x38)
+                                                     : QColor(0xA5, 0xAB, 0xB3));
       p->drawPath(path);
       p->restore();
       return;
@@ -137,7 +138,7 @@ void setGroup(QPalette& pal, QPalette::ColorGroup g, const Tokens& t, bool disab
   pal.setColor(g, QPalette::BrightText, text);
   pal.setColor(g, QPalette::Highlight, disabled ? t.sky3 : t.sky5);
   pal.setColor(g, QPalette::HighlightedText, disabled ? t.ink : Qt::white);
-  pal.setColor(g, QPalette::PlaceholderText, disabled ? QColor(0x94, 0xA3, 0xB8) : t.inkDisabled);
+  pal.setColor(g, QPalette::PlaceholderText, disabled ? QColor(0xA5, 0xAB, 0xB3) : t.inkDisabled);
   pal.setColor(g, QPalette::ToolTipBase, t.sky0);
   pal.setColor(g, QPalette::ToolTipText, text);
   pal.setColor(g, QPalette::Light, disabled ? t.sky0 : t.bevelLight);

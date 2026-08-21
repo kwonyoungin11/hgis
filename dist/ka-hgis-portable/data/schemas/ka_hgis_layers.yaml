@@ -17,3 +17,9 @@ layers:
   - id: control_points
     geometry: Point
     name_ko: 기준점
+  - id: artifact_point
+    geometry: Point
+    name_ko: 유물
+  - id: trial_trench
+    geometry: Polygon
+    name_ko: 시굴격자

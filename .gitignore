@@ -61,8 +61,7 @@ symbology-style.db
 *.ipdb
 *.iobj
 
-# Track portable package under dist/ (including ka-hgis.exe for other PCs)
-# Still requires OSGeo4W on the target machine — DLLs are not vendored.
+# Portable folder: keep launchers/docs; do not commit OSGeo/Qt/QGIS DLLs.
 !dist/
 !dist/**/
 !dist/**/*.exe
@@ -74,6 +73,10 @@ symbology-style.db
 !dist/**/*.md
 dist/**/*.pdb
 dist/**/*.ilk
+dist/**/*.dll
+dist/ka-hgis-portable/apps/
+dist/ka-hgis-portable/bin/
+dist/ka-hgis-portable/share/
 
 # Python / misc
 __pycache__/

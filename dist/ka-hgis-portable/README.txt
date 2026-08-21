@@ -1,14 +1,15 @@
-﻿ka-hgis portable (DLLs not vendored)
+﻿ka-hgis portable (no OSGeo4W install on the target PC)
 
-REQUIREMENTS on this PC:
-  - OSGeo4W with qgis-dev (recommended root: C:\OSGeo4W)
-  - Also accepts OSGEO4W_ROOT env, then D:\OSGeo4W
+Copy this whole folder to another Windows 10/11 x64 PC (USB or share).
+No C:\OSGeo4W and no Visual Studio required.
 
-RUN:
-  run.bat
-  or: powershell -File .\run-ka-hgis.ps1
+Run:
+  start.bat
+  or ka-hgis.exe
+  or run.bat
 
-Launcher uses ka-hgis.exe in THIS folder first, then sets PATH via dev-env.ps1.
+VWorld ?꾩꽦/吏?곸? ?꾩?留먯뿉??API ?ㅻ? 洹?PC????踰??ｌ뒿?덈떎. ?ㅻ뒗 ???대뜑???ｌ? 留덉꽭??
 
-Full second-PC guide (clone + build): see repo docs/other-pc-setup.md
-  https://github.com/kwonyoungin11/hgis
+二쇱쓽:
+  - ?대뜑 ?덉쓽 apps, bin, share 瑜?吏?곕㈃ ?ㅽ뻾?섏? ?딆뒿?덈떎.
+  - GPLv2+ (QGIS ?쇱씠釉뚮윭由?留곹겕). 怨듭?: ???뺣낫 李?

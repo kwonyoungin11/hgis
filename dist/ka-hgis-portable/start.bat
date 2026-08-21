@@ -1,0 +1,11 @@
+@echo off
+cd /d "%~dp0"
+set "OSGEO4W_ROOT=%~dp0"
+set "QGIS_PREFIX_PATH=%~dp0apps\qgis-dev"
+set "PATH=%~dp0;%~dp0bin;%~dp0apps\qgis-dev\bin;%~dp0apps\Qt6\bin;%~dp0apps\gdal-dev\bin;%~dp0apps\pdal-dev\bin;%PATH%"
+set "QT_PLUGIN_PATH=%~dp0apps\Qt6\plugins"
+set "QGIS_PLUGIN_PATH=%~dp0apps\qgis-dev\plugins"
+set "GDAL_DATA=%~dp0apps\gdal-dev\share\gdal"
+set "PROJ_DATA=%~dp0share\proj"
+set "PROJ_LIB=%~dp0share\proj"
+start "" "%~dp0ka-hgis.exe"

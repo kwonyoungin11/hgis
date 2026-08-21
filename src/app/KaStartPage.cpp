@@ -18,22 +18,22 @@ KaStartPage::KaStartPage(QWidget* parent) : QWidget(parent) {
   setObjectName(QStringLiteral("startPage"));
   auto* root = new QHBoxLayout(this);
   root->setContentsMargins(0, 0, 0, 0);
-  root->setSpacing(0);
+  root->setSpacing(12);
 
   auto* rail = new QWidget(this);
   rail->setObjectName(QStringLiteral("startRail"));
   rail->setFixedWidth(168);
-  rail->setStyleSheet(QStringLiteral("QWidget#startRail { background:#134E4A; }"));
+  rail->setStyleSheet(QStringLiteral("QWidget#startRail { background:#232830; }"));
   auto* railLay = new QVBoxLayout(rail);
   railLay->setContentsMargins(16, 20, 16, 20);
   railLay->setSpacing(10);
   auto* homeLab = new QLabel(QStringLiteral("홈"), rail);
   homeLab->setObjectName(QStringLiteral("startRailHome"));
-  homeLab->setStyleSheet(QStringLiteral("font-weight:800;font-size:16px;color:#F6F1E8;"));
+  homeLab->setStyleSheet(QStringLiteral("font-weight:800;font-size:16px;color:#EFF2F5;"));
   railLay->addWidget(homeLab);
   auto* railHint = new QLabel(QStringLiteral("최근 조사를\n여기서 다시 엽니다."), rail);
   railHint->setWordWrap(true);
-  railHint->setStyleSheet(QStringLiteral("color:#E7F5F2;font-size:12px;"));
+  railHint->setStyleSheet(QStringLiteral("color:#A9B1BA;font-size:12px;"));
   railLay->addWidget(railHint);
   railLay->addStretch(1);
   root->addWidget(rail);

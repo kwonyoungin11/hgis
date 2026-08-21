@@ -126,7 +126,6 @@ private:
   void syncScaleChips();
   void applyCrsGrid(QgsLayoutItemMap* map);
   void clearGridCoordinateLabels();
-  void placeGridCoordinateLabels(QgsLayoutItemMap* map);
   void autoPlaceDefaultSheet();
   QRectF defaultMapRect() const;
   void updatePageOutline();
@@ -149,9 +148,10 @@ private:
   KaLayoutCoordPointTool* m_toolCoordPoint = nullptr;
   QgsLayerTreeView* m_layerTree = nullptr;
   QgsLayerTreeModel* m_layerModel = nullptr;
-  bool m_gridEnabled = false;
-  bool m_gridShowNums = false;
-  double m_gridIntervalM = 20.0;
+  // 전문 도곽(지브라 프레임+좌표 주기)이 기본. 간격 0 = 축척에 맞춰 자동(1-2-5 계열).
+  bool m_gridEnabled = true;
+  bool m_gridShowNums = true;
+  double m_gridIntervalM = 0.0;
   QLabel* m_status = nullptr;
   QFrame* m_adjustBar = nullptr;
   QFrame* m_scaleBar = nullptr;

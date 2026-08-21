@@ -8,6 +8,7 @@
 #include <qgsfeatureid.h>
 #include <qgsrectangle.h>
 class QgsProject;
+class QgsLayoutItemMap;
 
 class LayoutService {
 public:
@@ -82,7 +83,8 @@ public:
   static QgsRectangle extentForPaperScale(const QgsRectangle& currentExtent,
                                           double mapWidthMm, double scaleDenominator);
 
-  // 지도 칸 아래 흰 여백(축척자·축척글자·좌표계·방위). 지도 픽셀 위에 겹치지 않는다.
+  // 지도 칸 아래 고정 띠: 왼쪽 축척자, 그 아래 축척 1:N, 오른쪽 CRS, 맨 오른쪽 방위.
+  // 위성/지적 픽셀 위에 올리지 않는다. 도면만들기마다 이 기하를 다시 앉힌다.
   struct SheetChromeRects {
     QRectF map;
     QRectF scaleBar;
@@ -98,6 +100,16 @@ public:
   static double niceScaleBarSegmentMeters(double mapWidthMm, double scaleDenominator,
                                           int segments = 4);
   static double scaleBarWidthMm(double segmentMeters, int segments, double scaleDenominator);
+
+  // 전문 측량도면 도곽: 지브라(흑백 교차) 프레임 + 정수 TM 좌표 주기(상하 수평,
+  // 좌우 세로쓰기) + 내부 십자 눈금. 기존 격자는 지우고 하나로 다시 만든다.
+  // crosses=false면 내부 눈금 없이 도곽·주기만 그린다(위치도처럼 배경이 촘촘할 때).
+  static void applySurveyFrameGrid(QgsLayoutItemMap* map, double intervalM, bool crosses,
+                                   bool showCoords);
+  // 도곽 격자 간격(m): 종이에서 한 칸이 25~70mm가 되는 1-2-5 계열 값.
+  static double niceGridIntervalMeters(double scaleDenominator, double mapWidthMm);
+  // 좌표계 한글 원점명(중부원점(GRS80) 등). 표제란·도면 라벨 공용.
+  static QString koreanCrsName(const QString& authId);
 
   static DrawingKind kindFromLayoutId(const QString& layoutId);
   static QString layoutId(DrawingKind kind);

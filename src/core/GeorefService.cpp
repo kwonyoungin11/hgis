@@ -424,7 +424,8 @@ bool isDomainSurveyLayer(const QgsMapLayer* layer) {
   const QString key = LayerOps::layerKeyOf(layer);
   return key == QLatin1String("survey_area") || key == QLatin1String("feature_poly")
          || key == QLatin1String("feature_line") || key == QLatin1String("section_line")
-         || key == QLatin1String("control_points") || key == QLatin1String("artifact_point");
+         || key == QLatin1String("control_points") || key == QLatin1String("artifact_point")
+         || key == QLatin1String("trial_trench");
 }
 
 bool isAlignableLayer(const QgsMapLayer* layer) {

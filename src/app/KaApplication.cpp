@@ -1,7 +1,9 @@
-﻿#include "KaApplication.h"
+#include "KaApplication.h"
+#include "KaCrashGuard.h"
 #include "KaTheme.h"
 #include "KaIcons.h"
 #include "MainWindow.h"
+#include <QElapsedTimer>
 #include <QApplication>
 #include <QPalette>
 #include <QColor>
@@ -30,6 +32,16 @@
 #include <QPen>
 #include <functional>
 #include <cstdlib>
+#include <QFileInfo>
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 #include "core/VworldSettings.h"
 #include "core/LayerOps.h"
 #include "core/SurveyProjectFactory.h"
@@ -40,16 +52,148 @@
 #include <qgsapplication.h>
 #include <qgsproviderregistry.h>
 #include <qgsnetworkaccessmanager.h>
+#include <qgssettings.h>
 #include <qgslayertreeview.h>
 #include <qgsmapcanvas.h>
+#include <qgsmessagelog.h>
 #include <qgsproject.h>
 #include <qgsmaplayer.h>
 #include <QNetworkRequest>
 #endif
 
+#ifdef Q_OS_WIN
+#include <tlhelp32.h>
+
+// 이미 같은 앱이 떠 있으면 그 창을 앞으로 가져온다(중복 실행 방지).
+// 느린 부팅 중 아이콘을 다시 누르거나 두 번 실행하면 같은 조사 GPKG를
+// 두 프로세스가 잡아 잠금 충돌·중복 다운로드가 나던 문제의 근본 대책.
+static bool kaActivateExistingInstance() {
+  CreateMutexW(nullptr, TRUE, L"Local\\ka-hgis-single-instance");
+  if (GetLastError() != ERROR_ALREADY_EXISTS)
+    return false;  // 첫 인스턴스 — 계속 부팅
+
+  // 다른 ka-hgis.exe 프로세스들의 PID를 모은다.
+  DWORD pids[64] = {};
+  int pidCount = 0;
+  const DWORD self = GetCurrentProcessId();
+  HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+  if (snap != INVALID_HANDLE_VALUE) {
+    PROCESSENTRY32W pe = {};
+    pe.dwSize = sizeof(pe);
+    if (Process32FirstW(snap, &pe)) {
+      do {
+        if (pe.th32ProcessID != self && _wcsicmp(pe.szExeFile, L"ka-hgis.exe") == 0 &&
+            pidCount < 64)
+          pids[pidCount++] = pe.th32ProcessID;
+      } while (Process32NextW(snap, &pe));
+    }
+    CloseHandle(snap);
+  }
+  if (pidCount == 0) return true;  // 뮤텍스만 남은 상태 — 그래도 중복 부팅은 막는다
+
+  struct Ctx {
+    const DWORD* pids;
+    int count;
+    HWND found;
+  } ctx{pids, pidCount, nullptr};
+  EnumWindows(
+      [](HWND h, LPARAM lp) -> BOOL {
+        auto* c = reinterpret_cast<Ctx*>(lp);
+        if (!IsWindowVisible(h)) return TRUE;
+        DWORD wpid = 0;
+        GetWindowThreadProcessId(h, &wpid);
+        for (int i = 0; i < c->count; ++i) {
+          if (c->pids[i] == wpid && GetWindowTextLengthW(h) > 0) {
+            c->found = h;
+            return FALSE;
+          }
+        }
+        return TRUE;
+      },
+      reinterpret_cast<LPARAM>(&ctx));
+  if (ctx.found) {
+    ShowWindow(ctx.found, SW_RESTORE);
+    SetForegroundWindow(ctx.found);
+  }
+  return true;
+}
+#endif
+
+// QCoreApplication 생성 전에도 exe 폴더를 알아야 해서 Win32로 직접 구한다.
+static QString kaExeDir() {
+#ifdef Q_OS_WIN
+  wchar_t buf[4096];
+  const DWORD n = GetModuleFileNameW(nullptr, buf, 4096);
+  if (n > 0 && n < 4096)
+    return QFileInfo(QString::fromWCharArray(buf, int(n))).absolutePath();
+#endif
+  if (QCoreApplication::instance())
+    return QCoreApplication::applicationDirPath();
+  return {};
+}
+
+static void applyBundledRuntime() {
+  const QDir app(kaExeDir());
+  const QString qgis = app.filePath(QStringLiteral("apps/qgis-dev"));
+  if (!QDir(qgis).exists())
+    return;
+  // Qt6/QGIS는 getenv 문자열을 UTF-8로 QString 변환한다. CP949로 넣으면 한글
+  // 경로에서 prefix가 내부적으로 깨져 srs.db 등을 못 찾는다. UTF-8로 넣는다.
+  qputenv("OSGEO4W_ROOT", app.absolutePath().toUtf8());
+  // 포터블 구조가 감지되면 외부(run.bat 등)가 CP949로 넣은 값 대신 항상 덮어쓴다.
+  qputenv("QGIS_PREFIX_PATH", qgis.toUtf8());
+  // PROJ와 GDAL은 윈도우에서 경로 문자열을 UTF-8로 해석한다. CP949(encodeName)로
+  // 넣으면 한글 폴더(예: "복사본", "바탕 화면")에서 proj.db를 못 찾아 좌표계 전체가
+  // 죽고, 시작 시 위성·지적 자동 올리기가 실패한다. 반드시 UTF-8로 넣는다.
+  const QString proj = app.filePath(QStringLiteral("share/proj"));
+  if (QDir(proj).exists()) {
+    qputenv("PROJ_DATA", proj.toUtf8());
+    qputenv("PROJ_LIB", proj.toUtf8());
+  }
+  const QString gdal = app.filePath(QStringLiteral("apps/gdal-dev/share/gdal"));
+  if (QDir(gdal).exists())
+    qputenv("GDAL_DATA", gdal.toUtf8());
+  const QString qtPlug = app.filePath(QStringLiteral("apps/Qt6/plugins"));
+  if (QDir(qtPlug).exists()) {
+    QCoreApplication::addLibraryPath(qtPlug);
+    if (qgetenv("QT_PLUGIN_PATH").isEmpty())
+      qputenv("QT_PLUGIN_PATH", QFile::encodeName(qtPlug));
+  }
+  const QString qgisPlug = QDir(qgis).filePath(QStringLiteral("qtplugins"));
+  if (QDir(qgisPlug).exists())
+    QCoreApplication::addLibraryPath(qgisPlug);
+  QStringList prepend;
+  const QStringList rels = {
+      QString(),
+      QStringLiteral("bin"),
+      QStringLiteral("apps/qgis-dev/bin"),
+      QStringLiteral("apps/Qt6/bin"),
+      QStringLiteral("apps/gdal-dev/bin"),
+      QStringLiteral("apps/pdal-dev/bin"),
+  };
+  for (const QString& rel : rels) {
+    const QString p = rel.isEmpty() ? app.absolutePath() : app.filePath(rel);
+    if (QDir(p).exists())
+      prepend << QDir::toNativeSeparators(p);
+  }
+  const QString old = QString::fromLocal8Bit(qgetenv("PATH"));
+  qputenv("PATH", (prepend.join(QLatin1Char(';')) + QLatin1Char(';') + old).toLocal8Bit());
+}
+
 QString KaApplication::resolvePrefixPath() {
   if (const char* e = std::getenv("QGIS_PREFIX_PATH")) {
-    return QString::fromLocal8Bit(e);
+    // applyBundledRuntime가 UTF-8로 넣는다(QGIS 내부 해석과 동일). 실패 시 로컬 인코딩 재시도.
+    QString p = QString::fromUtf8(e);
+    if (!QDir(p).exists())
+      p = QString::fromLocal8Bit(e);
+    if (QDir(p).exists())
+      return p;
+  }
+  if (QCoreApplication::instance()) {
+    const QString bundled =
+        QCoreApplication::applicationDirPath() + QStringLiteral("/apps/qgis-dev");
+    if (QDir(bundled).exists())
+      return bundled;
   }
   if (const char* o = std::getenv("OSGEO4W_ROOT")) {
     const QString root = QString::fromLocal8Bit(o);
@@ -298,6 +442,10 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
     all = step(QStringLiteral("toolbar_draw_toggle"), hasText(QStringLiteral("그리기"))) && all;
     all = step(QStringLiteral("toolbar_basemap_toggle"), hasText(QStringLiteral("배경"))) && all;
     all = step(QStringLiteral("toolbar_submit_toggle"), hasText(QStringLiteral("도면만들기"))) && all;
+    all = step(QStringLiteral("toolbar_measure_tape"), hasText(QStringLiteral("줄자"))) && all;
+    all = step(QStringLiteral("toolbar_dem"), hasText(QStringLiteral("지형분석"))) && all;
+    all = step(QStringLiteral("toolbar_trench_grid"), hasText(QStringLiteral("시굴격자"))) && all;
+    all = step(QStringLiteral("map_grid_check"), hasText(QStringLiteral("좌표격자"))) && all;
     all = step(QStringLiteral("toolbar_no_crs_peer"),
                !hasText(QStringLiteral("5186→")) && !hasText(QStringLiteral("5187→")) &&
                    !hasText(QStringLiteral("5186→5179")) && !hasText(QStringLiteral("5187→5179")),
@@ -394,6 +542,11 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
 }
 
 int KaApplication::run(int argc, char** argv) {
+  // 충돌 시 심볼 스택·미니덤프가 남도록 가장 먼저 설치한다.
+  KaCrashGuard::install();
+  QElapsedTimer bootTimer;
+  bootTimer.start();
+
   bool smokeQuit = false;
   bool qaPhase1 = false;
   bool demoSurvey = false;
@@ -412,6 +565,8 @@ int KaApplication::run(int argc, char** argv) {
   }
 
 #if KA_HGIS_HAS_QGIS
+  // PROJ/GDAL 환경은 QgsApplication이 첫 좌표계 컨텍스트를 만들기 전에 준비돼야 한다.
+  applyBundledRuntime();
   QgsApplication app(argc, argv, true);
   const QString prefix = resolvePrefixPath();
   if (prefix.isEmpty()) {
@@ -436,6 +591,16 @@ int KaApplication::run(int argc, char** argv) {
   if (!QgsProviderRegistry::instance()->providerList().contains(QStringLiteral("wms"))) {
     qCritical("WMS/XYZ provider missing — basemap tiles will not load");
   }
+  KaCrashGuard::logLine(QStringLiteral("[boot] QGIS 초기화 %1 ms").arg(bootTimer.elapsed()));
+  // QGIS 내부 경고(WMS 실패, 좌표계 문제 등)도 세션 로그로 남긴다.
+  QObject::connect(
+      QgsApplication::messageLog(),
+      qOverload<const QString&, const QString&, Qgis::MessageLevel>(
+          &QgsMessageLog::messageReceived),
+      &app, [](const QString& message, const QString& tag, Qgis::MessageLevel level) {
+        if (level == Qgis::MessageLevel::Warning || level == Qgis::MessageLevel::Critical)
+          KaCrashGuard::logLine(QStringLiteral("[qgis/%1] %2").arg(tag, message));
+      });
 #else
   QApplication app(argc, argv);
   qWarning("Built without QGIS SDK (stub mode)");
@@ -443,18 +608,40 @@ int KaApplication::run(int argc, char** argv) {
 
   app.setApplicationName(QStringLiteral("ka-hgis"));
   app.setApplicationDisplayName(QStringLiteral("유적 HGIS"));
-  app.setWindowIcon(KaIcons::appIcon());
+  // 배포 아이콘(딥블루 트라울+맵핀)이 있으면 그걸 쓰고, 없으면 그린 아이콘.
+  {
+    const QString icoPath = QDir(QCoreApplication::applicationDirPath())
+                                .filePath(QStringLiteral("../data/theme/ka-hgis.ico"));
+    const QString icoLocal = QDir(QCoreApplication::applicationDirPath())
+                                 .filePath(QStringLiteral("data/theme/ka-hgis.ico"));
+    QIcon appIco;
+    if (QFile::exists(icoLocal)) appIco = QIcon(icoLocal);
+    else if (QFile::exists(icoPath)) appIco = QIcon(icoPath);
+    app.setWindowIcon(appIco.isNull() ? KaIcons::appIcon() : appIco);
+  }
   app.setOrganizationName(QStringLiteral("ka-hgis"));
   app.setApplicationVersion(QStringLiteral("0.3.0"));
   app.setStyle(QStringLiteral("Fusion"));
   KaTheme::apply(&app);
+#if KA_HGIS_HAS_QGIS
+  // 타일 요청이 순간 실패(VWorld 요청 제한·네트워크 흔들림)해도 프로바이더가 더
+  // 재시도하도록 올린다(기본 3회). 위성지도가 반만 그려지는 주원인 완화.
+  // 주의: 조직·앱 이름이 정해진 뒤에 써야 프로바이더가 읽는 저장소와 일치한다.
+  {
+    QgsSettings tileSettings;
+    tileSettings.setValue(QStringLiteral("qgis/defaultTileMaxRetry"), 6);
+    KaCrashGuard::logLine(QStringLiteral("[boot] 타일 재시도 한도 = %1")
+                              .arg(tileSettings.value(QStringLiteral("qgis/defaultTileMaxRetry"), 3)
+                                       .toInt()));
+  }
+#endif
 
   QSplashScreen* splash = nullptr;
   if (!smokeQuit) {
     QPixmap pm(640, 360);
     QLinearGradient g(0, 0, 0, pm.height());
-    g.setColorAt(0.0, QColor(11, 58, 74));
-    g.setColorAt(1.0, QColor(15, 118, 110));
+    g.setColorAt(0.0, QColor(27, 36, 48));
+    g.setColorAt(1.0, QColor(23, 90, 176));
     QPainter p(&pm);
     p.fillRect(pm.rect(), g);
     p.setRenderHint(QPainter::Antialiasing, true);
@@ -464,7 +651,7 @@ int KaApplication::run(int argc, char** argv) {
     p.setFont(QFont(QStringLiteral("Malgun Gothic"), 28, QFont::Bold));
     p.drawText(pm.rect().adjusted(0, -28, 0, 0), Qt::AlignCenter, QStringLiteral("유적 HGIS"));
     p.setFont(QFont(QStringLiteral("Malgun Gothic"), 11));
-    p.setPen(QColor(231, 245, 242));
+    p.setPen(QColor(232, 238, 245));
     p.drawText(pm.rect().adjusted(0, 40, 0, 0), Qt::AlignCenter,
                QStringLiteral("현장 조사를 불러오는 중…"));
     p.end();
@@ -480,12 +667,14 @@ int KaApplication::run(int argc, char** argv) {
   }
 
   MainWindow w;
+  KaCrashGuard::logLine(QStringLiteral("[boot] 메인창 구성 %1 ms").arg(bootTimer.elapsed()));
   w.show();
   if (splash) {
     splash->finish(&w);
     delete splash;
     splash = nullptr;
   }
+  KaCrashGuard::logLine(QStringLiteral("[boot] 창 표시 %1 ms").arg(bootTimer.elapsed()));
   if (demoSurvey && openGpkg.isEmpty()) {
     const QString dir = QDir::temp().filePath(QStringLiteral("ka-hgis-survey-verify"));
     QDir().mkpath(dir);

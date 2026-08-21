@@ -1,0 +1,481 @@
+#include "GeologyMapService.h"
+#include "LayerOps.h"
+
+#include <QDir>
+#include <QFile>
+#include <QImage>
+#include <QRegularExpression>
+#include <QUrl>
+#include <algorithm>
+
+#include <qgsblockingnetworkrequest.h>
+#include <qgscategorizedsymbolrenderer.h>
+#include <qgscoordinatereferencesystem.h>
+#include <qgscoordinatetransform.h>
+#include <qgscoordinatetransformcontext.h>
+#include <qgsexception.h>
+#include <qgsfeature.h>
+#include <qgsfeatureiterator.h>
+#include <qgsfields.h>
+#include <qgsfillsymbol.h>
+#include <qgsgeometry.h>
+#include <qgsmapcanvas.h>
+#include <qgspallabeling.h>
+#include <qgspointxy.h>
+#include <qgsproject.h>
+#include <qgsrectangle.h>
+#include <qgstextformat.h>
+#include <qgsvectorfilewriter.h>
+#include <qgsvectorlayer.h>
+#include <qgsvectorlayerlabeling.h>
+
+#include <QNetworkRequest>
+
+namespace {
+
+constexpr const char* kWfsUrl = "https://data.kigam.re.kr/geoserver/ows";
+constexpr const char* kTypeName = "geoOpen:l_50k_geology_litho_latest";
+constexpr const char* kWmsRaster = "geoOpen:L_50K_Geology_Map";
+constexpr const char* kLayerTitle = "지질도(KIGAM 1:5만)";
+constexpr const char* kEraSrcField = "시대";
+constexpr const char* kEraField = "era_class";
+constexpr const char* kSymbolField = "기호";
+constexpr const char* kStratField = "지층";
+
+// ICS(국제층서위원회) 표준 지질시대색. 젊은 시대 → 오래된 시대 순서(범례 순서).
+// keyword는 서버 시대 문자열에서 찾는 부분 문자열이며, 세분(기) 우선으로 검사한다.
+struct EraClassDef {
+  const char* keyword;
+  const char* name;
+  int r, g, b;
+};
+constexpr EraClassDef kEras[] = {
+    {"제4기", "제4기", 249, 249, 127},
+    {"네오기", "네오기(신제3기)", 255, 230, 25},
+    {"신제3기", "네오기(신제3기)", 255, 230, 25},
+    {"팔레오기", "팔레오기(고제3기)", 253, 154, 82},
+    {"고제3기", "팔레오기(고제3기)", 253, 154, 82},
+    {"백악기", "백악기", 127, 198, 78},
+    {"쥐라기", "쥐라기", 52, 178, 201},
+    {"쥬라기", "쥐라기", 52, 178, 201},
+    {"트라이아스기", "트라이아스기", 129, 43, 146},
+    {"페름기", "페름기", 240, 64, 40},
+    {"석탄기", "석탄기", 103, 165, 153},
+    {"데본기", "데본기", 203, 140, 55},
+    {"실루리아기", "실루리아기", 179, 225, 182},
+    {"오르도비스기", "오르도비스기", 0, 146, 112},
+    {"캄브리아기", "캄브리아기", 127, 160, 86},
+    // 대(era) 단위 — 기 단위가 없을 때의 대분류.
+    {"신생대", "신생대", 242, 249, 29},
+    {"중생대", "중생대", 103, 197, 202},
+    {"고생대", "고생대", 153, 192, 141},
+    {"원생누대", "원생누대", 247, 53, 99},
+    {"시생누대", "시생누대", 240, 4, 127},
+    {"선캄브리아", "선캄브리아시대", 247, 67, 112},
+};
+constexpr const char* kEraUnknown = "시대미상";
+
+QgsSymbol* eraFillSymbol(const QColor& base) {
+  QColor fill = base;
+  fill.setAlpha(150);
+  auto fs = QgsFillSymbol::createSimple({
+      {QStringLiteral("color"), fill.name(QColor::HexArgb)},
+      {QStringLiteral("outline_color"), QColor(80, 80, 80, 130).name(QColor::HexArgb)},
+      {QStringLiteral("outline_width"), QStringLiteral("0.12")},
+      {QStringLiteral("outline_width_unit"), QStringLiteral("MM")},
+  });
+  return fs.release();
+}
+
+// 시대 문자열의 젊은→오래된 순위(범례 정렬용). kEras 배열 순서를 그대로 쓴다.
+int eraRank(const QString& eraText) {
+  int i = 0;
+  for (const EraClassDef& e : kEras) {
+    if (eraText.contains(QString::fromUtf8(e.keyword))) return i;
+    ++i;
+  }
+  return int(std::size(kEras));
+}
+
+// 공식 도폭색 샘플링 실패 시: 시대 기준색에 단위별로 밝기 변화를 줘 구분한다.
+QColor unitFallbackColor(const QString& eraText, const QString& sym) {
+  QColor base = GeologyMapService::eraColor(GeologyMapService::eraClass(eraText));
+  int sum = 0;
+  const QByteArray b = sym.toUtf8();
+  for (const char c : b) sum += static_cast<unsigned char>(c);
+  const int step = (sum % 5) - 2;  // -2..+2
+  return base.lighter(100 + step * 12);
+}
+
+// 이미지의 (px,py) 주변에서 라벨·경계선(어두운 픽셀)을 걸러내고 중간 밝기 색을 고른다.
+QColor pickPixelColor(const QImage& img, int px, int py) {
+  static const QPoint kOffsets[] = {{0, 0},  {-3, 0}, {3, 0},  {0, -3}, {0, 3},
+                                    {-6, 0}, {6, 0},  {0, -6}, {0, 6},  {-3, -3},
+                                    {3, 3},  {-3, 3}, {3, -3}};
+  QList<QColor> picks;
+  for (const QPoint& off : kOffsets) {
+    const int x = px + off.x(), y = py + off.y();
+    if (x < 0 || y < 0 || x >= img.width() || y >= img.height()) continue;
+    const QColor col = img.pixelColor(x, y);
+    if (col.alpha() < 200) continue;
+    if (col.lightness() < 80) continue;
+    picks.append(col);
+  }
+  if (picks.isEmpty()) return {};
+  std::sort(picks.begin(), picks.end(),
+            [](const QColor& a, const QColor& b) { return a.lightness() < b.lightness(); });
+  QColor out = picks.at(picks.size() / 2);
+  out.setAlpha(255);
+  return out;
+}
+
+// 공식 지질도 래스터(WMS)를 요청 범위 전체로 「한 번만」 받아 단위별 내부점
+// 픽셀에서 도폭색을 얻는다. (예전에는 단위마다 별도 요청이라 단위 수만큼
+// 순차 왕복이 생겨 내려받기가 수십 초씩 걸리고 UI가 멎은 듯 보였다.)
+QHash<QString, QColor> sampleOfficialColors(const QgsRectangle& ext4326,
+                                            const QHash<QString, QgsPointXY>& pts5186) {
+  QHash<QString, QColor> out;
+  if (pts5186.isEmpty()) return out;
+
+  QHash<QString, QgsPointXY> pts4326;
+  try {
+    const QgsCoordinateTransform tr(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")),
+                                    QgsCoordinateReferenceSystem(QStringLiteral("EPSG:4326")),
+                                    QgsCoordinateTransformContext());
+    for (auto it = pts5186.constBegin(); it != pts5186.constEnd(); ++it)
+      pts4326.insert(it.key(), tr.transform(it.value()));
+  } catch (const QgsException&) {
+    return out;
+  }
+
+  const double w = std::max(ext4326.width(), 1e-9);
+  const double h = std::max(ext4326.height(), 1e-9);
+  int imgW = 1400, imgH = 1400;
+  if (w >= h)
+    imgH = std::max(64, int(std::lround(1400.0 * h / w)));
+  else
+    imgW = std::max(64, int(std::lround(1400.0 * w / h)));
+
+  const QString url =
+      QStringLiteral(
+          "%1?service=WMS&version=1.1.1&request=GetMap&layers=%2&styles="
+          "&srs=EPSG:4326&bbox=%3,%4,%5,%6&width=%7&height=%8&format=image/png"
+          "&transparent=true")
+          .arg(QLatin1String(kWfsUrl), QLatin1String(kWmsRaster))
+          .arg(ext4326.xMinimum(), 0, 'f', 7)
+          .arg(ext4326.yMinimum(), 0, 'f', 7)
+          .arg(ext4326.xMaximum(), 0, 'f', 7)
+          .arg(ext4326.yMaximum(), 0, 'f', 7)
+          .arg(imgW)
+          .arg(imgH);
+  QgsBlockingNetworkRequest req;
+  QNetworkRequest netReq{QUrl(url)};
+  netReq.setHeader(QNetworkRequest::UserAgentHeader,
+                   QStringLiteral("Mozilla/5.0 (Windows NT 10.0; Win64; x64) ka-hgis/0.3"));
+  if (req.get(netReq) != QgsBlockingNetworkRequest::NoError) return out;
+  const QImage img = QImage::fromData(req.reply().content());
+  if (img.isNull()) return out;
+
+  for (auto it = pts4326.constBegin(); it != pts4326.constEnd(); ++it) {
+    const int px = int(std::lround((it.value().x() - ext4326.xMinimum()) / w * (imgW - 1)));
+    const int py = int(std::lround((ext4326.yMaximum() - it.value().y()) / h * (imgH - 1)));
+    const QColor c = pickPixelColor(img, px, py);
+    if (c.isValid()) out.insert(it.key(), c);
+  }
+  return out;
+}
+
+// 현재 화면 bbox(위경도)의 암상 GeoJSON을 임시 파일로 받아 경로를 돌려준다.
+QString fetchLithoGeojson(const QgsRectangle& extent4326, QString* errorOut) {
+  const QString url =
+      QStringLiteral(
+          "%1?service=WFS&version=2.0.0&request=GetFeature&typeNames=%2"
+          "&outputFormat=application/json&srsName=EPSG:5186&count=100000"
+          "&bbox=%3,%4,%5,%6,urn:ogc:def:crs:EPSG::4326")
+          .arg(QLatin1String(kWfsUrl), QLatin1String(kTypeName))
+          .arg(extent4326.yMinimum(), 0, 'f', 8)
+          .arg(extent4326.xMinimum(), 0, 'f', 8)
+          .arg(extent4326.yMaximum(), 0, 'f', 8)
+          .arg(extent4326.xMaximum(), 0, 'f', 8);
+
+  QgsBlockingNetworkRequest req;
+  QNetworkRequest netReq{QUrl(url)};
+  netReq.setHeader(QNetworkRequest::UserAgentHeader,
+                   QStringLiteral("Mozilla/5.0 (Windows NT 10.0; Win64; x64) ka-hgis/0.3"));
+  if (req.get(netReq) != QgsBlockingNetworkRequest::NoError) {
+    if (errorOut) *errorOut = req.errorMessage();
+    return {};
+  }
+  const QByteArray body = req.reply().content();
+  if (body.isEmpty() || !body.trimmed().startsWith('{')) {
+    if (errorOut) *errorOut = QStringLiteral("서버가 GeoJSON 대신 다른 응답을 보냈습니다.");
+    return {};
+  }
+  const QString path = QDir::temp().filePath(QStringLiteral("ka-hgis-geology.geojson"));
+  QFile f(path);
+  if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    if (errorOut) *errorOut = QStringLiteral("임시 파일을 쓰지 못했습니다.");
+    return {};
+  }
+  f.write(body);
+  return path;
+}
+
+}  // namespace
+
+QString GeologyMapService::eraClass(const QString& eraText) {
+  for (const EraClassDef& e : kEras)
+    if (eraText.contains(QString::fromUtf8(e.keyword))) return QString::fromUtf8(e.name);
+  return QString::fromUtf8(kEraUnknown);
+}
+
+QColor GeologyMapService::eraColor(const QString& eraClassName) {
+  for (const EraClassDef& e : kEras)
+    if (eraClassName == QString::fromUtf8(e.name)) return QColor(e.r, e.g, e.b);
+  return QColor(200, 200, 200);
+}
+
+bool GeologyMapService::applyGeologyStyle(QgsVectorLayer* layer,
+                                          const QHash<QString, QColor>& officialColors) {
+  if (!layer || !layer->isValid()) return false;
+  const int symIdx = layer->fields().indexOf(QString::fromUtf8(kSymbolField));
+  if (symIdx < 0) return false;
+  const int stratIdx = layer->fields().indexOf(QString::fromUtf8(kStratField));
+  const int eraIdx = layer->fields().indexOf(QString::fromUtf8(kEraSrcField));
+
+  // 데이터에 실제로 있는 지질단위만 모은다. 보고서 지질도 범례 관례(기호+지층명).
+  struct UnitInfo {
+    QString sym, strat, era;
+  };
+  QList<UnitInfo> units;
+  QStringList seen;
+  QgsFeatureIterator it = layer->getFeatures();
+  QgsFeature f;
+  while (it.nextFeature(f)) {
+    const QString sym = f.attribute(symIdx).toString();
+    if (sym.isEmpty() || seen.contains(sym)) continue;
+    seen << sym;
+    units.append({sym, stratIdx >= 0 ? f.attribute(stratIdx).toString() : QString(),
+                  eraIdx >= 0 ? f.attribute(eraIdx).toString() : QString()});
+  }
+  // 젊은 시대 → 오래된 시대 순으로 정렬(같은 시대는 기호순).
+  std::sort(units.begin(), units.end(), [](const UnitInfo& a, const UnitInfo& b) {
+    const int ra = eraRank(a.era), rb = eraRank(b.era);
+    if (ra != rb) return ra < rb;
+    return a.sym < b.sym;
+  });
+
+  QgsCategoryList cats;
+  for (const UnitInfo& u : units) {
+    QColor col = officialColors.value(u.sym);
+    if (!col.isValid()) col = unitFallbackColor(u.era, u.sym);
+    // 범례는 지질단위명(지층)만 — 기호는 지도 라벨로 이미 표시된다.
+    const QString label = u.strat.isEmpty() ? u.sym : u.strat;
+    if (QgsSymbol* sym = eraFillSymbol(col))
+      cats.append(QgsRendererCategory(QVariant(u.sym), sym, label));
+  }
+  if (QgsSymbol* rest = eraFillSymbol(QColor(200, 200, 200)))
+    cats.append(QgsRendererCategory(QVariant(), rest, QStringLiteral("기타")));
+  layer->setRenderer(
+      new QgsCategorizedSymbolRenderer(QString::fromUtf8(kSymbolField), cats));
+
+  // 암상 기호(Qa, PCEpgn …) 라벨 — 지질도 관례. (한글 필드명은 UTF-8 변환 필수)
+  if (layer->fields().indexOf(QString::fromUtf8(kSymbolField)) >= 0) {
+    QgsPalLayerSettings s;
+    s.drawLabels = true;
+    s.fieldName = QString::fromUtf8(kSymbolField);
+    s.isExpression = false;
+    s.placement = Qgis::LabelPlacement::OverPoint;
+    s.setPolygonPlacementFlags(Qgis::LabelPolygonPlacementFlag::AllowPlacementInsideOfPolygon);
+    QgsLabelObstacleSettings obs = s.obstacleSettings();
+    obs.setIsObstacle(false);
+    s.setObstacleSettings(obs);
+
+    QgsTextFormat fmt;
+    QFont font = fmt.font();
+    font.setFamily(QStringLiteral("Malgun Gothic"));
+    font.setPointSize(8);
+    fmt.setFont(font);
+    fmt.setSize(8);
+    fmt.setSizeUnit(Qgis::RenderUnit::Points);
+    fmt.setColor(QColor(40, 40, 40));
+    QgsTextBufferSettings buf = fmt.buffer();
+    buf.setEnabled(true);
+    buf.setSize(0.6);
+    buf.setColor(QColor(255, 255, 255, 220));
+    fmt.setBuffer(buf);
+    s.setFormat(fmt);
+
+    layer->setLabeling(new QgsVectorLayerSimpleLabeling(s));
+    layer->setLabelsEnabled(true);
+  }
+  layer->triggerRepaint();
+  return true;
+}
+
+QgsVectorLayer* GeologyMapService::downloadAndAdd(QgsProject* project, QgsMapCanvas* canvas,
+                                                  const QgsRectangle& extent5186,
+                                                  const QString& outGpkgPath,
+                                                  QString* errorOut) {
+  if (!project) {
+    if (errorOut) *errorOut = QStringLiteral("프로젝트가 없습니다.");
+    return nullptr;
+  }
+  if (extent5186.isEmpty() || extent5186.width() > maxSpanMeters() ||
+      extent5186.height() > maxSpanMeters()) {
+    if (errorOut)
+      *errorOut = QStringLiteral(
+          "범위가 너무 넓습니다. 지도를 조사지역(한 변 %1km 이하)으로 확대한 뒤 다시 "
+          "내려받으세요.")
+          .arg(maxSpanMeters() / 1000.0, 0, 'f', 0);
+    return nullptr;
+  }
+
+  QgsRectangle ext4326;
+  try {
+    const QgsCoordinateTransform tr(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")),
+                                    QgsCoordinateReferenceSystem(QStringLiteral("EPSG:4326")),
+                                    QgsCoordinateTransformContext());
+    ext4326 = tr.transformBoundingBox(extent5186);
+  } catch (const QgsException&) {
+    if (errorOut) *errorOut = QStringLiteral("좌표 변환에 실패했습니다.");
+    return nullptr;
+  }
+
+  QString netErr;
+  const QString jsonPath = fetchLithoGeojson(ext4326, &netErr);
+  if (jsonPath.isEmpty()) {
+    if (errorOut)
+      *errorOut = netErr.isEmpty() ? QStringLiteral("지질도를 내려받지 못했습니다.")
+                                   : QStringLiteral("KIGAM 서버 연결 실패: %1").arg(netErr);
+    return nullptr;
+  }
+
+  QgsVectorLayer src(jsonPath, QStringLiteral("part"), QStringLiteral("ogr"));
+  if (!src.isValid() || src.featureCount() == 0) {
+    QFile::remove(jsonPath);
+    if (errorOut)
+      *errorOut = QStringLiteral("이 범위에는 지질도 데이터가 없습니다. (바다이거나 "
+                                 "도폭 미구축 지역입니다)");
+    return nullptr;
+  }
+
+  // 메모리 레이어로 복사하며 era_class 파생 필드를 채우고 속성의 HTML 링크를 걷어낸다.
+  auto* merged = new QgsVectorLayer(QStringLiteral("MultiPolygon?crs=EPSG:5186"),
+                                    QStringLiteral("merge"), QStringLiteral("memory"));
+  QList<QgsField> outFields = src.fields().toList();
+  outFields.append(QgsField(QLatin1String(kEraField), QMetaType::Type::QString));
+  merged->dataProvider()->addAttributes(outFields);
+  merged->updateFields();
+
+  const QgsFields memFields = merged->fields();
+  const QgsFields srcFields = src.fields();
+  const int eraSrcIdx = srcFields.indexOf(QString::fromUtf8(kEraSrcField));
+  const int symSrcIdx = srcFields.indexOf(QString::fromUtf8(kSymbolField));
+  const int eraDstIdx = memFields.indexOf(QLatin1String(kEraField));
+  static const QRegularExpression kTagRe(QStringLiteral("<[^>]*>"));
+
+  // 단위(기호)별 최대 폴리곤의 내부점 — 공식 도폭색 샘플링 위치.
+  QHash<QString, double> bestArea;
+  QHash<QString, QgsPointXY> bestPt;
+
+  QgsFeatureList batch;
+  QgsFeatureIterator it = src.getFeatures();
+  QgsFeature f;
+  while (it.nextFeature(f)) {
+    QgsFeature nf(memFields);
+    for (int i = 0; i < srcFields.count(); ++i) {
+      const int dst = memFields.indexOf(srcFields.at(i).name());
+      if (dst < 0) continue;
+      QVariant v = f.attribute(i);
+      if (v.metaType().id() == QMetaType::QString) {
+        QString sv = v.toString();
+        if (sv.contains(QLatin1Char('<'))) sv.remove(kTagRe);
+        v = sv;
+      }
+      nf.setAttribute(dst, v);
+    }
+    if (eraDstIdx >= 0)
+      nf.setAttribute(eraDstIdx,
+                      eraClass(eraSrcIdx >= 0 ? f.attribute(eraSrcIdx).toString() : QString()));
+    QgsGeometry g = f.geometry();
+    g.convertToMultiType();
+    nf.setGeometry(g);
+    if (symSrcIdx >= 0) {
+      const QString symVal = f.attribute(symSrcIdx).toString();
+      if (!symVal.isEmpty()) {
+        const double a = g.area();
+        if (a > bestArea.value(symVal, -1.0)) {
+          const QgsGeometry ps = g.pointOnSurface();
+          if (!ps.isNull()) {
+            bestArea.insert(symVal, a);
+            bestPt.insert(symVal, ps.asPoint());
+          }
+        }
+      }
+    }
+    batch.append(nf);
+  }
+  QFile::remove(jsonPath);
+  if (batch.isEmpty()) {
+    delete merged;
+    if (errorOut) *errorOut = QStringLiteral("이 범위에는 지질도 데이터가 없습니다.");
+    return nullptr;
+  }
+  merged->dataProvider()->addFeatures(batch);
+  merged->updateExtents();
+
+  // 같은 GPKG를 쓰는 기존 레이어를 먼저 내려 파일 잠금을 푼다.
+  QStringList removeIds;
+  for (QgsMapLayer* old : project->mapLayers()) {
+    if (!old) continue;
+    if (old->name() == QString::fromUtf8(kLayerTitle) ||
+        old->name().startsWith(QString::fromUtf8(kLayerTitle) + QStringLiteral(" [")) ||
+        old->source().contains(outGpkgPath))
+      removeIds.append(old->id());
+  }
+  for (const QString& id : removeIds)
+    project->removeMapLayer(id);
+
+  QgsVectorFileWriter::SaveVectorOptions opts;
+  opts.driverName = QStringLiteral("GPKG");
+  opts.layerName = QStringLiteral("geology_map");
+  opts.fileEncoding = QStringLiteral("UTF-8");
+  QString werr, nf2, nl2;
+  const auto we = QgsVectorFileWriter::writeAsVectorFormatV3(
+      merged, outGpkgPath, project->transformContext(), opts, &werr, &nf2, &nl2);
+  delete merged;
+  if (we != QgsVectorFileWriter::NoError) {
+    if (errorOut) *errorOut = QStringLiteral("지질도 저장 실패: %1").arg(werr);
+    return nullptr;
+  }
+
+  auto* layer = new QgsVectorLayer(outGpkgPath + QStringLiteral("|layername=geology_map"),
+                                   QString::fromUtf8(kLayerTitle), QStringLiteral("ogr"));
+  if (!layer->isValid()) {
+    if (errorOut) *errorOut = QStringLiteral("저장한 지질도를 여는 데 실패했습니다.");
+    delete layer;
+    return nullptr;
+  }
+  // 공식 지질도 래스터를 한 번만 받아 단위별 도폭색을 샘플링(실패 단위는 시대 계열색).
+  const QHash<QString, QColor> officialColors = sampleOfficialColors(ext4326, bestPt);
+  applyGeologyStyle(layer, officialColors);
+  LayerOps::markReferenceLayer(layer);
+  LayerOps::applyLegendCrsLabel(layer);
+  if (!project->addMapLayer(layer, true)) {
+    delete layer;
+    if (errorOut) *errorOut = QStringLiteral("지질도 레이어를 프로젝트에 넣지 못했습니다.");
+    return nullptr;
+  }
+  LayerOps::placeInLegendGroup(project, layer, QStringLiteral("참조 지도"));
+  if (canvas) {
+    const QString workAuth = project->crs().isValid() ? project->crs().authid()
+                                                      : QStringLiteral("EPSG:5186");
+    LayerOps::ensureOtfEnabled(project, canvas, workAuth);
+    LayerOps::syncMapCanvas(project, canvas, false);
+    // refreshAllLayers()는 모든 레이어 캐시를 버려 배경 타일까지 다시 받는다.
+    // 새 레이어만 그리면 되므로 refresh()로 충분하다.
+    canvas->refresh();
+  }
+  return layer;
+}

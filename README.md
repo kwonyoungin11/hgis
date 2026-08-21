@@ -21,7 +21,7 @@ cd hgis
 ```
 
 - **개발:** 클론 + OSGeo4W(`qgis-dev`) + VS2022 + CMake → `bootstrap-dev-pc.ps1` 또는 `build-all.ps1`
-- **실행만:** `dist\ka-hgis-portable\` + OSGeo4W 런타임 → `run.bat`
+- **실행만:** 개발 PC에서 `.\scripts\make-portable.ps1` 후 `dist\ka-hgis-portable\` 폴더 전체를 복사 → `start.bat` (OSGeo4W 설치 불필요)
 - 조사 GPKG/SHP는 git에 없음 → 별도 복사
 - 규칙: `AGENTS.md` (Grok Build + QGIS 매뉴얼 연동) · `HANDOFF.md`
 

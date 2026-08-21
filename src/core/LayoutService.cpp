@@ -6,12 +6,18 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFont>
+#include <QImage>
+#include <QLocale>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPen>
 #include <QRectF>
 #include <QStringList>
 
 #include <algorithm>
 #include <cmath>
 #include <exception>
+#include <initializer_list>
 
 #include <qgscoordinatereferencesystem.h>
 #include <qgsfeature.h>
@@ -22,10 +28,13 @@
 #include <qgslayout.h>
 #include <qgslayoutexporter.h>
 #include <qgslayoutitemlabel.h>
+#include <qgslayoutitemlegend.h>
 #include <qgslayoutitemmap.h>
 #include <qgslayoutitemmapgrid.h>
 #include <qgslayoutitempage.h>
+#include <qgslayoutitempicture.h>
 #include <qgslayoutitemscalebar.h>
+#include <qgstextformat.h>
 #include <qgslayoutmanager.h>
 #include <qgslayoutmeasurement.h>
 #include <qgslayoutpagecollection.h>
@@ -85,7 +94,8 @@ LayoutService::DrawingRecipe LayoutService::recipe(DrawingKind kind) {
       r.defaultScale = 5000.0;
       r.gridIntervalM = 100.0;
       r.includeBasemap = true;
-      r.layerKeys = {QStringLiteral("survey_area"), QStringLiteral("control_points")};
+      r.layerKeys = {QStringLiteral("survey_area"), QStringLiteral("trial_trench"),
+                     QStringLiteral("control_points")};
       r.emptyHintKo = QStringLiteral("먼저 「그리기 → 구역」으로 조사구역을 그리세요.");
       r.scaleChoices = {2500.0, 5000.0, 10000.0};
       break;
@@ -103,8 +113,9 @@ LayoutService::DrawingRecipe LayoutService::recipe(DrawingKind kind) {
       r.defaultScale = 1000.0;
       r.gridIntervalM = 20.0;
       r.includeBasemap = false;
-      r.layerKeys = {QStringLiteral("survey_area"), QStringLiteral("feature_poly"),
-                     QStringLiteral("feature_line"), QStringLiteral("control_points")};
+      r.layerKeys = {QStringLiteral("survey_area"), QStringLiteral("trial_trench"),
+                     QStringLiteral("feature_poly"), QStringLiteral("feature_line"),
+                     QStringLiteral("control_points")};
       r.emptyHintKo = QStringLiteral("유구 면·선을 그린 뒤 종류·시대를 넣으면 범례가 채워집니다.");
       r.scaleChoices = {500.0, 1000.0, 2000.0};
       break;
@@ -181,49 +192,71 @@ static QList<QgsMapLayer*> layersForRecipe(QgsProject* project, const LayoutServ
   return out;
 }
 
-static QString koreanLegendText(const QList<QgsMapLayer*>& layers) {
-  QStringList lines;
-  lines << QStringLiteral("범례");
+// 유구 종류·시대 요약(범례 심볼 아래 보조 텍스트). 없으면 빈 문자열.
+static QString kindPeriodSummary(const QList<QgsMapLayer*>& layers) {
+  QStringList rows;
   for (QgsMapLayer* ml : layers) {
     auto* vl = qobject_cast<QgsVectorLayer*>(ml);
-    if (!vl) continue;
-    const QString key = LayerOps::layerKeyOf(vl);
-    QString name = LayoutService::koreanTitle(key);
-    if (name == key || name.isEmpty()) {
-      if (key == QLatin1String("survey_area") || vl->name().contains(QStringLiteral("조사")))
-        name = QStringLiteral("조사구역");
-      else if (key == QLatin1String("feature_poly") || vl->name().contains(QStringLiteral("유구면")))
-        name = QStringLiteral("유구 면");
-      else if (key == QLatin1String("feature_line") || vl->name().contains(QStringLiteral("유구선")))
-        name = QStringLiteral("유구 선");
-      else if (key == QLatin1String("section_line") || vl->name().contains(QStringLiteral("단면")))
-        name = QStringLiteral("단면선");
-      else if (key == QLatin1String("control_points") || vl->name().contains(QStringLiteral("GPS")))
-        name = QStringLiteral("기준점");
-      else
-        name = vl->name();
+    if (!vl || vl->fields().indexOf(QStringLiteral("kind")) < 0)
+      continue;
+    QgsFeature f;
+    QgsFeatureIterator it = vl->getFeatures();
+    while (it.nextFeature(f) && rows.size() < 10) {
+      const QString k = f.attribute(QStringLiteral("kind")).toString().trimmed();
+      const QString p = f.attribute(QStringLiteral("period")).toString().trimmed();
+      QString row = k;
+      if (!p.isEmpty())
+        row += QStringLiteral(" / %1").arg(p);
+      if (!row.isEmpty() && !rows.contains(row))
+        rows << row;
     }
-    QString extra;
-    if (vl->fields().indexOf(QStringLiteral("kind")) >= 0) {
-      QStringList kinds;
-      QgsFeature f;
-      QgsFeatureIterator it = vl->getFeatures();
-      while (it.nextFeature(f)) {
-        const QString k = f.attribute(QStringLiteral("kind")).toString().trimmed();
-        const QString p = f.attribute(QStringLiteral("period")).toString().trimmed();
-        QString row = k;
-        if (!p.isEmpty()) row += QStringLiteral(" / %1").arg(p);
-        if (!row.isEmpty() && !kinds.contains(row))
-          kinds << row;
-      }
-      if (!kinds.isEmpty())
-        extra = QStringLiteral("\n  · ") + kinds.join(QStringLiteral("\n  · "));
-    }
-    lines << name + extra;
   }
-  if (lines.size() == 1)
-    lines << QStringLiteral("(그린 도형 없음)");
-  return lines.join(QLatin1Char('\n'));
+  if (rows.isEmpty())
+    return {};
+  return QStringLiteral("유구 종류·시대\n· ") + rows.join(QStringLiteral("\n· "));
+}
+
+// 조판용 방위표 PNG. 측량도면식: N 글자 위 + 반채움 니들(좌흑·우백).
+static QString writeLayoutNorthArrowPng() {
+  const int s = 256;
+  QImage img(s, s, QImage::Format_ARGB32_Premultiplied);
+  img.fill(Qt::transparent);
+  QPainter p(&img);
+  p.setRenderHint(QPainter::Antialiasing, true);
+  const QColor ink(17, 24, 39);
+
+  // N 글자(위쪽 중앙).
+  QFont f(QStringLiteral("Malgun Gothic"), 10, QFont::Bold);
+  f.setPixelSize(int(s * 0.20));
+  p.setFont(f);
+  p.setPen(ink);
+  p.drawText(QRectF(0, s * 0.02, s, s * 0.22), Qt::AlignHCenter | Qt::AlignVCenter,
+             QStringLiteral("N"));
+
+  // 니들: 위 꼭짓점에서 아래 좌우로 벌어지는 긴 이등변, 왼쪽 채움·오른쪽 백색.
+  const QPointF tip(s * 0.5, s * 0.26);
+  const QPointF tail(s * 0.5, s * 0.80);
+  const double halfW = s * 0.085;
+  QPainterPath left;
+  left.moveTo(tip);
+  left.lineTo(tail.x() - halfW, s * 0.86);
+  left.lineTo(tail);
+  left.closeSubpath();
+  QPainterPath right;
+  right.moveTo(tip);
+  right.lineTo(tail.x() + halfW, s * 0.86);
+  right.lineTo(tail);
+  right.closeSubpath();
+  p.setPen(QPen(ink, s * 0.012));
+  p.setBrush(ink);
+  p.drawPath(left);
+  p.setBrush(Qt::white);
+  p.drawPath(right);
+  p.end();
+  const QString path = QDir::temp().filePath(QStringLiteral("ka-hgis-layout-north.png"));
+  if (!img.save(path, QByteArrayLiteral("PNG").constData()))
+    return {};
+  return QFile::exists(path) ? path : QString();
 }
 
 static bool hasDrawableContent(const QList<QgsMapLayer*>& layers, const LayoutService::DrawingRecipe& rec,
@@ -326,38 +359,72 @@ static void fillLayout(QgsPrintLayout* layout, QgsProject* project,
   const QString crsAuth = project && project->crs().isValid()
                               ? project->crs().authid()
                               : QStringLiteral("EPSG:5186");
+  const QString crsName = LayoutService::koreanCrsName(crsAuth);
+  const QString crsFull = crsName.isEmpty() ? crsAuth
+                                            : QStringLiteral("%1 %2").arg(crsName, crsAuth);
+  const QFont kFont(QStringLiteral("Malgun Gothic"));
+  const QColor ink(17, 24, 39);
+  const QColor sub(75, 85, 99);
 
+  // ── 전문 도면 골격: 상단 제목띠 / 도곽 좌표 주기 여백 / 우측 정보열 / 하단 축척띠.
   const double margin = 10.0;
+  const double annPad = 5.6;           // 도곽 밖 좌표 주기 공간(지브라+숫자)
+  const double headerBottom = 15.0;    // 제목띠 아래 경계(룰 라인)
   const double sideW = 46.0;
-  const double mapW = W - margin * 2 - sideW - 4.0;
-  const double mapH = H - margin * 2 - 28.0;
+  const double sideX = W - margin - sideW;
+  const double bottomStripH = 14.0;
+  const double mapX = margin + annPad;
+  const double mapTop = headerBottom + 1.5 + annPad;
+  const double mapW = sideX - 6.0 - annPad - mapX;
+  const double mapH = H - mapTop - margin - bottomStripH - annPad;
 
+  // 제목띠: 도면명(좌) + 조사명·유적명(우) + 가는 룰 라인.
   auto* title = new QgsLayoutItemLabel(layout);
-  title->setText(QStringLiteral("【%1】").arg(sheet));
-  title->attemptSetSceneRect(QRectF(margin, 4, mapW, 9));
-  title->setFont(QFont(QStringLiteral("Malgun Gothic"), 16, QFont::Bold));
-  title->setFrameEnabled(true);
+  title->setId(QStringLiteral("sheet_title"));
+  title->setText(sheet);
+  title->attemptSetSceneRect(QRectF(margin, 5.0, W * 0.5, 9.0));
+  QFont titleFont = kFont;
+  titleFont.setPointSize(15);
+  titleFont.setBold(true);
+  titleFont.setLetterSpacing(QFont::AbsoluteSpacing, 1.2);
+  title->setFont(titleFont);
+  title->setFontColor(ink);
   layout->addLayoutItem(title);
 
-  QString meta = surveyName.isEmpty() ? QStringLiteral("고고학 전용 HGIS")
-                                      : QStringLiteral("조사명: %1").arg(surveyName);
-  if (!siteName.isEmpty())
-    meta += QStringLiteral("  |  유적명: %1").arg(siteName);
-  meta += QStringLiteral("  |  진북  |  %1").arg(crsAuth);
-  auto* metaLbl = new QgsLayoutItemLabel(layout);
-  metaLbl->setText(meta);
-  metaLbl->attemptSetSceneRect(QRectF(margin, 13.5, mapW, 6));
-  metaLbl->setFont(QFont(QStringLiteral("Malgun Gothic"), 8));
-  layout->addLayoutItem(metaLbl);
+  QStringList metaParts;
+  if (!surveyName.isEmpty()) metaParts << surveyName;
+  if (!siteName.isEmpty() && siteName != surveyName) metaParts << siteName;
+  if (!metaParts.isEmpty()) {
+    auto* metaLbl = new QgsLayoutItemLabel(layout);
+    metaLbl->setText(metaParts.join(QStringLiteral("  ·  ")));
+    metaLbl->setHAlign(Qt::AlignRight);
+    metaLbl->setVAlign(Qt::AlignBottom);
+    metaLbl->attemptSetSceneRect(QRectF(W * 0.5 + 2.0, 6.5, W - margin - (W * 0.5 + 2.0), 7.0));
+    QFont metaFont = kFont;
+    metaFont.setPointSize(9);
+    metaLbl->setFont(metaFont);
+    metaLbl->setFontColor(sub);
+    layout->addLayoutItem(metaLbl);
+  }
+
+  // 제목띠 아래 가는 룰(디바이더): 빈 라벨 + 잉크색 배경.
+  auto* rule = new QgsLayoutItemLabel(layout);
+  rule->setId(QStringLiteral("header_rule"));
+  rule->setText(QString());
+  rule->setBackgroundEnabled(true);
+  rule->setBackgroundColor(ink);
+  rule->attemptSetSceneRect(QRectF(margin, headerBottom, W - margin * 2.0, 0.4));
+  layout->addLayoutItem(rule);
 
   const QList<QgsMapLayer*> mapLayers = layersForRecipe(project, rec);
   const bool content = hasDrawableContent(mapLayers, rec, opt.featureId);
   if (result) result->hasMapContent = content;
 
   auto* map = new QgsLayoutItemMap(layout);
-  map->attemptSetSceneRect(QRectF(margin, 21, mapW, mapH));
+  map->attemptSetSceneRect(QRectF(mapX, mapTop, mapW, mapH));
   map->setFrameEnabled(true);
-  map->setFrameStrokeWidth(QgsLayoutMeasurement(0.5, Qgis::LayoutUnit::Millimeters));
+  map->setFrameStrokeWidth(QgsLayoutMeasurement(0.3, Qgis::LayoutUnit::Millimeters));
+  map->setFrameStrokeColor(ink);
   layout->addLayoutItem(map);
   if (project && project->crs().isValid())
     map->setCrs(project->crs());
@@ -366,20 +433,21 @@ static void fillLayout(QgsPrintLayout* layout, QgsProject* project,
   map->setMapRotation(0.0);
 
   QgsRectangle ext = resolveExtent(project, rec, opt);
+  // setExtent는 아이템 크기를 범위 종횡비로 바꿔 도곽·축척띠와 겹치게 하므로
+  // 아이템 크기를 유지하는 zoomToExtent를 쓴다.
   if (!ext.isEmpty())
-    map->setExtent(ext);
+    map->zoomToExtent(ext);
 
   const double scale = opt.scaleOverride > 0.0 ? opt.scaleOverride : rec.defaultScale;
   if (scale > 0.0 && content && !ext.isEmpty())
     map->setScale(scale, true);
 
-  if (rec.gridIntervalM > 0.0 && map->grids()) {
-    auto* grid = new QgsLayoutItemMapGrid(QStringLiteral("grid"), map);
-    grid->setEnabled(true);
-    grid->setStyle(Qgis::MapGridStyle::Lines);
-    grid->setIntervalX(rec.gridIntervalM);
-    grid->setIntervalY(rec.gridIntervalM);
-    map->grids()->addGrid(grid);
+  // 도곽: 지브라 프레임 + 정수 TM 좌표 주기 + 십자 눈금(축척에 맞는 1-2-5 간격).
+  if (rec.gridIntervalM > 0.0) {
+    const double denom = map->scale() > 0.0 ? map->scale() : scale;
+    const double interval = LayoutService::niceGridIntervalMeters(denom, mapW);
+    const bool crosses = rec.kind != LayoutService::DrawingKind::SiteLocation;
+    LayoutService::applySurveyFrameGrid(map, interval, crosses, true);
   }
 
   if (result) {
@@ -387,31 +455,117 @@ static void fillLayout(QgsPrintLayout* layout, QgsProject* project,
     result->appliedExtent = map->extent();
   }
 
-  const double sideX = margin + mapW + 4.0;
-  auto* north = new QgsLayoutItemLabel(layout);
-  north->setText(QStringLiteral("N\n↑\n진북"));
-  north->setHAlign(Qt::AlignHCenter);
-  north->attemptSetSceneRect(QRectF(sideX + 8, 21, 28, 24));
-  north->setFont(QFont(QStringLiteral("Malgun Gothic"), 11, QFont::Bold));
-  north->setFrameEnabled(true);
-  layout->addLayoutItem(north);
+  // ── 우측 정보열: 방위표 → 범례 → (유구 요약) → 표제란.
+  const QString northPng = writeLayoutNorthArrowPng();
+  if (!northPng.isEmpty()) {
+    auto* north = new QgsLayoutItemPicture(layout);
+    north->setId(QStringLiteral("north_arrow"));
+    north->setPicturePath(northPng, Qgis::PictureFormat::Raster);
+    north->setMode(Qgis::PictureFormat::Raster);
+    north->setResizeMode(QgsLayoutItemPicture::Zoom);
+    north->setNorthMode(QgsLayoutItemPicture::GridNorth);
+    north->setLinkedMap(map);
+    north->attemptSetSceneRect(QRectF(sideX + (sideW - 16.0) * 0.5, mapTop, 16.0, 22.0));
+    layout->addLayoutItem(north);
+  } else {
+    auto* north = new QgsLayoutItemLabel(layout);
+    north->setText(QStringLiteral("N\n↑"));
+    north->setHAlign(Qt::AlignHCenter);
+    north->attemptSetSceneRect(QRectF(sideX + 8, mapTop, 28, 22));
+    north->setFont(QFont(QStringLiteral("Malgun Gothic"), 12, QFont::Bold));
+    layout->addLayoutItem(north);
+  }
 
-  auto* northLbl = new QgsLayoutItemLabel(layout);
-  northLbl->setText(QStringLiteral("방위표 (진북)"));
-  northLbl->setHAlign(Qt::AlignHCenter);
-  northLbl->attemptSetSceneRect(QRectF(sideX, 50, sideW, 6));
-  northLbl->setFont(QFont(QStringLiteral("Malgun Gothic"), 7));
-  layout->addLayoutItem(northLbl);
+  // 표제란(도면 정보 상자): 하단 고정. 전문 도면의 필수 요소.
+  const double blockH = 30.0;
+  const double blockHeadH = 6.0;
+  const double blockY = H - margin - blockH - blockHeadH;
+  auto* blockHead = new QgsLayoutItemLabel(layout);
+  blockHead->setId(QStringLiteral("title_block_head"));
+  blockHead->setText(QStringLiteral("도 면 정 보"));
+  blockHead->setHAlign(Qt::AlignHCenter);
+  blockHead->setVAlign(Qt::AlignVCenter);
+  QFont headFont = kFont;
+  headFont.setPointSize(8);
+  headFont.setBold(true);
+  headFont.setLetterSpacing(QFont::AbsoluteSpacing, 0.8);
+  blockHead->setFont(headFont);
+  blockHead->setFontColor(ink);
+  blockHead->setFrameEnabled(true);
+  blockHead->setFrameStrokeColor(ink);
+  blockHead->setFrameStrokeWidth(QgsLayoutMeasurement(0.3, Qgis::LayoutUnit::Millimeters));
+  blockHead->setBackgroundEnabled(true);
+  blockHead->setBackgroundColor(QColor(238, 239, 241));
+  blockHead->attemptSetSceneRect(QRectF(sideX, blockY, sideW, blockHeadH));
+  layout->addLayoutItem(blockHead);
 
-  auto* legend = new QgsLayoutItemLabel(layout);
-  legend->setText(koreanLegendText(mapLayers));
-  legend->attemptSetSceneRect(QRectF(sideX, 58, sideW, std::max(40.0, mapH - 90.0)));
-  legend->setFont(QFont(QStringLiteral("Malgun Gothic"), 8));
+  const int scNow = map->scale() > 0 ? int(std::lround(map->scale())) : 0;
+  const QString scaleText = scNow > 0 ? QStringLiteral("1 : %1").arg(QLocale().toString(scNow))
+                                      : QStringLiteral("축척자 참조");
+  auto* block = new QgsLayoutItemLabel(layout);
+  block->setId(QStringLiteral("title_block"));
+  block->setText(QStringLiteral("도면명   %1\n조사명   %2\n축  척   %3\n좌표계   %4\n작성일   %5   ·   ka-hgis")
+                     .arg(sheet,
+                          surveyName.isEmpty() ? QStringLiteral("―") : surveyName,
+                          scaleText, crsFull,
+                          QDate::currentDate().toString(QStringLiteral("yyyy-MM-dd"))));
+  block->setVAlign(Qt::AlignVCenter);
+  block->setMarginX(2.0);
+  block->setMarginY(1.5);
+  QFont blockFont = kFont;
+  blockFont.setPointSize(7);
+  block->setFont(blockFont);
+  block->setFontColor(ink);
+  block->setFrameEnabled(true);
+  block->setFrameStrokeColor(ink);
+  block->setFrameStrokeWidth(QgsLayoutMeasurement(0.3, Qgis::LayoutUnit::Millimeters));
+  block->setBackgroundEnabled(true);
+  block->setBackgroundColor(Qt::white);
+  block->attemptSetSceneRect(QRectF(sideX, blockY + blockHeadH, sideW, blockH));
+  layout->addLayoutItem(block);
+
+  // 범례: 방위표 아래 ~ 표제란 위.
+  const QString kinds = kindPeriodSummary(mapLayers);
+  const double legendTop = mapTop + 25.0;
+  const double kindsH = kinds.isEmpty() ? 0.0 : 24.0;
+  const double legendH = std::max(30.0, blockY - 3.0 - kindsH - (kindsH > 0.0 ? 2.0 : 0.0) - legendTop);
+  auto* legend = new QgsLayoutItemLegend(layout);
+  legend->setId(QStringLiteral("legend"));
+  legend->setTitle(QStringLiteral("범  례"));
+  legend->setLinkedMap(map);
+  legend->setLegendFilterByMapEnabled(true);
+  legend->setResizeToContents(false);
+  legend->setStyleFont(Qgis::LegendComponent::Title,
+                       QFont(QStringLiteral("Malgun Gothic"), 9, QFont::Bold));
+  legend->setStyleFont(Qgis::LegendComponent::Group, QFont(QStringLiteral("Malgun Gothic"), 8));
+  legend->setStyleFont(Qgis::LegendComponent::Subgroup, QFont(QStringLiteral("Malgun Gothic"), 8));
+  legend->setStyleFont(Qgis::LegendComponent::SymbolLabel,
+                       QFont(QStringLiteral("Malgun Gothic"), 8));
   legend->setFrameEnabled(true);
+  legend->setFrameStrokeColor(ink);
+  legend->setFrameStrokeWidth(QgsLayoutMeasurement(0.3, Qgis::LayoutUnit::Millimeters));
   legend->setBackgroundEnabled(true);
+  legend->attemptSetSceneRect(QRectF(sideX, legendTop, sideW, legendH));
   layout->addLayoutItem(legend);
+  legend->updateLegend();
 
+  if (!kinds.isEmpty()) {
+    auto* kindsLbl = new QgsLayoutItemLabel(layout);
+    kindsLbl->setText(kinds);
+    kindsLbl->attemptSetSceneRect(QRectF(sideX, legendTop + legendH + 2.0, sideW, kindsH));
+    kindsLbl->setFont(QFont(QStringLiteral("Malgun Gothic"), 7));
+    kindsLbl->setFontColor(sub);
+    kindsLbl->setFrameEnabled(true);
+    kindsLbl->setFrameStrokeColor(QColor(156, 163, 175));
+    kindsLbl->setFrameStrokeWidth(QgsLayoutMeasurement(0.2, Qgis::LayoutUnit::Millimeters));
+    kindsLbl->setBackgroundEnabled(true);
+    layout->addLayoutItem(kindsLbl);
+  }
+
+  // ── 하단 축척띠: 교호식 축척자 + 1:N + 좌표계.
+  const double stripY = H - margin - bottomStripH + 1.0;
   auto* sb = new QgsLayoutItemScaleBar(layout);
+  sb->setId(QStringLiteral("scale_bar"));
   layout->addLayoutItem(sb);
   sb->setLinkedMap(map);
   sb->setStyle(QStringLiteral("Double Box"));
@@ -419,34 +573,58 @@ static void fillLayout(QgsPrintLayout* layout, QgsProject* project,
   sb->setUnitLabel(QStringLiteral("m"));
   sb->setNumberOfSegments(4);
   sb->setNumberOfSegmentsLeft(0);
+  sb->setLabelVerticalPlacement(Qgis::ScaleBarDistanceLabelVerticalPlacement::AboveSegment);
+  sb->setHeight(2.4);
+  sb->setLabelBarSpace(1.0);
+  sb->setBoxContentSpace(0.6);
   if (content && !ext.isEmpty())
     sb->applyDefaultSize(Qgis::DistanceUnit::Meters);
-  sb->setHeight(3.0);
-  sb->attemptSetSceneRect(QRectF(margin, H - 16, 88, 12));
+  QgsTextFormat sbFmt;
+  sbFmt.setFont(QFont(QStringLiteral("Malgun Gothic")));
+  sbFmt.setSize(7.0);
+  sbFmt.setSizeUnit(Qgis::RenderUnit::Points);
+  sbFmt.setColor(ink);
+  sb->setTextFormat(sbFmt);
+  if (content && !ext.isEmpty() && map->scale() > 0.0) {
+    const double seg = LayoutService::niceScaleBarSegmentMeters(mapW, map->scale(), 4);
+    if (seg > 0.0) {
+      sb->setUnitsPerSegment(seg);
+      sb->setNumberOfSegments(4);
+    }
+  }
+  sb->attemptSetSceneRect(QRectF(mapX, stripY, 88, 11));
 
   auto* scaleLbl = new QgsLayoutItemLabel(layout);
-  const int sc = map->scale() > 0 ? int(std::lround(map->scale())) : 0;
-  scaleLbl->setText(sc > 0 ? QStringLiteral("축척 1 : %1").arg(sc)
-                           : QStringLiteral("축척: 축척자 참조"));
+  scaleLbl->setText(scNow > 0 ? QStringLiteral("S = 1 : %1").arg(QLocale().toString(scNow))
+                              : QStringLiteral("축척: 축척자 참조"));
   scaleLbl->setId(QStringLiteral("scale_label"));
-  scaleLbl->attemptSetSceneRect(QRectF(margin + 90, H - 14, 55, 8));
-  scaleLbl->setFont(QFont(QStringLiteral("Malgun Gothic"), 9, QFont::Bold));
+  scaleLbl->setVAlign(Qt::AlignBottom);
+  scaleLbl->attemptSetSceneRect(QRectF(mapX + 92, stripY + 1.0, 52, 9));
+  QFont scaleFont = kFont;
+  scaleFont.setPointSize(9);
+  scaleFont.setBold(true);
+  scaleLbl->setFont(scaleFont);
+  scaleLbl->setFontColor(ink);
   layout->addLayoutItem(scaleLbl);
 
-  auto* stamp = new QgsLayoutItemLabel(layout);
-  stamp->setText(QStringLiteral("업로드 CRS: EPSG:5179\n작성: ka-hgis\n%1")
-                     .arg(QDate::currentDate().toString(QStringLiteral("yyyy-MM-dd"))));
-  stamp->attemptSetSceneRect(QRectF(sideX, H - 40, sideW, 24));
-  stamp->setFont(QFont(QStringLiteral("Malgun Gothic"), 7));
-  stamp->setFrameEnabled(true);
-  layout->addLayoutItem(stamp);
+  auto* crsLbl = new QgsLayoutItemLabel(layout);
+  crsLbl->setId(QStringLiteral("crs_label"));
+  crsLbl->setText(QStringLiteral("좌표계  %1").arg(crsFull));
+  crsLbl->setHAlign(Qt::AlignRight);
+  crsLbl->setVAlign(Qt::AlignBottom);
+  crsLbl->attemptSetSceneRect(QRectF(mapX + 148, stripY + 1.0, mapX + mapW - (mapX + 148), 9));
+  QFont crsFont = kFont;
+  crsFont.setPointSize(7);
+  crsLbl->setFont(crsFont);
+  crsLbl->setFontColor(sub);
+  layout->addLayoutItem(crsLbl);
 
   if (!content) {
     auto* hint = new QgsLayoutItemLabel(layout);
     hint->setText(rec.emptyHintKo);
     hint->setHAlign(Qt::AlignHCenter);
     hint->setVAlign(Qt::AlignVCenter);
-    hint->attemptSetSceneRect(QRectF(margin + 8, 21 + mapH * 0.38, mapW - 16, 18));
+    hint->attemptSetSceneRect(QRectF(mapX + 8, mapTop + mapH * 0.38, mapW - 16, 18));
     hint->setFont(QFont(QStringLiteral("Malgun Gothic"), 11, QFont::Bold));
     hint->setBackgroundEnabled(true);
     hint->setFrameEnabled(true);
@@ -501,20 +679,133 @@ double LayoutService::scaleBarWidthMm(double segmentMeters, int segments, double
   return segmentMeters * static_cast<double>(segments) / scaleDenominator * 1000.0;
 }
 
+double LayoutService::niceGridIntervalMeters(double scaleDenominator, double mapWidthMm) {
+  if (!(scaleDenominator > 0.0) || !std::isfinite(scaleDenominator))
+    return 100.0;
+  const double paperMm = mapWidthMm > 0.0 ? mapWidthMm : 180.0;
+  // 한 칸이 종이에서 25~70mm 사이가 되게 목표 간격을 잡고 1-2-5 계열로 스냅.
+  const double targetMm = std::clamp(paperMm * 0.24, 25.0, 70.0);
+  const double rawM = targetMm / 1000.0 * scaleDenominator;
+  static const double kSteps[] = {0.5,   1.0,   2.0,    5.0,    10.0,   20.0,
+                                  25.0,  50.0,  100.0,  200.0,  250.0,  500.0,
+                                  1000.0, 2000.0, 5000.0, 10000.0};
+  double best = kSteps[0];
+  double bestRel = 1.0e99;
+  for (double s : kSteps) {
+    const double rel = std::fabs(rawM - s) / s;
+    if (rel < bestRel) {
+      bestRel = rel;
+      best = s;
+    }
+  }
+  return best;
+}
+
+QString LayoutService::koreanCrsName(const QString& authId) {
+  if (authId == QLatin1String("EPSG:5186")) return QStringLiteral("중부원점(GRS80)");
+  if (authId == QLatin1String("EPSG:5187")) return QStringLiteral("동부원점(GRS80)");
+  if (authId == QLatin1String("EPSG:5185")) return QStringLiteral("서부원점(GRS80)");
+  if (authId == QLatin1String("EPSG:5188")) return QStringLiteral("동해원점(GRS80)");
+  if (authId == QLatin1String("EPSG:5179")) return QStringLiteral("UTM-K 통일원점(GRS80)");
+  if (authId == QLatin1String("EPSG:4326")) return QStringLiteral("경위도(WGS84)");
+  if (authId == QLatin1String("EPSG:3857")) return QStringLiteral("웹 메르카토르");
+  return {};
+}
+
+void LayoutService::applySurveyFrameGrid(QgsLayoutItemMap* map, double intervalM, bool crosses,
+                                         bool showCoords) {
+  if (!map || !map->grids() || !(intervalM > 0.0))
+    return;
+  // 기존 격자를 전부 걷어내고 표준 도곽 하나만 남긴다.
+  QStringList oldIds;
+  const QList<QgsLayoutItemMapGrid*> olds = map->grids()->asList();
+  for (QgsLayoutItemMapGrid* old : olds) {
+    if (!old) continue;
+    old->setEnabled(false);
+    if (!old->name().isEmpty()) oldIds.append(old->name());
+    if (!old->id().isEmpty()) oldIds.append(old->id());
+  }
+  oldIds.removeDuplicates();
+  for (const QString& id : oldIds)
+    map->grids()->removeGrid(id);
+
+  auto* g = new QgsLayoutItemMapGrid(QStringLiteral("survey_frame_grid"), map);
+  map->grids()->addGrid(g);
+  if (map->crs().isValid())
+    g->setCrs(map->crs());
+  g->setEnabled(true);
+  g->setUnits(Qgis::MapGridUnit::MapUnits);
+  g->setIntervalX(intervalM);
+  g->setIntervalY(intervalM);
+  g->setOffsetX(0.0);
+  g->setOffsetY(0.0);
+
+  const QColor ink(17, 24, 39);
+  // 내부 눈금: 십자(도면 판독을 가리지 않는 측량 관례). crosses=false면 도곽만.
+  g->setStyle(crosses ? Qgis::MapGridStyle::LineCrosses
+                      : Qgis::MapGridStyle::FrameAndAnnotationsOnly);
+  g->setCrossLength(2.2);
+  g->setGridLineWidth(0.18);
+  g->setGridLineColor(QColor(17, 24, 39, 160));
+
+  // 도곽: 지형도·측량원도식 지브라(흑백 교차) 프레임.
+  g->setFrameStyle(Qgis::MapGridFrameStyle::Zebra);
+  g->setFrameWidth(1.4);
+  g->setFramePenSize(0.22);
+  g->setFramePenColor(ink);
+  g->setFrameFillColor1(ink);
+  g->setFrameFillColor2(Qt::white);
+
+  // 좌표 주기: 정수 m(TM), 상하 수평·좌우 세로쓰기, 도곽 밖.
+  g->setAnnotationEnabled(showCoords);
+  if (showCoords) {
+    g->setAnnotationFormat(Qgis::MapGridAnnotationFormat::Decimal);
+    g->setAnnotationPrecision(0);
+    g->setAnnotationFrameDistance(0.8);
+    g->setAnnotationPosition(Qgis::MapGridAnnotationPosition::OutsideMapFrame,
+                             Qgis::MapGridBorderSide::Left);
+    g->setAnnotationPosition(Qgis::MapGridAnnotationPosition::OutsideMapFrame,
+                             Qgis::MapGridBorderSide::Right);
+    g->setAnnotationPosition(Qgis::MapGridAnnotationPosition::OutsideMapFrame,
+                             Qgis::MapGridBorderSide::Top);
+    g->setAnnotationPosition(Qgis::MapGridAnnotationPosition::OutsideMapFrame,
+                             Qgis::MapGridBorderSide::Bottom);
+    g->setAnnotationDirection(Qgis::MapGridAnnotationDirection::Horizontal,
+                              Qgis::MapGridBorderSide::Top);
+    g->setAnnotationDirection(Qgis::MapGridAnnotationDirection::Horizontal,
+                              Qgis::MapGridBorderSide::Bottom);
+    g->setAnnotationDirection(Qgis::MapGridAnnotationDirection::Vertical,
+                              Qgis::MapGridBorderSide::Left);
+    g->setAnnotationDirection(Qgis::MapGridAnnotationDirection::Vertical,
+                              Qgis::MapGridBorderSide::Right);
+    QgsTextFormat tf;
+    QFont annFont(QStringLiteral("Malgun Gothic"));
+    tf.setFont(annFont);
+    tf.setSize(6.5);
+    tf.setSizeUnit(Qgis::RenderUnit::Points);
+    tf.setColor(QColor(31, 41, 55));
+    g->setAnnotationTextFormat(tf);
+  }
+  map->updateBoundingRect();
+}
+
 LayoutService::SheetChromeRects LayoutService::standardSheetChrome(const QRectF& page,
                                                                    const QRectF& requestedMap) {
-  constexpr double kChromeH = 22.0;
-  constexpr double kGap = 3.0;
+  // Field sheet strip locked under the map (not on imagery):
+  // [0 50 100 … m]                    좌표계 … EPSG:518x   [N]
+  //      축척 1 : N
+  // kGap은 도곽(지브라 프레임+좌표 주기)이 지도 아래로 뻗는 공간까지 포함한다.
+  constexpr double kChromeH = 33.0;
+  constexpr double kGap = 7.0;
   constexpr double kMargin = 8.0;
   constexpr double kMinMapH = 40.0;
-  constexpr double kBarH = 10.0;
-  constexpr double kLabelW = 72.0;
-  constexpr double kLabelH = 8.0;
-  constexpr double kLabelGap = 1.5;
-  constexpr double kNorthW = 28.0;
-  constexpr double kNorthH = 32.0;
-  constexpr double kCrsH = 8.0;
-  constexpr double kInner = 4.0;
+  constexpr double kBarH = 12.0;
+  constexpr double kLabelH = 7.0;
+  constexpr double kLabelGap = 2.5;
+  constexpr double kNorth = 20.0;
+  constexpr double kCrsH = 7.0;
+  constexpr double kCrsW = 58.0;
+  constexpr double kCrsGap = 6.0;
 
   SheetChromeRects out;
   QRectF map = requestedMap;
@@ -533,21 +824,21 @@ LayoutService::SheetChromeRects LayoutService::standardSheetChrome(const QRectF&
   out.map = map;
 
   const double rowTop = map.bottom() + kGap;
-  const double barW = std::min(88.0, std::max(48.0, map.width() * 0.42));
-  out.scaleBar = QRectF(map.left(), rowTop, barW, kBarH);
-  out.scaleLabel = QRectF(map.left(), out.scaleBar.bottom() + kLabelGap, kLabelW, kLabelH);
-  out.north = QRectF(map.right() - kNorthW, rowTop, kNorthW, kNorthH);
+  out.north = QRectF(map.right() - kNorth, rowTop, kNorth, kNorth);
+  out.crs = QRectF(out.north.left() - kCrsGap - kCrsW,
+                   rowTop + std::max(0.0, (kBarH - kCrsH) * 0.5), kCrsW, kCrsH);
 
-  const double crsLeft = out.scaleLabel.right() + 8.0;
-  const double crsRight = out.north.left() - 6.0;
-  const double crsW = std::max(24.0, crsRight - crsLeft);
-  out.crs = QRectF(crsLeft, out.scaleLabel.top(), crsW, kCrsH);
+  const double barMaxRight = out.crs.left() - 8.0;
+  const double barW = std::min({88.0, std::max(48.0, map.width() * 0.38),
+                                std::max(32.0, barMaxRight - map.left())});
+  out.scaleBar = QRectF(map.left(), rowTop, barW, kBarH);
+  out.scaleLabel = QRectF(map.left(), out.scaleBar.bottom() + kLabelGap, barW, kLabelH);
 
   auto clampOnPage = [&](QRectF& r) {
     if (r.top() < map.bottom())
       r.moveTop(map.bottom());
-    if (r.bottom() > page.bottom())
-      r.setHeight(std::max(4.0, page.bottom() - r.top()));
+    if (r.bottom() > page.bottom() - kMargin)
+      r.setHeight(std::max(4.0, page.bottom() - kMargin - r.top()));
     if (r.left() < page.left())
       r.moveLeft(page.left());
     if (r.right() > page.right())
@@ -558,19 +849,15 @@ LayoutService::SheetChromeRects LayoutService::standardSheetChrome(const QRectF&
   clampOnPage(out.north);
   clampOnPage(out.crs);
 
-  if (out.scaleLabel.right() > out.north.left() - 2.0)
-    out.scaleLabel.setWidth(std::max(8.0, out.north.left() - 2.0 - out.scaleLabel.left()));
-
-  if (out.crs.left() < out.scaleBar.right() + 2.0)
-    out.crs.setLeft(out.scaleBar.right() + 2.0);
   if (out.crs.right() > out.north.left() - 2.0)
-    out.crs.setRight(out.north.left() - 2.0);
-  if (out.crs.width() < 4.0) {
-    out.crs = QRectF(out.north.left() - 36.0, rowTop + 1.0, 32.0, kCrsH);
-    if (out.crs.left() < out.scaleBar.right() + 2.0)
-      out.crs.setLeft(out.scaleBar.right() + 2.0);
-    clampOnPage(out.crs);
-  }
+    out.crs.setRight(std::max(out.crs.left() + 4.0, out.north.left() - 2.0));
+  if (out.scaleBar.right() > out.crs.left() - 4.0)
+    out.scaleBar.setWidth(std::max(32.0, out.crs.left() - 4.0 - out.scaleBar.left()));
+  out.scaleLabel.setLeft(out.scaleBar.left());
+  out.scaleLabel.setWidth(out.scaleBar.width());
+  if (out.scaleLabel.top() < out.scaleBar.bottom())
+    out.scaleLabel.moveTop(out.scaleBar.bottom() + kLabelGap);
+  clampOnPage(out.scaleLabel);
 
   return out;
 }

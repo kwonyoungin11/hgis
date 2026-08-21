@@ -54,7 +54,7 @@ void KaAlignPickTool::updateSnapMark(const QgsPointXY& pt, bool snapped) {
     m_snapMark->setIconType(QgsVertexMarker::ICON_CIRCLE);
     m_snapMark->setIconSize(16);
     m_snapMark->setPenWidth(2);
-    m_snapMark->setColor(QColor(15, 118, 110));
+    m_snapMark->setColor(QColor(30, 103, 198));
     m_snapMark->setFillColor(QColor(255, 255, 255, 220));
   }
   m_snapMark->setCenter(pt);
@@ -292,7 +292,7 @@ bool KaAlignMapTool::applyPreview(QString* errorOut) {
     auto* vl = qobject_cast<QgsVectorLayer*>(m_layer.data());
     ok = vl && GeorefService::applyAffineToVector(vl, m_affine, m_originals, workCrs(), &err);
     if (ok && vl) {
-      LayerOps::applySimpleVectorStyle(vl, QColor(0, 0, 0, 0), QColor(15, 118, 110), 0.9, 4.0,
+      LayerOps::applySimpleVectorStyle(vl, QColor(0, 0, 0, 0), QColor(30, 103, 198), 0.9, 4.0,
                                        true, false);
       vl->setOpacity(1.0);
     }
@@ -488,7 +488,7 @@ void KaAlignMapTool::updateSnapMark(const QgsPointXY& pt, bool snapped) {
     m_snapMark->setIconType(QgsVertexMarker::ICON_CIRCLE);
     m_snapMark->setIconSize(16);
     m_snapMark->setPenWidth(2);
-    m_snapMark->setColor(QColor(15, 118, 110));
+    m_snapMark->setColor(QColor(30, 103, 198));
     m_snapMark->setFillColor(QColor(255, 255, 255, 220));
   }
   m_snapMark->setCenter(pt);

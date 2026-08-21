@@ -144,6 +144,11 @@ bool LayerOps::applyDomainDrawStyle(QgsVectorLayer* layer, const QString& layerK
     fill = QColor(185, 28, 28, 255);
     stroke = QColor(127, 29, 29, 255);
     markerSize = 3.6;
+  } else if (key == QLatin1String("trial_trench")) {
+    // 시굴 트렌치 도면 관례: 붉은 외곽선 0.5, 채움은 거의 없음(위성·지적 위 판독).
+    fill = QColor(220, 38, 38, 18);
+    stroke = QColor(220, 38, 38, 255);
+    strokeW = 0.5;
   }
 
   QgsSymbol* sym = nullptr;
@@ -681,7 +686,7 @@ QgsVectorLayer* LayerOps::digitizeTargetLayer(QgsProject* project, QgsVectorLaye
 QStringList LayerOps::domainLayerKeys() {
   return {QStringLiteral("survey_area"), QStringLiteral("feature_poly"), QStringLiteral("feature_line"),
           QStringLiteral("section_line"), QStringLiteral("control_points"),
-          QStringLiteral("artifact_point")};
+          QStringLiteral("artifact_point"), QStringLiteral("trial_trench")};
 }
 
 void LayerOps::removeSurveyDomainLayers(QgsProject* project) {
@@ -729,19 +734,30 @@ QgsVectorLayer* LayerOps::ensureDomainLayer(QgsProject* project, const QString& 
   }
   auto* vl = new QgsVectorLayer(QStringLiteral("%1|layername=%2").arg(gpkgPath, layerKey),
                                 titleKo, QStringLiteral("ogr"));
-  if (!vl->isValid() && layerKey == QLatin1String("artifact_point")) {
+  const bool canCreateMissing = layerKey == QLatin1String("artifact_point")
+                                || layerKey == QLatin1String("trial_trench");
+  if (!vl->isValid() && canCreateMissing) {
     delete vl;
     vl = nullptr;
     const QgsCoordinateReferenceSystem crs = project->crs().isValid()
         ? project->crs()
         : QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186"));
-    QgsVectorLayer mem(QStringLiteral("Point?crs=%1").arg(crs.authid()), titleKo, QStringLiteral("memory"));
+    const QString memUri = (layerKey == QLatin1String("trial_trench"))
+                               ? QStringLiteral("Polygon?crs=%1").arg(crs.authid())
+                               : QStringLiteral("Point?crs=%1").arg(crs.authid());
+    QgsVectorLayer mem(memUri, titleKo, QStringLiteral("memory"));
     if (mem.isValid()) {
       QgsFields fields;
+      if (layerKey == QLatin1String("trial_trench")) {
+        fields.append(QgsField(QStringLiteral("name"), QMetaType::Type::QString));
+        fields.append(QgsField(QStringLiteral("width"), QMetaType::Type::Double));
+        fields.append(QgsField(QStringLiteral("length"), QMetaType::Type::Double));
+      } else {
       fields.append(QgsField(QStringLiteral("kind"), QMetaType::Type::QString));
       fields.append(QgsField(QStringLiteral("period"), QMetaType::Type::QString));
       fields.append(QgsField(QStringLiteral("artifact_no"), QMetaType::Type::QString));
       fields.append(QgsField(QStringLiteral("note"), QMetaType::Type::QString));
+      }
       mem.dataProvider()->addAttributes(fields.toList());
       mem.updateFields();
       mem.setCrs(crs);
@@ -1376,8 +1392,8 @@ static bool addGdalVworldCadastral(QgsProject* project, QgsMapCanvas* canvas, co
                                                       : QStringLiteral("EPSG:5186");
     LayerOps::ensureOtfEnabled(project, canvas, workAuth);
     syncCanvasToProject(project, canvas);
-    if (canvas->scale() > 8000.0 || canvas->scale() < 200.0)
-      zoomCanvasToWorkingScale(canvas, workAuth, 3000.0);
+    if (canvas->scale() > 80000.0 || canvas->scale() < 200.0)
+      zoomCanvasToWorkingScale(canvas, workAuth, 25000.0);
     canvas->clearCache();
     canvas->refreshAllLayers();
     canvas->refresh();
@@ -1437,8 +1453,8 @@ bool LayerOps::addVworldCadastralMap(QgsProject* project, QgsMapCanvas* canvas, 
     }
     LayerOps::syncMapCanvas(project, canvas, false);
     const double s = canvas->scale();
-    if (s > 6000.0 || s < 500.0)
-      canvas->zoomScale(3000.0, true);
+    if (s > 80000.0 || s < 200.0)
+      canvas->zoomScale(25000.0, true);
     canvas->clearCache();
     canvas->refreshAllLayers();
     canvas->refresh();
@@ -1537,6 +1553,118 @@ bool LayerOps::addVworldContourMap(QgsProject* project, QgsMapCanvas* canvas, co
       makeVworldWmsUri(apiKey, QStringLiteral("lt_c_upisuq"), QString(), QStringLiteral("EPSG:3857")),
   };
   return addBasemapWithFallbacks(project, canvas, uris, QStringLiteral("VWorld 등고선"), errorOut);
+}
+
+// 토양도 참조 스타일. categoryField 값별 반투명 채움 + 옅은 외곽선.
+// 값이 수백 개면(토양부호 등) 범례가 무의미해지므로 단색으로 떨어진다.
+static void applySoilCategoryStyle(QgsVectorLayer* layer, const QString& categoryField) {
+  if (!layer || !layer->isValid()) return;
+  const Qgis::GeometryType gt = layer->geometryType();
+
+  auto makeSymbol = [gt](const QColor& c) -> QgsSymbol* {
+    if (gt == Qgis::GeometryType::Polygon) {
+      auto fs = QgsFillSymbol::createSimple({
+          {QStringLiteral("color"), c.name(QColor::HexArgb)},
+          {QStringLiteral("outline_color"), QColor(90, 96, 104, 130).name(QColor::HexArgb)},
+          {QStringLiteral("outline_width"), QStringLiteral("0.12")},
+          {QStringLiteral("outline_width_unit"), QStringLiteral("MM")},
+      });
+      return fs.release();
+    }
+    QgsSymbol* s = QgsSymbol::defaultSymbol(gt);
+    if (s) s->setColor(c);
+    return s;
+  };
+
+  const int fieldIdx = categoryField.isEmpty() ? -1 : layer->fields().indexOf(categoryField);
+  if (fieldIdx >= 0) {
+    constexpr int kMaxCategories = 200;
+    const QSet<QVariant> uniq = layer->uniqueValues(fieldIdx, kMaxCategories + 1);
+    if (!uniq.isEmpty() && uniq.size() <= kMaxCategories) {
+      QStringList sorted;
+      QHash<QString, QVariant> byText;
+      for (const QVariant& v : uniq) {
+        const QString t = v.toString().trimmed();
+        if (t.isEmpty()) continue;
+        if (!byText.contains(t)) {
+          byText.insert(t, v);
+          sorted.append(t);
+        }
+      }
+      sorted.sort();
+      QgsCategoryList cats;
+      int i = 0;
+      for (const QString& t : sorted) {
+        // 황금각 색상환: 인접 폴리곤이 비슷한 색으로 붙지 않게 한다.
+        const QColor c = QColor::fromHsv((i * 47) % 360, 140, 220, 150);
+        if (QgsSymbol* sym = makeSymbol(c))
+          cats.append(QgsRendererCategory(byText.value(t), sym, t));
+        ++i;
+      }
+      // 빈 값·미분류는 회색 "기타"로 표시(없으면 해당 폴리곤이 아예 안 그려진다).
+      if (QgsSymbol* rest = makeSymbol(QColor(150, 150, 150, 90)))
+        cats.append(QgsRendererCategory(QVariant(), rest, QStringLiteral("기타")));
+      if (!cats.isEmpty()) {
+        layer->setRenderer(new QgsCategorizedSymbolRenderer(categoryField, cats));
+        layer->triggerRepaint();
+        return;
+      }
+    }
+  }
+  if (QgsSymbol* sym = makeSymbol(QColor(189, 183, 107, 110))) {
+    layer->setRenderer(new QgsSingleSymbolRenderer(sym));
+    layer->triggerRepaint();
+  }
+}
+
+QgsVectorLayer* LayerOps::addSoilShapefile(QgsProject* project, QgsMapCanvas* canvas,
+                                           const QString& path, const QString& crsOverrideAuthId,
+                                           const QString& categoryField, QString* errorOut) {
+  if (!project) {
+    if (errorOut) *errorOut = QStringLiteral("프로젝트가 없습니다.");
+    return nullptr;
+  }
+  const QFileInfo fi(path);
+  auto* layer = new QgsVectorLayer(path, fi.completeBaseName(), QStringLiteral("ogr"));
+  if (!layer->isValid()) {
+    if (errorOut)
+      *errorOut = QStringLiteral("토양도 SHP를 열 수 없습니다: %1").arg(layer->error().message());
+    delete layer;
+    return nullptr;
+  }
+
+  // 정부 배포 SHP의 DBF는 대부분 CP949. .cpg가 없으면 한글 속성이 깨진다.
+  const QString cpg = fi.dir().filePath(fi.completeBaseName() + QStringLiteral(".cpg"));
+  if (fi.suffix().compare(QLatin1String("shp"), Qt::CaseInsensitive) == 0 && !QFile::exists(cpg))
+    layer->setProviderEncoding(QStringLiteral("CP949"));
+
+  // 흙토람 고시 좌표계 = EPSG:2097(중부원점/Bessel). 사용자가 고른 값이 우선,
+  // 아니면 파일 좌표계 유지, 그것도 없으면 2097로 가정한다.
+  const QString overrideAuth = crsOverrideAuthId.trimmed();
+  if (!overrideAuth.isEmpty())
+    layer->setCrs(QgsCoordinateReferenceSystem(overrideAuth));
+  else if (!layer->crs().isValid())
+    layer->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:2097")));
+
+  applySoilCategoryStyle(layer, categoryField.trimmed());
+
+  LayerOps::markReferenceLayer(layer);
+  LayerOps::applyLegendCrsLabel(layer);
+  if (!project->addMapLayer(layer, true)) {
+    delete layer;
+    if (errorOut) *errorOut = QStringLiteral("토양도 레이어를 프로젝트에 넣지 못했습니다.");
+    return nullptr;
+  }
+  LayerOps::placeInLegendGroup(project, layer, QStringLiteral("참조 지도"));
+  if (canvas) {
+    const QString workAuth = project->crs().isValid() ? project->crs().authid()
+                                                      : QStringLiteral("EPSG:5186");
+    LayerOps::ensureOtfEnabled(project, canvas, workAuth);
+    LayerOps::syncMapCanvas(project, canvas, false);
+    LayerOps::zoomToLayerMax(canvas, layer);
+    canvas->refreshAllLayers();
+  }
+  return layer;
 }
 
 static QList<QgsMapLayer*> layersMatchingBaseName(QgsProject* project, const QString& name) {

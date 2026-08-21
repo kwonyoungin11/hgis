@@ -34,10 +34,10 @@ VWorld key is **local only** (`VworldSettings` / 도움말 → API 키). Never c
 Korean field archaeology HGIS (C++20/Qt6 + OSGeo4W `qgis-dev`, Architecture B, no QGIS fork):
 
 1. GPKG survey store; **legend empty until draw/import** (`LayerOps::ensureDomainLayer` only). **새 조사** drops every non-basemap layer (keep WMS/XYZ 지적·위성 only)
-2. Domain keys: `survey_area`, `feature_poly`, `feature_line`, `section_line`, `control_points`
+2. Domain keys: `survey_area`, `feature_poly`, `feature_line`, `section_line`, `control_points`, `artifact_point`
 3. **참조 지도** (위성/지적) vs **조사 데이터**
 4. Digitize: startEditing → addFeature → commit (keep tool). **Ctrl+Z** undoes last vertex, then last saved feature
-5. **도면 만들기** = `KaDrawingStudio` (not QGIS Layout Designer). Samples for north/scale/legend/CRS. **Ctrl+Z** removes last placed item
+5. **도면 만들기** = `KaDrawingStudio` (not QGIS Layout Designer). Samples for north/scale/legend/CRS. **Ctrl+Z** removes last placed item. 전문 도곽 기본: 지브라 프레임 + 정수 TM 좌표 주기(좌우 세로쓰기) + 십자 눈금, 간격은 축척 연동 1-2-5 자동(`LayoutService::applySurveyFrameGrid`). 자동 도면(`fillLayout`)은 표제란(도면명·조사명·축척·좌표계·작성일) 포함
 5b. **맞추기** = same-canvas JPG/DXF onto 지적 (Fit To Display + 2–3 pairs). Result is **참조 지도**, not submit geometry. Not GNSS `control_points`.
 6. Work CRS default **EPSG:5187 (동부)**; 5186 also OK. **export SHP+PDF+MANIFEST = EPSG:5179**. Checklist error hard-blocks 제출
 7. Icon toolbar (새조사/열기/저장/위성/지적/그리기/선택/속성/도면/검수/보내기/찾기). Text menu bar **hidden**. File drawer and 작업 제어 dock hidden by default (**더보기**)
