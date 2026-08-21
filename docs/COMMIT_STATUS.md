@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-21 23:09:07 +09:00 |
+| Updated (local) | 2026-08-21 23:37:27 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `cursor/pro-drawing-and-map-services` |
-| HEAD short | `5735677` |
-| HEAD full | `5735677fcd09d877d8c623e0050672cc1b4d317e` |
-| HEAD date | 2026-08-21 22:49:12 +0900 |
+| HEAD short | `80223e1` |
+| HEAD full | `80223e1adc6d4e85605d97c968437bf0f0b40ea3` |
+| HEAD date | 2026-08-21 23:09:06 +0900 |
 | HEAD author | kwonypungin <kyi25@nate.com> |
-| HEAD subject | Ship pro survey sheets, Korean map services, trench tools, and crash guard. |
-| Total commits | 29 |
+| HEAD subject | Fix review findings: wire single-instance guard, anchor layout wheel zoom, repair portable README encoding. |
+| Total commits | 30 |
 | Upstream | `(none)` |
 | Sync | no upstream configured |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (17 paths) |
+| Working tree dirty | **yes** (15 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Ship pro survey sheets, Korean map services, trench tools, and crash guard. (`5735677` @ 2026-08-21 22:49:12 +0900)
+- **Recorded tip when this file was written:** Fix review findings: wire single-instance guard, anchor layout wheel zoom, repair portable README encoding. (`80223e1` @ 2026-08-21 23:09:06 +0900)
 - **Remote sync at write time:** no upstream configured
-- **Uncommitted local changes at write time:** yes (17 paths)
+- **Uncommitted local changes at write time:** yes (15 paths)
 
 ### Read this correctly
 
@@ -54,6 +54,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `80223e1` | 2026-08-21T23:09:06+09:00 | Fix review findings: wire single-instance guard, anchor layout wheel zoom, repair portable README encoding. |
 | `5735677` | 2026-08-21T22:48:49+09:00 | Ship pro survey sheets, Korean map services, trench tools, and crash guard. |
 | `cf52276` | 2026-08-18T07:29:54+09:00 | Refresh COMMIT_STATUS after start page and layout coord ship. |
 | `a057319` | 2026-08-18T07:29:17+09:00 | Ship start page, recent surveys, splash, auto VWorld basemaps, and layout coordinate callouts. |
@@ -87,9 +88,8 @@
 ## Staged in this commit
 
 ```
-M	dist/ka-hgis-portable/README.txt
-M	scripts/make-portable.ps1
-M	src/app/KaApplication.cpp
+M	HANDOFF.md
+M	docs/HANDOFF.md
 M	src/app/KaDrawingStudio.cpp
 M	src/core/LayoutService.cpp
 M	src/core/LayoutService.h

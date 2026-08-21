@@ -809,6 +809,8 @@ void KaDrawingStudio::ensureBlankLayout() {
 void KaDrawingStudio::attachLayoutToView() {
   auto* ly = layout();
   if (!m_view || !ly) return;
+  // 위성 배경이 조각 단위로 빈 채 남는 것을 막는다(다시 열린 조판까지 포함).
+  LayoutService::applySingleRasterPassRendering(ly);
   if (m_view->currentLayout() != ly)
     m_view->setCurrentLayout(ly);
   if (m_toolSelect)

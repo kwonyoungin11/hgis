@@ -45,6 +45,7 @@
 #include <qgscategorizedsymbolrenderer.h>
 #include <qgssinglesymbolrenderer.h>
 #include <qgsprintlayout.h>
+#include <qgslayoutrendercontext.h>
 #include <qgslayoutitemmap.h>
 #include <qgslayoutitemmapgrid.h>
 #include <qgslayoutitemlabel.h>
@@ -104,6 +105,7 @@ private slots:
   void startupLoadsSatelliteAndCadastralWithoutToolbarIcons();
   void layoutCoordPointHasIconAndCallout();
   void layoutProfessionalSheet_frameGridTitleBlock();
+  void layoutRasterDrawnInOnePass();
   void layoutWheelZoom_keepsPointUnderCursor();
   void singleInstanceGuardIsWiredIntoBoot();
 };
@@ -1747,6 +1749,41 @@ void TestWorkflow::layoutProfessionalSheet_frameGridTitleBlock() {
       LayoutService::renderPreview(&proj, QStringLiteral("survey_area_map"), QSize(1400, 990), &err);
   QVERIFY2(!img.isNull(), qPrintable(err));
   img.save(QDir::temp().filePath(QStringLiteral("ka-hgis-layout-pro.png")));
+}
+
+void TestWorkflow::layoutRasterDrawnInOnePass() {
+  // 위성지도가 반만 나오는 원인: QGIS 기본값이 래스터를 여러 조각으로 나눠 그려서
+  // 조각 하나가 빈 채로 오면 그 사각형이 통째로 빈다. 도면은 항상 한 번에 그린다.
+  const auto tiledOff = [](QgsLayout* ly) {
+    return ly && ly->renderContext().testFlag(
+                     Qgis::LayoutRenderFlag::DisableTiledRasterLayerRenders);
+  };
+
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+
+  // 사용자 도면(조판 스튜디오가 쓰는 빈 용지).
+  QString err;
+  QVERIFY(!LayoutService::createBlankSheet(&proj, 210.0, 297.0,
+                                          QStringLiteral("user_sheet"), &err)
+               .isEmpty());
+  auto* sheet = dynamic_cast<QgsPrintLayout*>(
+      proj.layoutManager()->layoutByName(QStringLiteral("user_sheet")));
+  QVERIFY2(tiledOff(sheet), "빈 용지도 래스터를 한 번에 그려야 한다");
+
+  // 자동 생성 도면.
+  LayoutService::DrawingOptions opt;
+  LayoutService::buildDrawing(&proj, LayoutService::DrawingKind::SurveyAreaMap, opt, &err);
+  auto* built = dynamic_cast<QgsPrintLayout*>(
+      proj.layoutManager()->layoutByName(QStringLiteral("survey_area_map")));
+  QVERIFY2(tiledOff(built), "자동 도면도 래스터를 한 번에 그려야 한다");
+
+  // 예전 프로젝트에서 열린 조판처럼 플래그가 꺼져 있어도 내보내기·미리보기에서 되살린다.
+  sheet->renderContext().setFlag(Qgis::LayoutRenderFlag::DisableTiledRasterLayerRenders, false);
+  LayoutService::renderPreview(&proj, QStringLiteral("user_sheet"), QSize(200, 280), &err);
+  QVERIFY2(tiledOff(sheet), "미리보기 경로에서 다시 켜져야 한다");
+
+  LayoutService::applySingleRasterPassRendering(nullptr);  // 널 안전
 }
 
 #include "test_workflow.moc"

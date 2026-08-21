@@ -897,6 +897,12 @@ QgsRectangle LayoutService::zoomExtentAtAnchor(const QgsRectangle& extent, doubl
   return QgsRectangle(xMin, yMax - h, xMin + w, yMax);
 }
 
+void LayoutService::applySingleRasterPassRendering(QgsLayout* layout) {
+  if (!layout)
+    return;
+  layout->renderContext().setFlag(Qgis::LayoutRenderFlag::DisableTiledRasterLayerRenders, true);
+}
+
 QString LayoutService::createBlankSheet(QgsProject* project, double widthMm, double heightMm,
                                         const QString& name, QString* errorOut) {
   if (!project) {
@@ -913,6 +919,7 @@ QString LayoutService::createBlankSheet(QgsProject* project, double widthMm, dou
   layout->initializeDefaults();
   layout->setName(name);
   layout->setUnits(Qgis::LayoutUnit::Millimeters);
+  applySingleRasterPassRendering(layout);
   if (layout->pageCollection() && layout->pageCollection()->pageCount() > 0) {
     if (QgsLayoutItemPage* page = layout->pageCollection()->page(0))
       page->setPageSize(QgsLayoutSize(widthMm, heightMm, Qgis::LayoutUnit::Millimeters));
@@ -928,6 +935,7 @@ static QgsPrintLayout* replaceLayout(QgsProject* project, const QString& name) {
   layout->initializeDefaults();
   layout->setName(name);
   layout->setUnits(Qgis::LayoutUnit::Millimeters);
+  LayoutService::applySingleRasterPassRendering(layout);
   project->layoutManager()->addLayout(layout);
   return layout;
 }
@@ -1032,6 +1040,8 @@ QString LayoutService::exportLayoutPdf(QgsProject* project, const QString& layou
     return {};
   }
 
+  // 저장된 조판(예전 프로젝트에서 열린 것)에도 래스터 단일 렌더를 보장한다.
+  applySingleRasterPassRendering(layout);
   QgsLayoutExporter exporter(layout);
   QgsLayoutExporter::PdfExportSettings settings;
   settings.dpi = 300;
@@ -1060,6 +1070,7 @@ QImage LayoutService::renderPreview(QgsProject* project, const QString& layoutNa
     if (errorOut) *errorOut = QStringLiteral("미리볼 도면이 없습니다.");
     return {};
   }
+  applySingleRasterPassRendering(layout);
   try {
     QgsLayoutExporter exporter(layout);
     const QSize sz = imageSize.isEmpty() ? QSize(720, 510) : imageSize;

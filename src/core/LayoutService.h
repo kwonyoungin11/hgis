@@ -8,6 +8,7 @@
 #include <qgsfeatureid.h>
 #include <qgsrectangle.h>
 class QgsProject;
+class QgsLayout;
 class QgsLayoutItemMap;
 
 class LayoutService {
@@ -78,6 +79,12 @@ public:
   static QString createBlankSheet(QgsProject* project, double widthMm, double heightMm,
                                   const QString& name = QStringLiteral("user_sheet"),
                                   QString* errorOut = nullptr);
+
+  // 도면의 래스터(위성·지적·지질 배경)를 조각내지 않고 한 번에 그리게 한다.
+  // QGIS 기본값은 래스터를 여러 조각으로 나눠 그리는데, 타일 배경에서는 조각 하나가
+  // 빈 채로 돌아오면 그 사각형만 통째로 비어 위성지도가 반만 나온 것처럼 보인다.
+  // 조판을 새로 만들 때와 이미 있는 조판을 열 때 모두 걸어 준다.
+  static void applySingleRasterPassRendering(QgsLayout* layout);
 
   // 용지 mm × 축척 → 지도 범위(미터 CRS). 입력한 1:N이 그대로 유지되게 한다.
   static QgsRectangle extentForPaperScale(const QgsRectangle& currentExtent,
