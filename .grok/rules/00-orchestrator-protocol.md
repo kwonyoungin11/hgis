@@ -6,6 +6,19 @@ MCP, skills, hooks, or subagents.
 
 MCP, skills, and hooks are **allowed and required**. There is no ban.
 
+User standing order (also injected by `.grok/hooks/bin/prompt-inject.ps1`
+and spelled out in `30-excavation-gis-loop.md`): excavation field HGIS only;
+prompt-engineer internally; sequential-thinking + context7 first; **English
+official QGIS + ArcGIS developer sites** (docs.qgis.org, api.qgis.org,
+developers.arcgis.com, pro.arcgis.com) before GIS edits — user command wins;
+matching skills (each expert
+loads its own); graph + loop; cross-check vs digitize/layout/export 5179;
+remember prior asks; end with **3** next field-GIS recommendations.
+
+Remembered product asks: 좌표점 is **layout-only**; keep layout scale when
+visiting 맵; on layout enter, pan map-center to layout center (do not steal
+scale); 레이어를 가운데 keeps scale.
+
 ## Step 1 — tools first
 
 Before answering, call:

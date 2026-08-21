@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-21 23:37:27 +09:00 |
+| Updated (local) | 2026-08-21 23:37:43 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `cursor/pro-drawing-and-map-services` |
-| HEAD short | `80223e1` |
-| HEAD full | `80223e1adc6d4e85605d97c968437bf0f0b40ea3` |
-| HEAD date | 2026-08-21 23:09:06 +0900 |
+| HEAD short | `be276e4` |
+| HEAD full | `be276e4dc61188d612f3dc79132a0461bbe32413` |
+| HEAD date | 2026-08-21 23:37:27 +0900 |
 | HEAD author | kwonypungin <kyi25@nate.com> |
-| HEAD subject | Fix review findings: wire single-instance guard, anchor layout wheel zoom, repair portable README encoding. |
-| Total commits | 30 |
+| HEAD subject | Draw layout rasters in a single pass so tiled basemaps stop leaving blank chunks. |
+| Total commits | 31 |
 | Upstream | `(none)` |
 | Sync | no upstream configured |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (15 paths) |
+| Working tree dirty | **yes** (9 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Fix review findings: wire single-instance guard, anchor layout wheel zoom, repair portable README encoding. (`80223e1` @ 2026-08-21 23:09:06 +0900)
+- **Recorded tip when this file was written:** Draw layout rasters in a single pass so tiled basemaps stop leaving blank chunks. (`be276e4` @ 2026-08-21 23:37:27 +0900)
 - **Remote sync at write time:** no upstream configured
-- **Uncommitted local changes at write time:** yes (15 paths)
+- **Uncommitted local changes at write time:** yes (9 paths)
 
 ### Read this correctly
 
@@ -54,6 +54,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `be276e4` | 2026-08-21T23:37:27+09:00 | Draw layout rasters in a single pass so tiled basemaps stop leaving blank chunks. |
 | `80223e1` | 2026-08-21T23:09:06+09:00 | Fix review findings: wire single-instance guard, anchor layout wheel zoom, repair portable README encoding. |
 | `5735677` | 2026-08-21T22:48:49+09:00 | Ship pro survey sheets, Korean map services, trench tools, and crash guard. |
 | `cf52276` | 2026-08-18T07:29:54+09:00 | Refresh COMMIT_STATUS after start page and layout coord ship. |
@@ -83,17 +84,19 @@
 | `f659bdb` | 2026-08-09T18:53:27+09:00 | Add QGIS 3.44 manuals as design guide and agent SSOT rules. |
 | `536977c` | 2026-08-09T16:10:06+09:00 | Sync COMMIT_STATUS to HEAD after push. |
 | `99bd664` | 2026-08-09T16:09:56+09:00 | Refresh COMMIT_STATUS for baseline HEAD. |
-| `eac6c9c` | 2026-08-09T16:09:43+09:00 | Initial baseline: ka-hgis v0.3 archaeology HGIS (C++/Qt6 + QGIS libs). |
 
 ## Staged in this commit
 
 ```
-M	HANDOFF.md
-M	docs/HANDOFF.md
-M	src/app/KaDrawingStudio.cpp
-M	src/core/LayoutService.cpp
-M	src/core/LayoutService.h
-M	tests/test_workflow.cpp
+A	.grok/hooks/bin/excavation-loop-expert.txt
+A	.grok/hooks/bin/excavation-loop.txt
+M	.grok/hooks/bin/prompt-inject.ps1
+M	.grok/hooks/bin/session-start.ps1
+M	.grok/hooks/orchestrator-protocol.json
+M	.grok/rules/00-orchestrator-protocol.md
+A	.grok/rules/30-excavation-gis-loop.md
+A	.grok/rules/31-official-dev-docs.md
+M	docs/COMMIT_STATUS.md
 ```
 ## Other PC checklist
 

@@ -1,0 +1,31 @@
+[EXCAVATION-GIS LOOP — every user request. Hooks and skills are ON.]
+
+DOMAIN: Korean archaeology field HGIS (ka-hgis). Architecture B. Work CRS 5186/5187. Export/upload EPSG:5179 SHP+PDF. No QGIS fork. No removeAllMapLayers. No empty domain auto-add. No hardcoded VWorld key. No DXF submit. No commit unless asked.
+
+1) PROMPT ENGINEERING (internal, do not dump): Role, Context, Objective, Instructions, Constraints, Output, Tone, Evaluation, Edge Cases.
+
+2) TOOLS FIRST: sequential-thinking MCP + context7 MCP (search_tool then use_tool).
+   USER COMMANDS WIN. Follow the user's last explicit order.
+   Before ANY develop/fix/GIS edit, learn the matching topic in ENGLISH from official developer sites
+   (do not invent Qgs* or ArcGIS APIs):
+   - QGIS: https://docs.qgis.org/latest/en/docs/pyqgis_developer_cookbook/
+           https://docs.qgis.org/latest/en/docs/user_manual/
+           https://api.qgis.org/api/
+           in-repo docs/vendor/qgis-manual-3.44/
+   - ArcGIS: https://developers.arcgis.com/documentation/
+             https://pro.arcgis.com/en/pro-app/latest/help/mapping/
+             https://pro.arcgis.com/en/pro-app/latest/sdk/api-reference/
+             docs/user/job-cards/arcgis-용어.md (terms only; do not clone ArcMap chrome).
+   Use context7 + open_page/web_fetch on those URLs, then implement.
+
+3) SKILLS: orchestrator-protocol, ka-graph, ka-experts, ka-hgis, gis-verify, ka-hgis-verify as they match. Each spawned expert loads skills separately.
+
+4) GRAPH this turn: QUICK=parent only. gis=qgis-api||gis-protocol||field-check. ship=scouts then implementer then reviewer then tester. debug=debugger||scout||qgis-api. architecture=ka-architect+plan. Worker prompts: TASK / EXPECTED OUTCOME / MUST DO / MUST NOT DO / CONTEXT + sequential-thinking + context7 + QGIS/ArcGIS docs + named skills.
+
+5) LOOP: after src/QSS/UI edits, cmake --build then relevant ctest this turn. Quote exit codes. No 완료 without this-turn output.
+
+6) CROSS-CHECK vs digitize / legend / layout / export 5179. Ship only if field-usable.
+
+7) MEMORY: persist decisions. Recall: coord points live on layout; keep layout scale; on layout enter pan map-center to layout center; start splash+recents+auto sat/cadastral.
+
+8) End every user-facing answer with exactly 3 next excavation-GIS recommendations.
