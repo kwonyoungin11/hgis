@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-23 08:44:16 +09:00 |
+| Updated (local) | 2026-08-23 08:44:29 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `cursor/pro-drawing-and-map-services` |
-| HEAD short | `4a7f44d` |
-| HEAD full | `4a7f44de9352227286ba8ab9fa8e394af18b0966` |
-| HEAD date | 2026-08-21 23:37:43 +0900 |
+| HEAD short | `bbec31e` |
+| HEAD full | `bbec31e11d661a0975ae9487ec20c3c0091d754b` |
+| HEAD date | 2026-08-23 08:44:15 +0900 |
 | HEAD author | kwonypungin <kyi25@nate.com> |
-| HEAD subject | Update Grok agent rules and hooks for the excavation GIS loop. |
-| Total commits | 32 |
+| HEAD subject | Ship section drawing studio so Descartes GeoTIFF sheets can continue on another machine. |
+| Total commits | 33 |
 | Upstream | `origin/cursor/pro-drawing-and-map-services` |
 | Sync | up to date with origin/cursor/pro-drawing-and-map-services |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (32 paths) |
+| Working tree dirty | **yes** (5 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Update Grok agent rules and hooks for the excavation GIS loop. (`4a7f44d` @ 2026-08-21 23:37:43 +0900)
+- **Recorded tip when this file was written:** Ship section drawing studio so Descartes GeoTIFF sheets can continue on another machine. (`bbec31e` @ 2026-08-23 08:44:15 +0900)
 - **Remote sync at write time:** up to date with origin/cursor/pro-drawing-and-map-services
-- **Uncommitted local changes at write time:** yes (32 paths)
+- **Uncommitted local changes at write time:** yes (5 paths)
 
 ### Read this correctly
 
@@ -54,6 +54,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `bbec31e` | 2026-08-23T08:44:15+09:00 | Ship section drawing studio so Descartes GeoTIFF sheets can continue on another machine. |
 | `4a7f44d` | 2026-08-21T23:37:43+09:00 | Update Grok agent rules and hooks for the excavation GIS loop. |
 | `be276e4` | 2026-08-21T23:37:27+09:00 | Draw layout rasters in a single pass so tiled basemaps stop leaving blank chunks. |
 | `80223e1` | 2026-08-21T23:09:06+09:00 | Fix review findings: wire single-instance guard, anchor layout wheel zoom, repair portable README encoding. |
@@ -83,39 +84,11 @@
 | `3129ef6` | 2026-08-09T18:53:46+09:00 | Harden digitize capture tool finish and keep drawing session. |
 | `ca3a77e` | 2026-08-09T18:53:44+09:00 | Fix domain layer symbology so digitized features render on canvas. |
 | `f659bdb` | 2026-08-09T18:53:27+09:00 | Add QGIS 3.44 manuals as design guide and agent SSOT rules. |
-| `536977c` | 2026-08-09T16:10:06+09:00 | Sync COMMIT_STATUS to HEAD after push. |
 
 ## Staged in this commit
 
 ```
-A	.cursor/rules/grok-ka-hgis.mdc
-A	.cursor/rules/section-studio.mdc
-A	.grok/NOW.md
-M	.grok/hooks/bin/excavation-loop.txt
-M	.grok/hooks/bin/session-start.ps1
-M	.grok/rules/00-grok-preset.md
-A	.grok/rules/40-section-studio.md
-M	.grok/skills/ka-hgis/SKILL.md
-M	AGENTS.md
-M	CMakeLists.txt
-M	HANDOFF.md
-M	dist/ka-hgis-portable/ka-hgis.exe
 M	docs/COMMIT_STATUS.md
-M	docs/HANDOFF.md
-A	docs/superpowers/plans/2026-08-22-section-layout-studio.md
-A	docs/superpowers/specs/2026-08-22-section-layout-studio-design.md
-M	src/app/KaDrawingStudio.cpp
-M	src/app/KaIcons.cpp
-A	src/app/KaSectionDrawingStudio.cpp
-A	src/app/KaSectionDrawingStudio.h
-M	src/app/MainWindow.cpp
-M	src/app/MainWindow.h
-M	src/core/LayoutService.cpp
-A	src/core/SectionLayoutService.cpp
-A	src/core/SectionLayoutService.h
-A	tests/test_section_layout.cpp
-A	tests/test_section_studio.cpp
-M	tests/test_workflow.cpp
 ```
 ## Other PC checklist
 
