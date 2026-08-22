@@ -1,6 +1,6 @@
 # ka-hgis Handoff — product SSOT (v0.3.0)
 
-> Updated: 2026-08-15. Grok Build only. MCP / skills / hooks **off**.
+> Updated: 2026-08-22. Grok Build (Cursor 포함). 현재 세션: [`.grok/NOW.md`](./.grok/NOW.md)
 
 **Agent rules:** [`AGENTS.md`](./AGENTS.md)  
 **This file + `docs/HANDOFF.md`:** edit together.
@@ -9,11 +9,12 @@
 
 ## Resume after reconnect (same PC or clone)
 
-Remote: `https://github.com/kwonyoungin11/hgis.git` · branch **`main`**
+이 PC 작업본: `A:\hgis - 복사본` · OSGeo **`A:\OSGeo4W`**. 세션 재개 시 `.grok/NOW.md`부터.
+
+Remote: `https://github.com/kwonyoungin11/hgis.git`
 
 ```powershell
-cd D:\qgis
-git pull origin main
+cd "A:\hgis - 복사본"
 $env:PATH = "C:\CMake\bin;" + $env:PATH
 . .\scripts\dev-env.ps1
 .\scripts\run-ka-hgis.ps1
@@ -38,6 +39,7 @@ Korean field archaeology HGIS (C++20/Qt6 + OSGeo4W `qgis-dev`, Architecture B, n
 3. **참조 지도** (위성/지적) vs **조사 데이터**
 4. Digitize: startEditing → addFeature → commit (keep tool). **Ctrl+Z** undoes last vertex, then last saved feature
 5. **도면 만들기** = `KaDrawingStudio` (not QGIS Layout Designer). Samples for north/scale/legend/CRS. **Ctrl+Z** removes last placed item. 전문 도곽 기본: 지브라 프레임 + 정수 TM 좌표 주기(좌우 세로쓰기) + 십자 눈금, 간격은 축척 연동 1-2-5 자동(`LayoutService::applySurveyFrameGrid`). 자동 도면(`fillLayout`)은 표제란(도면명·조사명·축척·좌표계·작성일) 포함. 도면의 래스터(위성·지적·지질)는 조각 렌더 없이 한 번에 그린다(`LayoutService::applySingleRasterPassRendering`) — QGIS 기본 조각 렌더는 조각 하나가 비면 위성이 반만 나온 것처럼 보인다
+5c. **단면도** = `KaSectionDrawingStudio` 전용 탭. 열면 A3/A4 용지와 표고·거리 눈금이 이미 있다. 좌측 **GeoTIFF 추가**만 쓰고 위성·지적·조사 벡터는 목록에 넣지 않는다. CRS는 EPSG:5187/5186 선택(재투영 없음, 거리×표고 m). PDF는 `SectionLayoutService::exportSectionPdf`(300 DPI, forceVector, AlwaysText)
 5b. **맞추기** = same-canvas JPG/DXF onto 지적 (Fit To Display + 2–3 pairs). Result is **참조 지도**, not submit geometry. Not GNSS `control_points`.
 6. Work CRS default **EPSG:5187 (동부)**; 5186 also OK. **export SHP+PDF+MANIFEST = EPSG:5179**. Checklist error hard-blocks 제출
 7. Icon toolbar (새조사/열기/저장/위성/지적/그리기/선택/속성/도면/검수/보내기/찾기). Text menu bar **hidden**. File drawer and 작업 제어 dock hidden by default (**더보기**)
@@ -52,6 +54,7 @@ Korean field archaeology HGIS (C++20/Qt6 + OSGeo4W `qgis-dev`, Architecture B, n
 | VWorld 지적 | Frozen tiled WMS `crs=EPSG:3857` + KEY/DOMAIN. Do not put 5186/5187/5179 in WMS CRS list |
 | Digitize / attrs | `KaCaptureMapTool`, `KaAttributeMapTool`, `ensureDomainLayer`. 그리기: 조사구역/유구면/유구선/단면선/기준점 |
 | Layout studio | `src/app/KaDrawingStudio.*` — 160 mm scale bar, PNG north = sample, CRS label |
+| Section studio | `src/app/KaSectionDrawingStudio.*` + `src/core/SectionLayoutService.*` — A3/A4 landscape, GeoTIFF body, elevation/distance ticks, vector PDF |
 | Launch | `scripts/start-ka-hgis.vbs` + `launch.ps1` (Job Object safe) |
 | Chrome theme | `KaTheme` + `data/theme/ka-hgis.qss` sky 3D / black 2px regions |
 | Tests | `tests/test_workflow.cpp` (satellite key-first, undo feature, scale bar width, …) |
@@ -71,6 +74,8 @@ Korean field archaeology HGIS (C++20/Qt6 + OSGeo4W `qgis-dev`, Architecture B, n
 ```
 src/app/MainWindow.*        chrome, digitize, export
 src/app/KaDrawingStudio.*   조판
+src/app/KaSectionDrawingStudio.* 단면도 탭
+src/core/SectionLayoutService.* 단면 눈금·조판·PDF
 src/app/KaCaptureMapTool.*  그리기
 src/app/KaAttributeMapTool.* 속성 클릭
 src/core/LayerOps.*         basemap, layer_key, undoCommittedFeature
@@ -87,7 +92,7 @@ cmake --build build --config Release
 .\scripts\run-ka-hgis.ps1
 ```
 
-This machine: OSGeo `D:\OSGeo4W` (also `C:\OSGeo4W` in docs). CMake `C:\CMake\bin`.
+This machine: OSGeo `A:\OSGeo4W` (dev-env also accepts C: / D:). CMake `C:\CMake\bin`.
 
 ---
 
@@ -96,6 +101,9 @@ This machine: OSGeo `D:\OSGeo4W` (also `C:\OSGeo4W` in docs). CMake `C:\CMake\bi
 | Surface | Path |
 | --- | --- |
 | Agent rules | `AGENTS.md` |
+| Session now | `.grok/NOW.md` |
+| Cursor → Grok | `.cursor/rules/grok-ka-hgis.mdc` |
+| Section invariants | `.grok/rules/40-section-studio.md` |
 | Product SSOT | `HANDOFF.md` + `docs/HANDOFF.md` |
 | Preset (MCP/skills/hooks/LSP/graph) | `.grok/rules/00-grok-preset.md` |
 | clangd | `.clangd` + `.grok/lsp.json` |

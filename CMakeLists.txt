@@ -48,6 +48,7 @@ add_library(ka_core STATIC
   src/core/SoilMapService.cpp
   src/core/GeologyMapService.cpp
   src/core/RiverMapService.cpp
+  src/core/SectionLayoutService.cpp
   src/core/ChecklistEngine.h
   src/core/SurveyProjectFactory.h
   src/core/ExportService.h
@@ -67,6 +68,7 @@ add_library(ka_core STATIC
   src/core/SoilMapService.h
   src/core/GeologyMapService.h
   src/core/RiverMapService.h
+  src/core/SectionLayoutService.h
 )
 target_include_directories(ka_core PUBLIC ${KA_INCLUDES})
 target_link_directories(ka_core PUBLIC ${KA_LIBDIRS})
@@ -96,6 +98,7 @@ add_executable(ka-hgis
   src/app/KaAttributeMapTool.cpp
   src/app/KaLayoutWindow.cpp
   src/app/KaDrawingStudio.cpp
+  src/app/KaSectionDrawingStudio.cpp
   src/app/KaAlignMapTool.cpp
   src/app/KaImageView.cpp
   src/app/KaStartPage.cpp
@@ -114,6 +117,7 @@ add_executable(ka-hgis
   src/app/KaAttributeMapTool.h
   src/app/KaLayoutWindow.h
   src/app/KaDrawingStudio.h
+  src/app/KaSectionDrawingStudio.h
   src/app/KaAlignMapTool.h
   src/app/KaImageView.h
   src/app/KaStartPage.h
@@ -215,9 +219,27 @@ if(KA_HGIS_BUILD_TESTS)
   target_compile_definitions(ka_dem_trench_tests PRIVATE ${KA_TEST_DEFS})
   add_test(NAME dem_trench_engine COMMAND ka_dem_trench_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+  add_executable(ka_section_layout_tests tests/test_section_layout.cpp)
+  target_link_libraries(ka_section_layout_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_section_layout_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_section_layout_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_section_layout_tests PRIVATE ${KA_TEST_DEFS})
+  add_test(NAME section_layout_engine COMMAND ka_section_layout_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+  add_executable(ka_section_studio_tests
+    tests/test_section_studio.cpp
+    src/app/KaSectionDrawingStudio.cpp
+  )
+  target_link_libraries(ka_section_studio_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_section_studio_tests PRIVATE ${KA_INCLUDES} ${CMAKE_BINARY_DIR}/generated)
+  target_link_directories(ka_section_studio_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_section_studio_tests PRIVATE ${KA_TEST_DEFS})
+  add_test(NAME section_studio_engine COMMAND ka_section_studio_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
   # Console subsystem, otherwise QtTest PASS/FAIL lines never reach ctest.
   set_target_properties(ka_hgis_tests ka_workflow_tests ka_georef_tests ka_preset_tests
                         ka_buffer_tests ka_measure_tests ka_dem_trench_tests
+                        ka_section_layout_tests ka_section_studio_tests
                         PROPERTIES WIN32_EXECUTABLE FALSE)
 
   add_executable(ka_theme_tests
@@ -253,7 +275,7 @@ if(KA_HGIS_BUILD_TESTS)
       "${OSGEO4W_ROOT}/bin"
     )
     string(JOIN "\\;" _ka_path_esc ${_ka_path})
-    set_tests_properties(checklist_engine workflow_engine georef_engine feature_presets buffer_ring measure_tape dem_trench_engine theme_qss recent_surveys PROPERTIES
+    set_tests_properties(checklist_engine workflow_engine georef_engine feature_presets buffer_ring measure_tape dem_trench_engine theme_qss recent_surveys section_layout_engine section_studio_engine PROPERTIES
       ENVIRONMENT "PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
   endif()
 endif()

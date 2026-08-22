@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <QMainWindow>
 #include <QJsonObject>
 #include <QPair>
@@ -39,6 +39,7 @@ class KaAlignPickTool;
 class KaImageView;
 class KaAlignLinkOverlay;
 class KaDrawingStudio;
+class KaSectionDrawingStudio;
 class KaStartPage;
 class KaCoordPointMapTool;
 class KaMeasureMapTool;
@@ -157,6 +158,7 @@ private slots:
   void runSiteBuffer1000();
   void applySnapConfig();
   void openLayoutDesigner();
+  void openSectionDesigner();
   void onViewTabCloseRequested(int index);
   void openRecentSurvey(const QString& path);
   void showHomePage();
@@ -173,6 +175,7 @@ private:
   void clearSubToolbar();
   bool addVectorFromPath(const QString& path);
   bool addRasterFromPath(const QString& path);
+  bool addSectionGeoTiffFromPath(const QString& path, const QString& crsAuthId);
   bool tryAddDroppedUrls(const QList<QUrl>& urls);
   bool tryAddDroppedPaths(const QStringList& paths);
   QStringList selectedBrowserFiles() const;
@@ -294,6 +297,7 @@ private:
   QString m_subToolsMode;
   bool m_snapEnabled = true;
   KaDrawingStudio* m_drawingStudio = nullptr;
+  KaSectionDrawingStudio* m_sectionStudio = nullptr;
   QTabWidget* m_viewTabs = nullptr;
   KaStartPage* m_startPage = nullptr;
   QWidget* m_mapPage = nullptr;

@@ -1,4 +1,4 @@
-﻿#include "MainWindow.h"
+#include "MainWindow.h"
 #include "KaTheme.h"
 #include "KaIcons.h"
 #include "KaCaptureMapTool.h"
@@ -6,6 +6,7 @@
 #include "KaAlignMapTool.h"
 #include "KaImageView.h"
 #include "KaDrawingStudio.h"
+#include "KaSectionDrawingStudio.h"
 #include "KaStartPage.h"
 #include "KaCoordPointMapTool.h"
 #include "KaMeasureMapTool.h"
@@ -469,6 +470,9 @@ void MainWindow::buildMenus() {
   mainTb->addSeparator();
   addIcon(QStringLiteral("pdf"), QStringLiteral("도면출력"),
           QStringLiteral("종이에 지도를 올려 도면을 만듭니다"), &MainWindow::openLayoutDesigner);
+  addIcon(QStringLiteral("section"), QStringLiteral("단면도"),
+          QStringLiteral("단면 GeoTIFF로 표고·거리 눈금 도면을 만듭니다"),
+          &MainWindow::openSectionDesigner);
   addIcon(QStringLiteral("transform"), QStringLiteral("제출변환"),
           QStringLiteral("레이어 목록에서 고른 레이어를 제출용 EPSG:5179 SHP로 저장합니다"),
           &MainWindow::convertSelectedTo5179);
@@ -1277,6 +1281,10 @@ void MainWindow::buildUi() {
         m_drawingStudio->refreshMapFromProject();
         m_drawingStudio->centerOnMapCanvas();
       });
+    if (m_sectionStudio && page == m_sectionStudio)
+      QTimer::singleShot(0, this, [this]() {
+        if (m_sectionStudio) m_sectionStudio->refreshLayers();
+      });
   });
   m_viewTabs->setCurrentWidget(m_startPage);
   setCentralWidget(m_viewTabs);
@@ -1477,6 +1485,43 @@ void MainWindow::openLayoutDesigner() {
 #endif
 }
 
+void MainWindow::openSectionDesigner() {
+#if KA_HGIS_HAS_QGIS
+  if (!m_viewTabs)
+    return;
+  if (m_sectionStudio && m_viewTabs->indexOf(m_sectionStudio) >= 0) {
+    m_viewTabs->setCurrentWidget(m_sectionStudio);
+    hideSubTools();
+    m_sectionStudio->refreshLayers();
+    return;
+  }
+  if (!m_sectionStudio) {
+    m_sectionStudio = new KaSectionDrawingStudio(QgsProject::instance(), this);
+    m_sectionStudio->setAttribute(Qt::WA_DeleteOnClose, false);
+    connect(m_sectionStudio, &KaSectionDrawingStudio::geoTiffAddRequested, this,
+            [this](const QString& path) {
+              if (path.isEmpty()) return;
+              const QString crs = m_sectionStudio
+                  ? m_sectionStudio->selectedCrsAuthId()
+                  : QStringLiteral("EPSG:5187");
+              if (!addSectionGeoTiffFromPath(path, crs)) {
+                QMessageBox::warning(this, QStringLiteral("GeoTIFF 추가"),
+                                     QStringLiteral("단면 GeoTIFF를 열지 못했습니다.\n%1").arg(path));
+                return;
+              }
+            });
+  }
+  m_sectionStudio->setParent(m_viewTabs, Qt::Widget);
+  if (m_viewTabs->indexOf(m_sectionStudio) < 0)
+    m_viewTabs->addTab(m_sectionStudio, KaIcons::icon(QStringLiteral("section")),
+                       QStringLiteral("단면도"));
+  m_viewTabs->setCurrentWidget(m_sectionStudio);
+  hideSubTools();
+  m_sectionStudio->refreshLayers();
+  statusBar()->showMessage(QStringLiteral("용지 눈금이 준비되었습니다. GeoTIFF 추가로 단면을 맞추세요."), 6000);
+#endif
+}
+
 void MainWindow::rememberSurvey(const QString& path, const QString& name) {
   QSettings st = RecentSurveys::userSettings();
   RecentSurveys::remember(st, path, name);
@@ -1542,10 +1587,10 @@ void MainWindow::onViewTabCloseRequested(int index) {
   if (!m_viewTabs || index < 0)
     return;
   QWidget* w = m_viewTabs->widget(index);
-  if (!w || w != m_drawingStudio)
+  if (!w || (w != m_drawingStudio && w != m_sectionStudio))
     return;
   m_viewTabs->removeTab(index);
-  m_drawingStudio->hide();
+  w->hide();
   if (m_mapPage)
     m_viewTabs->setCurrentWidget(m_mapPage);
   else
@@ -5188,6 +5233,30 @@ bool MainWindow::tryAddDroppedPaths(const QStringList& paths) {
   if (n > 0)
     statusBar()->showMessage(QStringLiteral("레이어 %1개 추가됨 (파일→지도)").arg(n), 5000);
   return n > 0;
+}
+
+bool MainWindow::addSectionGeoTiffFromPath(const QString& path, const QString& crsAuthId) {
+#if KA_HGIS_HAS_QGIS
+  const QString title = QFileInfo(path).completeBaseName();
+  auto* rl = new QgsRasterLayer(path, title, QStringLiteral("gdal"));
+  if (!rl || !rl->isValid()) {
+    delete rl;
+    return false;
+  }
+  const QString crsLabel = crsAuthId.isEmpty()
+      ? QStringLiteral("EPSG:5187") : crsAuthId;
+  rl->setCustomProperty(QStringLiteral("ka_hgis/section_raster"), true);
+  rl->setCustomProperty(QStringLiteral("ka_hgis/section_crs_label"), crsLabel);
+  // 범례·캔버스에 넣지 않음. 단면도 탭 전용 (위성·지적과 섞지 않음).
+  QgsProject::instance()->addMapLayer(rl, false);
+  statusBar()->showMessage(
+      QStringLiteral("단면 GeoTIFF 추가: %1 · %2").arg(title, crsLabel), 8000);
+  return true;
+#else
+  Q_UNUSED(path);
+  Q_UNUSED(crsAuthId);
+  return false;
+#endif
 }
 
 bool MainWindow::addRasterFromPath(const QString& path) {

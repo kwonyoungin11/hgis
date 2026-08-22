@@ -1,0 +1,17 @@
+---
+description: 단면도 조판 — setTool 순서·종횡비·CRS. 회귀 금지.
+globs:
+  - src/core/SectionLayoutService.*
+  - src/app/KaSectionDrawingStudio.*
+  - src/app/MainWindow.*
+  - tests/test_section_*.cpp
+---
+
+자세한 불변식은 `.grok/rules/40-section-studio.md`와 `.grok/NOW.md`.
+
+- `setTool(select)`는 `setLayout(layout)` **이후**만. `setLayout(nullptr)` 금지.
+- 프레임 mm 종횡비 = GeoTIFF extent. `zoomToExtent`만으로 고정 390×261에 맞추지 말 것.
+- CRS는 5187/5186 선택. 단면 GeoTIFF는 재투영하지 않는다.
+- 탭을 열면 용지+눈금. 목록에는 단면 GeoTIFF만 (위성·지적 제외).
+- 스튜디오는 `geoTiffAddRequested(path)`만. MainWindow는 `addSectionGeoTiffFromPath`.
+- `KaDrawingStudio.cpp` / `LayoutService.cpp` / `test_workflow.cpp` 기존 미커밋을 덮어쓰지 말 것.

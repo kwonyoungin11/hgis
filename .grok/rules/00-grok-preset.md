@@ -1,7 +1,8 @@
 # Grok Build preset (ka-hgis)
 
 Grok-native stack is **on**: MCP, project skills, project hooks, clangd LSP,
-workflows, multi-graph experts. OpenCode / Claude / Cursor harness files stay off.
+workflows, multi-graph experts. OpenCode / Sisyphus / `.agents/` stay off.
+Cursor+Grok 브릿지(`.cursor/rules/grok-ka-hgis.mdc` → `.grok/NOW.md`)는 허용. Playwright/web harness는 넣지 않는다.
 
 ## When to use what
 

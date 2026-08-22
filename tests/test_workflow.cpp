@@ -1783,6 +1783,15 @@ void TestWorkflow::layoutRasterDrawnInOnePass() {
   LayoutService::renderPreview(&proj, QStringLiteral("user_sheet"), QSize(200, 280), &err);
   QVERIFY2(tiledOff(sheet), "미리보기 경로에서 다시 켜져야 한다");
 
+  // 화면 미리보기 해상도(96 DPI)로 내보내도 인쇄는 300 DPI로 나가고, 끝나면 되돌린다.
+  built->renderContext().setDpi(96.0);
+  const QString pdf = QDir::temp().filePath(QStringLiteral("ka-hgis-dpi-check.pdf"));
+  QFile::remove(pdf);
+  const QString saved = LayoutService::exportLayoutPdf(&proj, QStringLiteral("survey_area_map"),
+                                                       pdf, &err);
+  QVERIFY2(!saved.isEmpty(), qPrintable(err));
+  QCOMPARE(built->renderContext().dpi(), 96.0);
+
   LayoutService::applySingleRasterPassRendering(nullptr);  // 널 안전
 }
 

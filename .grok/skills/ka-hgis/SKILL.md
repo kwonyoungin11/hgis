@@ -12,9 +12,10 @@ This repo is a standalone C++20/Qt6 desktop HGIS linked to OSGeo4W qgis-dev. Not
 
 ## Read first
 
-1. `AGENTS.md` — routing, invariants, build
-2. `HANDOFF.md` — product SSOT
-3. `docs/domain/data-model.md` and `docs/adr/0001-standalone-cpp-qgis-libs.md` for non-trivial work
+1. `.grok/NOW.md` — current session / do-not-touch
+2. `AGENTS.md` — routing, invariants, build
+3. `HANDOFF.md` — product SSOT
+4. `docs/domain/data-model.md` and `docs/adr/0001-standalone-cpp-qgis-libs.md` for non-trivial work
 
 ## MCP
 

@@ -1046,7 +1046,11 @@ QString LayoutService::exportLayoutPdf(QgsProject* project, const QString& layou
   QgsLayoutExporter::PdfExportSettings settings;
   settings.dpi = 300;
   settings.forceVectorOutput = true;
+  // 화면 미리보기용으로 낮춰 둔 해상도가 남아 있어도 인쇄는 300 DPI로 나가게 한다.
+  const double keepDpi = layout->renderContext().dpi();
+  layout->renderContext().setDpi(settings.dpi);
   const auto r = exporter.exportToPdf(pdfPath, settings);
+  layout->renderContext().setDpi(keepDpi);
   if (r != QgsLayoutExporter::Success) {
     if (errorOut) *errorOut = QStringLiteral("PDF 내보내기 실패 (코드 %1)").arg(int(r));
     return {};

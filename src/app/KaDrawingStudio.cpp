@@ -129,6 +129,10 @@ constexpr const char* kIdScaleBar = "ka_scalebar";
 constexpr const char* kIdScale = "ka_scale";
 constexpr const char* kIdCrs = "ka_crs";
 constexpr const char* kGridAnnPrefix = "ka_grid_ann_";
+// 화면 미리보기 해상도. 인쇄용 300 DPI로 미리보기를 그리면 A4 지도 칸이
+// 2300×3000픽셀이 되어 QGIS가 래스터를 2000픽셀 조각으로 나누고 위성 타일도
+// 수백 장 필요해진다. 조각 하나가 비면 위성이 반만 나온 것처럼 보인다.
+constexpr double kPreviewDpi = 96.0;
 
 bool isLiveBasemapLayer(QgsMapLayer* layer) {
   if (!layer) return false;
@@ -811,6 +815,10 @@ void KaDrawingStudio::attachLayoutToView() {
   if (!m_view || !ly) return;
   // 위성 배경이 조각 단위로 빈 채 남는 것을 막는다(다시 열린 조판까지 포함).
   LayoutService::applySingleRasterPassRendering(ly);
+  // 화면 미리보기는 화면 해상도로 그린다. 300 DPI로 미리보기를 그리면 A4가
+  // 2300×3000픽셀이 되어 위성 타일을 수백 장 받아야 하고, 다 못 받으면 배경이
+  // 사각형 단위로 빈다. 인쇄·PDF는 내보낼 때만 300 DPI로 올린다(savePdf).
+  ly->renderContext().setDpi(kPreviewDpi);
   if (m_view->currentLayout() != ly)
     m_view->setCurrentLayout(ly);
   if (m_toolSelect)
@@ -2720,7 +2728,7 @@ void KaDrawingStudio::setFastLayoutPreview(bool on) {
     if (m_savedLayoutDpi <= 1.0)
       m_savedLayoutDpi = ly->renderContext().dpi();
     if (m_savedLayoutDpi < 48.0)
-      m_savedLayoutDpi = 300.0;
+      m_savedLayoutDpi = kPreviewDpi;
     ly->renderContext().setDpi(48.0);
     return;
   }
@@ -2848,7 +2856,15 @@ void KaDrawingStudio::savePdf() {
   QgsLayoutExporter exporter(ly);
   QgsLayoutExporter::PdfExportSettings settings;
   settings.dpi = 300;
+  // 화면 미리보기는 낮은 해상도로 두고, 인쇄용 해상도는 내보내는 동안만 올린다.
+  const double previewDpi = ly->renderContext().dpi();
+  ly->renderContext().setDpi(settings.dpi);
   const auto pdfOk = exporter.exportToPdf(path, settings);
+  ly->renderContext().setDpi(previewDpi);
+  if (auto* map = mapItem()) {
+    map->invalidateCache();
+    map->refresh();
+  }
   if (m_pageOutline) m_pageOutline->show();
   if (pdfOk != QgsLayoutExporter::Success) {
     QMessageBox::warning(this, QStringLiteral("PDF"), QStringLiteral("저장에 실패했습니다."));

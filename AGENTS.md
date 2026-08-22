@@ -16,6 +16,7 @@ Harness: **Grok Build only**. Do not look for OpenCode, Sisyphus, or `.agents/` 
 
 ## SSOT (read before non-trivial work)
 
+0. `.grok/NOW.md` — current session (Cursor Grok resume). Read first after reconnect.
 1. `HANDOFF.md` (mirror: `docs/HANDOFF.md`) — product truth; edit both together
 2. `docs/adr/0001-standalone-cpp-qgis-libs.md` — Architecture B, no fork
 3. `docs/domain/data-model.md` — GPKG layers & fields
@@ -85,7 +86,9 @@ Treat these as **GIS** bugs. Before editing: name project CRS, layer CRS, OTF, c
 
 ## Tool preference (this repo)
 
-Grok-native MCP / skills / hooks / clangd LSP are **on**. OpenCode / Claude / Cursor harness files stay off. See `.grok/rules/00-grok-preset.md`.
+Grok-native MCP / skills / hooks / clangd LSP are **on**. OpenCode / Sisyphus / `.agents/` stay off.
+Cursor에서 Grok을 쓸 때는 얇은 브릿지 `.cursor/rules/grok-ka-hgis.mdc`만 허용한다 — 세션은 `.grok/NOW.md`.
+See `.grok/rules/00-grok-preset.md`.
 
 1. Targeted `read_file` / `search_replace` / `grep` / `list_dir`
 2. `lsp` (clangd) for C++ definition/references/diagnostics after edits
@@ -145,6 +148,7 @@ intent → /ka-experts ship (or /workflow ka-ship)
 | Live state for rules | `src/core/ProjectStateBuilder.*` | |
 | Export package | `src/core/ExportService.*` | SHP 5179 + manifest |
 | PDF layouts | `src/core/LayoutService.*` | |
+| Section studio | `src/app/KaSectionDrawingStudio.*` + `src/core/SectionLayoutService.*` | GeoTIFF 단면도; `.grok/rules/40-section-studio.md` |
 | Location search | `src/core/LocationSearch.*` | |
 | VWorld key | `src/core/VworldSettings.*` | |
 | Workflow helper | `src/core/WorkflowGuide.*` | |
@@ -163,13 +167,13 @@ intent → /ka-experts ship (or /workflow ka-ship)
 Env SSOT:
 
 - CMake: `C:\CMake\bin`
-- OSGeo4W: `C:\OSGeo4W` (`OSGEO4W_ROOT`)
+- OSGeo4W: `scripts/dev-env.ps1`가 C: → D: → **A:\\OSGeo4W** 순으로 찾음 (이 PC는 `A:\OSGeo4W`)
 - Prefer repo scripts over ad-hoc PATH edits
 
 ```powershell
 $env:PATH = "C:\CMake\bin;" + $env:PATH
 . .\scripts\dev-env.ps1
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DOSGEO4W_ROOT=C:/OSGeo4W -DKA_HGIS_BUILD_TESTS=ON
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DOSGEO4W_ROOT=$env:OSGEO4W_ROOT -DKA_HGIS_BUILD_TESTS=ON
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 .\scripts\run-ka-hgis.ps1 --smoke-quit   # if UI/boot/menu path touched

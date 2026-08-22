@@ -157,6 +157,17 @@ void dPdf(QPainter& p) {
   p.drawLine(38, 20, 46, 20);
 }
 
+void dSection(QPainter& p) {
+  prep(p, 2.6);
+  p.drawRoundedRect(QRectF(12, 16, 40, 32), 3, 3);
+  p.drawLine(QPointF(16, 40), QPointF(20, 28));
+  p.drawLine(QPointF(20, 28), QPointF(28, 34));
+  p.drawLine(QPointF(28, 34), QPointF(36, 22));
+  p.drawLine(QPointF(36, 22), QPointF(48, 30));
+  p.setPen(QPen(QColor(0xD7, 0x19, 0x1C), 2.0, Qt::DashLine, Qt::RoundCap));
+  p.drawLine(QPointF(16, 42), QPointF(48, 42));
+}
+
 void dCrs(QPainter& p) {
   prep(p, 2.6);
   p.drawEllipse(QPointF(32, 32), 16, 16);
@@ -577,6 +588,7 @@ QIcon icon(const QString& id) {
     ic = bake(dCheck);
   else if (id == QLatin1String("export")) ic = bake(dExport);
   else if (id == QLatin1String("pdf")) ic = bake(dPdf);
+  else if (id == QLatin1String("section") || id == QLatin1String("section_layout")) ic = bake(dSection);
   else if (id == QLatin1String("crs")) ic = bake(dCrs);
   else if (id == QLatin1String("transform")) ic = bake(dTransform);
   else if (id == QLatin1String("upload")) ic = bake(dUpload);

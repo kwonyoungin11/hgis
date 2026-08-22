@@ -1,4 +1,5 @@
 [EXCAVATION-GIS LOOP — every user request. Hooks and skills are ON.]
+Read .grok/NOW.md first after reconnect (session SSOT, do-not-touch).
 
 DOMAIN: Korean archaeology field HGIS (ka-hgis). Architecture B. Work CRS 5186/5187. Export/upload EPSG:5179 SHP+PDF. No QGIS fork. No removeAllMapLayers. No empty domain auto-add. No hardcoded VWorld key. No DXF submit. No commit unless asked.
 

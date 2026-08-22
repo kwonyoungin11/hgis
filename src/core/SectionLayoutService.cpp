@@ -1,0 +1,836 @@
+#include "SectionLayoutService.h"
+
+#include <QDate>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QFont>
+#include <QList>
+#include <QLocale>
+#include <QPolygonF>
+#include <QString>
+#include <QStringList>
+#include <QTextStream>
+
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <vector>
+
+#include <qgis.h>
+#include <qgscoordinatereferencesystem.h>
+#include <qgslayout.h>
+#include <qgslayoutexporter.h>
+#include <qgslayoutitemlabel.h>
+#include <qgslayoutitemmap.h>
+#include <qgslayoutitempage.h>
+#include <qgslayoutitempolyline.h>
+#include <qgslayoutitemscalebar.h>
+#include <qgslayoutmanager.h>
+#include <qgslayoutmeasurement.h>
+#include <qgslayoutpagecollection.h>
+#include <qgslayoutsize.h>
+#include <qgslinesymbol.h>
+#include <qgsmaplayer.h>
+#include <qgsmasterlayoutinterface.h>
+#include <qgsprintlayout.h>
+#include <qgsproject.h>
+#include <qgsrasterdataprovider.h>
+#include <qgsrasterlayer.h>
+#include <qgsrectangle.h>
+#include <qgstextformat.h>
+
+#include <cpl_string.h>
+#include <cpl_vsi.h>
+#include <gdal_priv.h>
+
+// ---- axisTicks ----
+
+AxisTickResult SectionLayoutService::axisTicks(double minVal, double maxVal, double interval)
+{
+    AxisTickResult result;
+
+    // 범위 유효성 검사
+    if (!std::isfinite(minVal) || !std::isfinite(maxVal)) {
+        result.error = QStringLiteral("범위가 유한하지 않습니다 (무한대 또는 NaN).");
+        return result;
+    }
+    if (minVal >= maxVal) {
+        result.error = QStringLiteral("최솟값이 최댓값 이상입니다 (min >= max).");
+        return result;
+    }
+
+    // 간격 유효성 검사
+    if (!std::isfinite(interval) || interval <= 0.0) {
+        result.error = QStringLiteral("눈금 간격은 0보다 커야 합니다.");
+        return result;
+    }
+
+    // 첫 눈금 인덱스: minVal 이상인 최소 정수 배수
+    // 정수 인덱스 곱셈 방식으로 부동소수점 누적 오차를 방지한다.
+    //
+    // P3 UB 방지: double → long long 캐스트 전에 rawIdx가 유한하고
+    // long long 범위 안에 있는지 확인한다. 안전 상한 9.0e18은
+    // LLONG_MAX(≈9.22e18)보다 작아 캐스트와 루프 내 ++i 오버플로를 방지한다.
+    const double rawIdx = std::ceil(minVal / interval);
+    constexpr double kIdxMax =  9.0e18; // LLONG_MAX ≈ 9.22e18 에서 안전 마진
+    constexpr double kIdxMin = -9.0e18;
+    if (!std::isfinite(rawIdx) || rawIdx > kIdxMax || rawIdx < kIdxMin) {
+        result.error = QStringLiteral("눈금 인덱스가 표현 범위를 초과합니다. 범위나 간격을 조정해 주세요.");
+        return result;
+    }
+    const long long firstIdx = static_cast<long long>(rawIdx);
+
+    // 작은 엡실론: 구간 끝 경계 포함 여부 판정에 사용 (1e-9 * interval)
+    const double eps = 1e-9 * interval;
+
+    QVector<double> ticks;
+    for (long long i = firstIdx; ; ++i) {
+        const double v = static_cast<double>(i) * interval;
+        if (v > maxVal + eps) {
+            break;
+        }
+        ticks.append(v);
+        if (ticks.size() > 500) {
+            result.error = QStringLiteral("눈금이 500개를 초과합니다. 간격을 늘려주세요.");
+            return result;
+        }
+    }
+
+    result.ticks = std::move(ticks);
+    return result;
+}
+
+// ---- niceDistanceInterval ----
+
+double SectionLayoutService::niceDistanceInterval(double span, int targetTickCount)
+{
+    // span이 NaN/Inf이면 log10/pow에서 비정상값이 전파된다 (P2 API 계약).
+    if (!std::isfinite(span) || span <= 0.0 || targetTickCount < 1) {
+        return 1.0;
+    }
+
+    const double rough     = span / static_cast<double>(targetTickCount);
+    const double magnitude = std::pow(10.0, std::floor(std::log10(rough)));
+
+    // 1-2-5-10 계열에서 조건을 만족하는 가장 작은 간격을 선택한다.
+    // span/v <= targetTickCount + 2 이면 수용 가능한 개수로 판단한다.
+    const double candidates[] = {1.0, 2.0, 5.0, 10.0};
+    const double limit = static_cast<double>(targetTickCount) + 2.0;
+    for (double c : candidates) {
+        const double v = c * magnitude;
+        if (span / v <= limit) {
+            return v;
+        }
+    }
+
+    // 모두 실패하면 가장 큰 후보(10 * magnitude)를 반환한다.
+    return 10.0 * magnitude;
+}
+
+namespace {
+
+constexpr const char* kPropSectionDisplay = "ka_hgis/section_display";
+constexpr const char* kPropSectionDisplayPath = "ka_hgis/section_display_path";
+
+bool yLooksLikeElevation(const QgsRectangle& ext)
+{
+    return ext.isFinite()
+        && ext.yMinimum() > -500.0 && ext.yMaximum() < 10000.0
+        && ext.height() > 0.0 && ext.height() <= 500.0;
+}
+
+/// 해발(m). 지도 북ing(~1.4e6)은 제외.
+bool looksLikeOrthometricElev(double a, double b)
+{
+    return std::isfinite(a) && std::isfinite(b)
+        && std::abs(a) < 10000.0 && std::abs(b) < 10000.0
+        && std::abs(a - b) > 0.0 && std::abs(a - b) <= 500.0;
+}
+
+QString xmlEscape(const QString& s)
+{
+    QString o = QDir::fromNativeSeparators(s);
+    o.replace(QLatin1Char('&'), QLatin1String("&amp;"));
+    o.replace(QLatin1Char('<'), QLatin1String("&lt;"));
+    o.replace(QLatin1Char('>'), QLatin1String("&gt;"));
+    o.replace(QLatin1Char('"'), QLatin1String("&quot;"));
+    return o;
+}
+
+struct SectionPlane {
+    QgsRasterLayer* src = nullptr;
+    QgsRectangle extent;
+    bool flatten = false;
+    bool worldPlacement = false; ///< 4x4가 지도 XY. 픽셀 축이 거리×해발.
+    double lengthM = 0.0;
+    double heightM = 0.0;
+    double elevBottom = 0.0;
+};
+
+void inspectRaster(QgsRasterLayer* rl, SectionPlane* out)
+{
+    out->src = rl;
+    out->extent = rl->extent();
+    out->flatten = false;
+    out->worldPlacement = false;
+    GDALAllRegister();
+    GDALDataset* ds = static_cast<GDALDataset*>(
+        GDALOpen(rl->source().toUtf8().constData(), GA_ReadOnly));
+    if (!ds) return;
+    double gt[6] = {};
+    ds->GetGeoTransform(gt);
+    const int cols = ds->GetRasterXSize();
+    const int rows = ds->GetRasterYSize();
+    GDALClose(ds);
+    if (cols <= 0 || rows <= 0) return;
+
+    // 사진실측: 픽셀 가로=거리, 픽셀 세로=해발 축. 세계 XYZ가 도면 축이 아님.
+    const double colStep = std::hypot(gt[1], gt[4]);
+    const double rowStep = std::hypot(gt[2], gt[5]);
+    if (!(colStep > 0.0) || !(rowStep > 0.0)) return;
+
+    const bool rotated = std::abs(gt[2]) > 1e-8 || std::abs(gt[4]) > 1e-8;
+    const double yTopLeft = gt[3];
+    const double yBotLeft = gt[3] + static_cast<double>(rows) * gt[5];
+    const bool elevFromFile = looksLikeOrthometricElev(yTopLeft, yBotLeft);
+
+    out->lengthM = static_cast<double>(cols) * colStep;
+    out->heightM = static_cast<double>(rows) * rowStep;
+
+    if (!rotated && elevFromFile && yLooksLikeElevation(out->extent)) {
+        out->flatten = false;
+        out->lengthM = out->extent.width();
+        out->heightM = out->extent.height();
+        out->elevBottom = out->extent.yMinimum();
+        return;
+    }
+
+    if (elevFromFile && std::abs(gt[5]) > 0.0) {
+        // 이미 단면 평면(Y=해발). 전단이 있어도 표고 높이는 gt[5]만.
+        out->heightM = std::abs(static_cast<double>(rows) * gt[5]);
+        out->elevBottom = std::min(yTopLeft, yBotLeft);
+    } else {
+        // 지도에 눕힌 4×4. 픽셀 세로 길이가 벽 높이. 원점은 표고 보정.
+        out->worldPlacement = true;
+        out->elevBottom = 0.0;
+        out->heightM = static_cast<double>(rows) * rowStep;
+    }
+
+    out->flatten = true;
+    out->extent = QgsRectangle(0.0, out->elevBottom,
+                               out->lengthM, out->elevBottom + out->heightM);
+}
+
+void removeDisplayLayers(QgsProject* project)
+{
+    QStringList ids;
+    QStringList paths;
+    for (QgsMapLayer* l : project->mapLayers()) {
+        if (!l || !l->customProperty(QLatin1String(kPropSectionDisplay)).toBool())
+            continue;
+        ids.append(l->id());
+        const QString p = l->customProperty(QLatin1String(kPropSectionDisplayPath)).toString();
+        if (!p.isEmpty())
+            paths.append(p);
+    }
+    if (!ids.isEmpty())
+        project->removeMapLayers(ids);
+    for (const QString& p : paths) {
+        if (p.startsWith(QLatin1String("/vsimem/")))
+            VSIUnlink(p.toUtf8().constData());
+        else
+            QFile::remove(p);
+    }
+}
+
+void sharpenSectionRaster(QgsRasterLayer* rl)
+{
+    if (!rl) return;
+    // 지오레퍼런스 래스터에 setDpi 하지 않는다. DPI를 붙이면 QGIS가
+    // 개요(피라미드)로 낮춰 읽어 단면 사진이 흐려진다.
+    // 사진실측은 1:1 픽셀을 유지한다. Cubic은 기울어진 소스 GT를 섞는다.
+    rl->setResamplingStage(Qgis::RasterResamplingStage::Provider);
+    if (QgsRasterDataProvider* dp = rl->dataProvider()) {
+        dp->enableProviderResampling(true);
+        dp->setZoomedInResamplingMethod(Qgis::RasterResamplingMethod::Nearest);
+        dp->setZoomedOutResamplingMethod(Qgis::RasterResamplingMethod::Nearest);
+    }
+}
+
+QgsRasterLayer* makeNorthUpDisplay(QgsRasterLayer* src,
+                                   const QgsCoordinateReferenceSystem& planeCrs,
+                                   const SectionPlane& plane, QgsProject* project)
+{
+    GDALAllRegister();
+    GDALDataset* ds = static_cast<GDALDataset*>(
+        GDALOpen(src->source().toUtf8().constData(), GA_ReadOnly));
+    if (!ds) return nullptr;
+    const int cols = ds->GetRasterXSize();
+    const int rows = ds->GetRasterYSize();
+    const int nBands = ds->GetRasterCount();
+    if (cols <= 0 || rows <= 0 || nBands <= 0) {
+        GDALClose(ds);
+        return nullptr;
+    }
+    const double px = plane.lengthM / static_cast<double>(cols);
+    const double py = plane.heightM / static_cast<double>(rows);
+    const double elevTop = plane.elevBottom + plane.heightM;
+    double ngt[6] = {0.0, px, 0.0, elevTop, 0.0, -py};
+
+    QString outPath = QDir::temp().filePath(
+        QStringLiteral("ka_section_%1.tif").arg(src->id()));
+    QFile::remove(outPath);
+
+    QString wkt = planeCrs.isValid() ? planeCrs.toWkt() : QString();
+    GDALDriver* drv = GetGDALDriverManager()->GetDriverByName("GTiff");
+    GDALDataset* copy = nullptr;
+    if (drv) {
+        char** copts = CSLSetNameValue(nullptr, "TILED", "YES");
+        copy = drv->CreateCopy(QDir::fromNativeSeparators(outPath).toUtf8().constData(),
+                               ds, FALSE, copts, nullptr, nullptr);
+        CSLDestroy(copts);
+    }
+    if (copy) {
+        copy->SetGeoTransform(ngt);
+        if (!wkt.isEmpty())
+            copy->SetProjection(wkt.toUtf8().constData());
+        GDALClose(copy);
+        GDALClose(ds);
+    } else {
+        wkt.replace(QLatin1Char('&'), QLatin1String("&amp;"));
+        wkt.replace(QLatin1Char('<'), QLatin1String("&lt;"));
+        QString xml;
+        QTextStream ts(&xml);
+        ts << QStringLiteral("<VRTDataset rasterXSize=\"%1\" rasterYSize=\"%2\">\n")
+              .arg(cols).arg(rows);
+        if (!wkt.isEmpty())
+            ts << QStringLiteral("  <SRS>") << wkt << QStringLiteral("</SRS>\n");
+        ts << QStringLiteral("  <GeoTransform>0, %1, 0, %2, 0, %3</GeoTransform>\n")
+              .arg(px, 0, 'g', 17).arg(elevTop, 0, 'g', 17).arg(-py, 0, 'g', 17);
+        for (int b = 1; b <= nBands; ++b) {
+            GDALRasterBand* band = ds->GetRasterBand(b);
+            const char* dt = GDALGetDataTypeName(band->GetRasterDataType());
+            ts << QStringLiteral("  <VRTRasterBand dataType=\"%1\" band=\"%2\">\n")
+                  .arg(QLatin1String(dt)).arg(b);
+            const GDALColorInterp ci = band->GetColorInterpretation();
+            if (ci != GCI_Undefined && ci != GCI_PaletteIndex) {
+                ts << QStringLiteral("    <ColorInterp>%1</ColorInterp>\n")
+                      .arg(QLatin1String(GDALGetColorInterpretationName(ci)));
+            }
+            int blockX = 0;
+            int blockY = 0;
+            band->GetBlockSize(&blockX, &blockY);
+            ts << QStringLiteral("    <SimpleSource>\n")
+               << QStringLiteral("      <SourceFilename relativeToVRT=\"0\">")
+               << xmlEscape(src->source())
+               << QStringLiteral("</SourceFilename>\n")
+               << QStringLiteral("      <SourceBand>%1</SourceBand>\n").arg(b)
+               << QStringLiteral("      <SourceProperties RasterXSize=\"%1\" RasterYSize=\"%2\" "
+                                 "DataType=\"%3\" BlockXSize=\"%4\" BlockYSize=\"%5\"/>\n")
+                    .arg(cols).arg(rows).arg(QLatin1String(dt))
+                    .arg(blockX > 0 ? blockX : cols).arg(blockY > 0 ? blockY : 1)
+               << QStringLiteral("      <SrcRect xOff=\"0\" yOff=\"0\" xSize=\"%1\" ySize=\"%2\"/>\n")
+                    .arg(cols).arg(rows)
+               << QStringLiteral("      <DstRect xOff=\"0\" yOff=\"0\" xSize=\"%1\" ySize=\"%2\"/>\n")
+                    .arg(cols).arg(rows)
+               << QStringLiteral("    </SimpleSource>\n")
+               << QStringLiteral("  </VRTRasterBand>\n");
+        }
+        ts << QStringLiteral("</VRTDataset>\n");
+        GDALClose(ds);
+        const QString vrtPath = QDir::temp().filePath(
+            QStringLiteral("ka_section_%1.vrt").arg(src->id()));
+        QFile f(vrtPath);
+        if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+            return nullptr;
+        f.write(xml.toUtf8());
+        f.close();
+        QFile::remove(outPath);
+        outPath = vrtPath;
+    }
+
+    auto* layer = new QgsRasterLayer(outPath, src->name(), QStringLiteral("gdal"));
+    if (!layer->isValid()) {
+        delete layer;
+        QFile::remove(outPath);
+        return nullptr;
+    }
+    layer->setCustomProperty(QLatin1String(kPropSectionDisplay), true);
+    layer->setCustomProperty(QLatin1String(kPropSectionDisplayPath), outPath);
+    if (planeCrs.isValid())
+        layer->setCrs(planeCrs);
+    sharpenSectionRaster(layer);
+    project->addMapLayer(layer, false);
+    return layer;
+}
+
+} // namespace
+
+// ---- Task 3: buildSectionLayout ----
+
+SectionLayoutResult SectionLayoutService::buildSectionLayout(
+    QgsProject* project,
+    const QList<QgsMapLayer*>& layers,
+    const SectionLayoutOptions& options)
+{
+    SectionLayoutResult result;
+
+    if (!project) {
+        result.errorKo = QStringLiteral("프로젝트가 없습니다.");
+        return result;
+    }
+
+    // 1. 단면 평면(픽셀 가로=거리, 세로=표고)으로 범위 계산.
+    //    지도 CRS geotransform의 회전/AABB는 쓰지 않는다.
+    QgsRasterLayer* firstRaster = nullptr;
+    QgsCoordinateReferenceSystem mapCrs;
+    QgsRectangle combinedExtent;
+    QVector<SectionPlane> planes;
+    bool anyFlatten = false;
+
+    for (QgsMapLayer* ml : layers) {
+        auto* rl = qobject_cast<QgsRasterLayer*>(ml);
+        if (!rl || !rl->isValid()) continue;
+        if (rl->extent().isEmpty()) continue;
+
+        SectionPlane plane;
+        inspectRaster(rl, &plane);
+        if (plane.extent.isEmpty() || plane.extent.width() <= 0.0
+            || plane.extent.height() <= 0.0)
+            continue;
+        if (std::abs(options.elevationOffsetM) > 1e-12) {
+            plane.elevBottom += options.elevationOffsetM;
+            plane.flatten = true;
+            if (plane.worldPlacement || plane.extent.xMinimum() <= 0.0) {
+                plane.extent = QgsRectangle(0.0, plane.elevBottom,
+                                            plane.lengthM, plane.elevBottom + plane.heightM);
+            } else {
+                plane.extent = QgsRectangle(plane.extent.xMinimum(), plane.elevBottom,
+                                            plane.extent.xMaximum(),
+                                            plane.elevBottom + plane.heightM);
+            }
+        }
+        planes.append(plane);
+        anyFlatten = anyFlatten || plane.flatten;
+        if (!firstRaster) {
+            firstRaster = rl;
+            combinedExtent = plane.extent;
+        } else {
+            combinedExtent.combineExtentWith(plane.extent);
+        }
+    }
+
+    const QString userCrsAuth = options.mapCrsAuthId.isEmpty()
+        ? QStringLiteral("EPSG:5187") : options.mapCrsAuthId;
+    QString titleCrsId = options.mapCrsAuthId;
+    if (titleCrsId.isEmpty()) {
+        if (firstRaster && firstRaster->crs().isValid()
+            && !firstRaster->crs().authid().isEmpty())
+            titleCrsId = firstRaster->crs().authid();
+        else
+            titleCrsId = QStringLiteral("EPSG:5187");
+    }
+    if (!firstRaster) {
+        mapCrs = QgsCoordinateReferenceSystem(userCrsAuth);
+        if (!mapCrs.isValid()) {
+            result.errorKo = QStringLiteral("좌표계를 인식하지 못했습니다.");
+            return result;
+        }
+        combinedExtent = QgsRectangle(0.0, 0.0, 10.0, 2.0);
+    } else if (!options.mapCrsAuthId.isEmpty() || anyFlatten) {
+        // 표시 래스터는 이미 거리×해발(회전 없음). 5186/5187은 표제·map CRS 라벨용.
+        mapCrs = QgsCoordinateReferenceSystem(userCrsAuth);
+        if (!mapCrs.isValid())
+            mapCrs = firstRaster->crs();
+    } else {
+        mapCrs = firstRaster->crs();
+    }
+    if (combinedExtent.isEmpty()
+        || !std::isfinite(combinedExtent.width())
+        || !std::isfinite(combinedExtent.height())
+        || combinedExtent.width() <= 0.0
+        || combinedExtent.height() <= 0.0) {
+        result.errorKo = QStringLiteral("레이어 범위가 유효하지 않습니다.");
+        return result;
+    }
+
+    // 2. 용지 치수 (mm, 가로)
+    const bool isA3 = (options.paper == SectionLayoutOptions::Paper::A3);
+    const double W = isA3 ? 420.0 : 297.0;
+    const double H = isA3 ? 297.0 : 210.0;
+
+    // 3. 레이아웃 구역 (mm)
+    const double leftAxisW   = 22.0;  // 표고 축 영역
+    const double topM        = 10.0;  // 상단 여백
+    const double rightM      = 8.0;
+    const double bottomAxisH = 14.0;  // 거리 축 영역
+    const double infoH       = 12.0;  // 축척자·표제란·좌표계
+
+    const double mapW_avail = W - leftAxisW - rightM;
+    const double mapH_avail = H - topM - bottomAxisH - infoH;
+
+    // 4. 축척 및 지도 프레임 크기 결정
+    //    combinedExtent는 mapCrs 기준 미터 단위
+    const double extW = combinedExtent.width();
+    const double extH = combinedExtent.height();
+
+    // 용지 가용 영역에 꽉 채우는 최소 분모 (map units m → mm: * 1000)
+    const double scaleFromW = extW * 1000.0 / mapW_avail;
+    const double scaleFromH = extH * 1000.0 / mapH_avail;
+    const double autoScale  = std::max(scaleFromW, scaleFromH);
+
+    // 사용자 지정 분모 또는 자동; 용지에 안 맞으면 자동 최솟값으로 올린다.
+    double scaleDenom = (options.scaleDenominator > 0.0)
+        ? options.scaleDenominator : autoScale;
+    if (scaleDenom < autoScale) scaleDenom = autoScale;
+
+    // 지도 프레임 크기: extent와 같은 종횡비 → zoomToExtent가 정확히 combinedExtent를 렌더링
+    const double frameW = extW * 1000.0 / scaleDenom;
+    const double frameH = extH * 1000.0 / scaleDenom;
+
+    // 가용 영역 내 중앙 배치
+    const double mapX = leftAxisW + (mapW_avail - frameW) * 0.5;
+    const double mapY = topM      + (mapH_avail - frameH) * 0.5;
+
+    // 5. 눈금 사전 계산 (레이아웃 생성 전 검증 — 실패 시 기존 조판 유지)
+    const double xMin = combinedExtent.xMinimum();
+    const double xMax = combinedExtent.xMaximum();
+    const double yMin = combinedExtent.yMinimum();
+    const double yMax = combinedExtent.yMaximum();
+
+    const double elevInterval = options.elevationIntervalM > 0.0
+        ? options.elevationIntervalM : 0.10;
+    const double elevMin = yMin;
+    const double elevMax = yMax;
+
+    const auto elevResult = axisTicks(elevMin, elevMax, elevInterval);
+    if (!elevResult.error.isEmpty()) {
+        result.errorKo = elevResult.error;
+        return result;
+    }
+
+    const double distSpan = xMax - xMin;
+    const double distInterval = (options.manualDistanceIntervalM > 0.0)
+        ? options.manualDistanceIntervalM
+        : niceDistanceInterval(distSpan);
+
+    const auto distResult = axisTicks(0.0, distSpan, distInterval);
+    if (!distResult.error.isEmpty()) {
+        result.errorKo = distResult.error;
+        return result;
+    }
+
+    const double elevRange = (elevMax > elevMin) ? (elevMax - elevMin) : 1.0;
+
+    // 6. 기존 조판 제거 후 새 조판 생성 (검증 통과 이후에만 삭제)
+    static const QString kName = QStringLiteral("section_sheet");
+    if (auto* old = project->layoutManager()->layoutByName(kName))
+        project->layoutManager()->removeLayout(old);
+
+    auto* layout = new QgsPrintLayout(project);
+    layout->setName(kName);
+    layout->initializeDefaults();
+
+    if (layout->pageCollection() && layout->pageCollection()->pageCount() > 0) {
+        layout->pageCollection()->page(0)
+            ->setPageSize(QgsLayoutSize(W, H, Qgis::LayoutUnit::Millimeters));
+    }
+    project->layoutManager()->addLayout(layout);
+    layout->renderContext().setFlag(
+        Qgis::LayoutRenderFlag::DisableTiledRasterLayerRenders, true);
+
+    removeDisplayLayers(project);
+    QList<QgsMapLayer*> mapLayers;
+    for (const SectionPlane& plane : planes) {
+        if (plane.flatten) {
+            QgsRasterLayer* display = makeNorthUpDisplay(
+                plane.src, mapCrs, plane, project);
+            if (!display) {
+                result.errorKo =
+                    QStringLiteral("단면 GeoTIFF를 거리×표고 평면으로 펼치지 못했습니다.");
+                return result;
+            }
+            mapLayers.append(display);
+        } else {
+            sharpenSectionRaster(plane.src);
+            mapLayers.append(plane.src);
+        }
+    }
+
+    // 7. 지도 항목 (ka_section_map): extent 종횡비와 동일한 프레임 크기
+    auto* map = new QgsLayoutItemMap(layout);
+    map->setId(QStringLiteral("ka_section_map"));
+    map->attemptSetSceneRect(QRectF(mapX, mapY, frameW, frameH));
+    map->setFrameEnabled(true);
+    map->setFrameStrokeWidth(QgsLayoutMeasurement(0.3, Qgis::LayoutUnit::Millimeters));
+    map->setMapRotation(0.0);
+    layout->addLayoutItem(map);
+    map->setCrs(mapCrs);
+    map->setLayers(mapLayers);
+    map->setKeepLayerSet(true);
+    map->zoomToExtent(combinedExtent);
+    map->setExtent(combinedExtent);
+
+    result.appliedScaleDenominator = map->scale();
+    result.appliedExtent = map->extent();
+
+    // 선 심볼 생성 헬퍼 (회색 얇은 선)
+    auto makeGraySym = [](double widthMm) -> std::unique_ptr<QgsLineSymbol> {
+        return QgsLineSymbol::createSimple({
+            {QStringLiteral("line_color"),      QStringLiteral("#555555")},
+            {QStringLiteral("line_width"),      QString::number(widthMm)},
+            {QStringLiteral("line_width_unit"), QStringLiteral("MM")}
+        });
+    };
+
+    // 8. 표고 축선 (지도 좌측 경계, 수직)
+    {
+        QPolygonF ln;
+        ln << QPointF(mapX, mapY) << QPointF(mapX, mapY + frameH);
+        auto* item = new QgsLayoutItemPolyline(ln, layout);
+        item->setId(QStringLiteral("ka_section_elevation_axis"));
+        item->setStartMarker(QgsLayoutItemPolyline::NoMarker);
+        item->setEndMarker(QgsLayoutItemPolyline::NoMarker);
+        if (auto sym = makeGraySym(0.15)) item->setSymbol(sym.get());
+        layout->addLayoutItem(item);
+    }
+
+    // 8a. 표고 눈금선 + 레이블
+    for (int i = 0; i < elevResult.ticks.size(); ++i) {
+        const double tickVal = elevResult.ticks[i];
+        const double fracY   = (tickVal - elevMin) / elevRange;
+        const double layoutY = mapY + frameH * (1.0 - fracY); // 레이아웃 Y: 아래로 증가
+
+        QPolygonF tick;
+        tick << QPointF(mapX - 3.0, layoutY) << QPointF(mapX, layoutY);
+        auto* tickItem = new QgsLayoutItemPolyline(tick, layout);
+        tickItem->setId(QStringLiteral("ka_section_elevation_tick_%1").arg(i));
+        tickItem->setStartMarker(QgsLayoutItemPolyline::NoMarker);
+        tickItem->setEndMarker(QgsLayoutItemPolyline::NoMarker);
+        if (auto sym = makeGraySym(0.10)) tickItem->setSymbol(sym.get());
+        layout->addLayoutItem(tickItem);
+
+        QPolygonF grid;
+        grid << QPointF(mapX, layoutY) << QPointF(mapX + frameW, layoutY);
+        auto* gridItem = new QgsLayoutItemPolyline(grid, layout);
+        gridItem->setId(QStringLiteral("ka_section_elevation_grid_%1").arg(i));
+        gridItem->setStartMarker(QgsLayoutItemPolyline::NoMarker);
+        gridItem->setEndMarker(QgsLayoutItemPolyline::NoMarker);
+        if (auto sym = QgsLineSymbol::createSimple({
+                {QStringLiteral("line_color"),      QStringLiteral("#888888")},
+                {QStringLiteral("line_width"),      QStringLiteral("0.08")},
+                {QStringLiteral("line_width_unit"), QStringLiteral("MM")}}))
+            gridItem->setSymbol(sym.get());
+        layout->addLayoutItem(gridItem);
+
+        auto* lbl = new QgsLayoutItemLabel(layout);
+        lbl->setId(QStringLiteral("ka_section_elevation_%1").arg(i));
+        lbl->setText(QString::number(tickVal, 'f', 2));
+        lbl->setHAlign(Qt::AlignRight);
+        lbl->setVAlign(Qt::AlignVCenter);
+        lbl->attemptSetSceneRect(QRectF(0.5, layoutY - 2.5, mapX - 4.0, 5.0));
+        QFont f(QStringLiteral("Malgun Gothic"));
+        f.setPointSize(5);
+        lbl->setFont(f);
+        layout->addLayoutItem(lbl);
+    }
+
+    // 9. 거리 축선 (지도 하단 경계, 수평)
+    {
+        QPolygonF ln;
+        ln << QPointF(mapX, mapY + frameH) << QPointF(mapX + frameW, mapY + frameH);
+        auto* item = new QgsLayoutItemPolyline(ln, layout);
+        item->setId(QStringLiteral("ka_section_distance_axis"));
+        item->setStartMarker(QgsLayoutItemPolyline::NoMarker);
+        item->setEndMarker(QgsLayoutItemPolyline::NoMarker);
+        if (auto sym = makeGraySym(0.15)) item->setSymbol(sym.get());
+        layout->addLayoutItem(item);
+    }
+
+    // 9a. 거리 눈금선 + 레이블 (왼쪽 0.00m부터 상대 누적거리)
+    for (int i = 0; i < distResult.ticks.size(); ++i) {
+        const double relDist = distResult.ticks[i];
+        const double fracX   = (distSpan > 0.0) ? (relDist / distSpan) : 0.0;
+        const double layoutX = mapX + frameW * fracX;
+        const double axisY   = mapY + frameH;
+
+        QPolygonF tick;
+        tick << QPointF(layoutX, axisY) << QPointF(layoutX, axisY + 3.0);
+        auto* tickItem = new QgsLayoutItemPolyline(tick, layout);
+        tickItem->setId(QStringLiteral("ka_section_distance_tick_%1").arg(i));
+        tickItem->setStartMarker(QgsLayoutItemPolyline::NoMarker);
+        tickItem->setEndMarker(QgsLayoutItemPolyline::NoMarker);
+        if (auto sym = makeGraySym(0.10)) tickItem->setSymbol(sym.get());
+        layout->addLayoutItem(tickItem);
+
+        auto* lbl = new QgsLayoutItemLabel(layout);
+        lbl->setId(QStringLiteral("ka_section_distance_%1").arg(i));
+        lbl->setText(QStringLiteral("%1m").arg(relDist, 0, 'f', 2));
+        lbl->setHAlign(Qt::AlignHCenter);
+        lbl->setVAlign(Qt::AlignTop);
+        lbl->attemptSetSceneRect(QRectF(layoutX - 10.0, axisY + 3.0, 20.0, 5.0));
+        QFont f(QStringLiteral("Malgun Gothic"));
+        f.setPointSize(5);
+        lbl->setFont(f);
+        layout->addLayoutItem(lbl);
+    }
+
+    // 10. 기준선: #D7191C 점선 0.20mm (지도 하단 = 기준 표고)
+    if (options.showReferenceLine) {
+        QPolygonF ln;
+        ln << QPointF(mapX, mapY + frameH) << QPointF(mapX + frameW, mapY + frameH);
+        auto* refItem = new QgsLayoutItemPolyline(ln, layout);
+        refItem->setId(QStringLiteral("ka_section_reference_line"));
+        refItem->setStartMarker(QgsLayoutItemPolyline::NoMarker);
+        refItem->setEndMarker(QgsLayoutItemPolyline::NoMarker);
+        if (auto sym = QgsLineSymbol::createSimple({
+                {QStringLiteral("line_color"),      options.referenceLineColor},
+                {QStringLiteral("line_width"),      QString::number(options.referenceLineWidthMm)},
+                {QStringLiteral("line_width_unit"), QStringLiteral("MM")},
+                {QStringLiteral("line_style"),      QStringLiteral("dash")}}))
+            refItem->setSymbol(sym.get());
+        layout->addLayoutItem(refItem);
+    }
+
+    // 11. 크롬: 축척자·표제·좌표계·축척
+    const double chromeY = mapY + frameH + bottomAxisH;
+
+    // 표제란 (ka_section_title_block): 도면명 | 수직:표고(m) | 작성일
+    {
+        const QString title = options.titleKo.isEmpty()
+            ? QStringLiteral("단면도") : options.titleKo;
+        const QString date  = QDate::currentDate().toString(QStringLiteral("yyyy-MM-dd"));
+        auto* lbl = new QgsLayoutItemLabel(layout);
+        lbl->setId(QStringLiteral("ka_section_title_block"));
+        lbl->setText(QStringLiteral("%1  |  수직: 표고(m)  |  작성일: %2").arg(title, date));
+        lbl->setHAlign(Qt::AlignLeft);
+        lbl->setVAlign(Qt::AlignVCenter);
+        lbl->attemptSetSceneRect(QRectF(mapX, chromeY + 0.5, frameW * 0.45, 7.0));
+        QFont f(QStringLiteral("Malgun Gothic"));
+        f.setPointSize(7);
+        f.setBold(true);
+        lbl->setFont(f);
+        layout->addLayoutItem(lbl);
+    }
+
+    // 축척 레이블 (ka_section_scale)
+    {
+        const long long sd = result.appliedScaleDenominator > 0.5
+            ? static_cast<long long>(std::lround(result.appliedScaleDenominator)) : 0LL;
+        auto* lbl = new QgsLayoutItemLabel(layout);
+        lbl->setId(QStringLiteral("ka_section_scale"));
+        lbl->setText(sd > 0
+            ? QStringLiteral("S = 1:%1").arg(QLocale().toString(sd))
+            : QStringLiteral("S = 1:N"));
+        lbl->setHAlign(Qt::AlignLeft);
+        lbl->setVAlign(Qt::AlignVCenter);
+        lbl->attemptSetSceneRect(QRectF(mapX + frameW * 0.45, chromeY + 0.5, 40.0, 7.0));
+        QFont f(QStringLiteral("Malgun Gothic"));
+        f.setPointSize(7);
+        lbl->setFont(f);
+        layout->addLayoutItem(lbl);
+    }
+
+    // 좌표계 레이블 (ka_section_crs)
+    {
+        const QString crsId = titleCrsId.isEmpty() ? QStringLiteral("-") : titleCrsId;
+        auto* lbl = new QgsLayoutItemLabel(layout);
+        lbl->setId(QStringLiteral("ka_section_crs"));
+        lbl->setText(crsId);
+        lbl->setHAlign(Qt::AlignLeft);
+        lbl->setVAlign(Qt::AlignVCenter);
+        lbl->attemptSetSceneRect(QRectF(mapX + frameW * 0.45 + 42.0, chromeY + 0.5, 60.0, 7.0));
+        QFont f(QStringLiteral("Malgun Gothic"));
+        f.setPointSize(7);
+        lbl->setFont(f);
+        layout->addLayoutItem(lbl);
+    }
+
+    auto addScaleBar = [&](const QString& id, const QString& style,
+                           const QRectF& rect) {
+        auto* sb = new QgsLayoutItemScaleBar(layout);
+        sb->setId(id);
+        layout->addLayoutItem(sb);
+        sb->setLinkedMap(map);
+        sb->setStyle(style);
+        sb->setUnits(Qgis::DistanceUnit::Meters);
+        sb->setUnitLabel(QStringLiteral("m"));
+        sb->setNumberOfSegments(4);
+        sb->setNumberOfSegmentsLeft(0);
+        sb->setHeight(2.4);
+        if (!combinedExtent.isEmpty())
+            sb->applyDefaultSize(Qgis::DistanceUnit::Meters);
+        QgsTextFormat sbFmt;
+        sbFmt.setFont(QFont(QStringLiteral("Malgun Gothic")));
+        sbFmt.setSize(6.0);
+        sbFmt.setSizeUnit(Qgis::RenderUnit::Points);
+        sb->setTextFormat(sbFmt);
+        sb->attemptSetSceneRect(rect);
+    };
+
+    addScaleBar(QStringLiteral("ka_section_scale_bar"),
+                QStringLiteral("Double Box"),
+                QRectF(W - rightM - 68.0, chromeY + 1.0, 66.0, 9.0));
+    addScaleBar(QStringLiteral("ka_section_scale_bar_single"),
+                QStringLiteral("Single Box"),
+                QRectF(leftAxisW, 1.5, 66.0, 8.0));
+    addScaleBar(QStringLiteral("ka_section_scale_bar_ticks"),
+                QStringLiteral("Line Ticks Up"),
+                QRectF(leftAxisW + 70.0, 1.5, 66.0, 8.0));
+    addScaleBar(QStringLiteral("ka_section_scale_bar_numeric"),
+                QStringLiteral("Numeric"),
+                QRectF(leftAxisW + 140.0, 1.5, 50.0, 8.0));
+
+    result.layoutName = kName;
+    return result;
+}
+
+// ---- Task 3: exportSectionPdf ----
+
+QString SectionLayoutService::exportSectionPdf(
+    QgsProject* project,
+    const QString& pdfPath,
+    QString* errorOut)
+{
+    if (!project) {
+        if (errorOut) *errorOut = QStringLiteral("프로젝트가 없습니다.");
+        return {};
+    }
+
+    static const QString kName = QStringLiteral("section_sheet");
+    auto* master = project->layoutManager()->layoutByName(kName);
+    auto* layout = dynamic_cast<QgsPrintLayout*>(master);
+    if (!layout) {
+        if (errorOut) *errorOut = QStringLiteral("section_sheet 조판이 없습니다.");
+        return {};
+    }
+
+    // 래스터를 타일 없이 한 번에 그려 PDF에서 조각 없이 나오게 한다
+    layout->renderContext().setFlag(
+        Qgis::LayoutRenderFlag::DisableTiledRasterLayerRenders, true);
+
+    QgsLayoutExporter exporter(layout);
+    QgsLayoutExporter::PdfExportSettings settings;
+    settings.dpi                = 300;
+    settings.forceVectorOutput  = true;
+    settings.rasterizeWholeImage = false;
+    settings.textRenderFormat   = Qgis::TextRenderFormat::AlwaysText;
+
+    const double keepDpi = layout->renderContext().dpi();
+    layout->renderContext().setDpi(settings.dpi);
+    const auto r = exporter.exportToPdf(pdfPath, settings);
+    layout->renderContext().setDpi(keepDpi);
+
+    if (r != QgsLayoutExporter::Success) {
+        if (errorOut)
+            *errorOut = QStringLiteral("PDF 내보내기 실패 (코드 %1)").arg(int(r));
+        return {};
+    }
+    if (!QFile::exists(pdfPath) || QFileInfo(pdfPath).size() < 100) {
+        if (errorOut)
+            *errorOut = QStringLiteral("PDF 파일이 비었거나 너무 작습니다.");
+        return {};
+    }
+    return pdfPath;
+}
