@@ -23,6 +23,10 @@
 #include <qgscoordinatereferencesystem.h>
 #include <qgsfeature.h>
 #include <qgsfields.h>
+#include <qgsrasterrenderer.h>
+#include <qgsrastertransparency.h>
+
+#include <gdal.h>
 
 class TestGeoref : public QObject {
   Q_OBJECT
@@ -35,6 +39,8 @@ private slots:
   void vectorAffineDoesNotNeedControlPoints();
   void domainLayersNotAlignable();
   void pngWithoutWorldFileLooksUnreferenced();
+  void geotiffEmbeddedGtIsReferenced();
+  void knockOutRasterPaperMakesWhiteTransparent();
 };
 
 static bool nearly(double a, double b, double eps = 1e-6) {
@@ -196,6 +202,51 @@ void TestGeoref::pngWithoutWorldFileLooksUnreferenced() {
   QVERIFY2(rl->isValid(), qPrintable(rl->error().message()));
   QVERIFY(GeorefService::looksUnreferencedRaster(rl));
   QVERIFY(!QFile::exists(GeorefService::worldFilePathFor(png)));
+  delete rl;
+}
+
+void TestGeoref::geotiffEmbeddedGtIsReferenced() {
+  const QString dir = QDir::temp().filePath(QStringLiteral("ka_georef_gt_")
+                                            + QString::number(QDateTime::currentMSecsSinceEpoch()));
+  QVERIFY(QDir().mkpath(dir));
+  const QString tif = dir + QStringLiteral("/wall.tif");
+  GDALAllRegister();
+  GDALDriverH drv = GDALGetDriverByName("GTiff");
+  QVERIFY2(drv, "GTiff driver missing");
+  GDALDatasetH ds = GDALCreate(drv, qUtf8Printable(tif), 8, 6, 3, GDT_Byte, nullptr);
+  QVERIFY2(ds, "GeoTIFF create failed");
+  double gt[6] = {194880.0, 0.01, 0.0, 574000.0, 0.0, -0.01};
+  GDALSetGeoTransform(ds, gt);
+  GDALClose(ds);
+  QVERIFY(!QFile::exists(GeorefService::worldFilePathFor(tif)));
+  auto* rl = new QgsRasterLayer(tif, QStringLiteral("wall"), QStringLiteral("gdal"));
+  QVERIFY2(rl->isValid(), qPrintable(rl->error().message()));
+  QVERIFY2(!GeorefService::looksUnreferencedRaster(rl),
+           "embedded map GT must not be treated as a raw scan");
+  delete rl;
+}
+
+void TestGeoref::knockOutRasterPaperMakesWhiteTransparent() {
+  const QString dir = QDir::temp().filePath(QStringLiteral("ka_georef_ko_")
+                                            + QString::number(QDateTime::currentMSecsSinceEpoch()));
+  QVERIFY(QDir().mkpath(dir));
+  const QString tif = dir + QStringLiteral("/paper.tif");
+  QImage img(16, 12, QImage::Format_RGB32);
+  img.fill(Qt::white);
+  img.setPixelColor(4, 4, QColor(80, 60, 40));
+  QVERIFY(img.save(tif, "TIFF"));
+  auto* rl = new QgsRasterLayer(tif, QStringLiteral("paper"), QStringLiteral("gdal"));
+  QVERIFY2(rl->isValid(), qPrintable(rl->error().message()));
+  LayerOps::knockOutRasterPaper(rl);
+  QVERIFY(rl->renderer());
+  QVERIFY(rl->renderer()->rasterTransparency());
+  const auto list = rl->renderer()->rasterTransparency()->transparentThreeValuePixelList();
+  bool knocked = false;
+  for (const auto& px : list) {
+    if (std::abs(px.red - 255.0) < 1e-6 && px.opacity < 0.01)
+      knocked = true;
+  }
+  QVERIFY2(knocked, "white paper must be transparent");
   delete rl;
 }
 

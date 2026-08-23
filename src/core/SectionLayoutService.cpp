@@ -37,6 +37,8 @@
 #include <qgsproject.h>
 #include <qgsrasterdataprovider.h>
 #include <qgsrasterlayer.h>
+#include <qgsrasterrenderer.h>
+#include <qgsrastertransparency.h>
 #include <qgsrectangle.h>
 #include <qgstextformat.h>
 
@@ -166,7 +168,81 @@ struct SectionPlane {
     double lengthM = 0.0;
     double heightM = 0.0;
     double elevBottom = 0.0;
+    int cropX0 = 0;
+    int cropY0 = 0;
+    int cropW = 0;  // 0이면 원본 전체
+    int cropH = 0;
 };
+
+// Descartes 단면 TIFF는 벽 사진 둘레에 흰 용지 여백이 있다.
+// RGB 바이트만 본다. 단밴드·Float 테스트 래스터는 손대지 않는다.
+struct PhotoBox {
+    int x0 = 0;
+    int y0 = 0;
+    int w = 0;
+    int h = 0;
+    bool cropped = false;
+};
+
+bool findPhotoPixelBox(GDALDataset* ds, PhotoBox* out)
+{
+    if (!ds || !out) return false;
+    const int cols = ds->GetRasterXSize();
+    const int rows = ds->GetRasterYSize();
+    const int nBands = ds->GetRasterCount();
+    if (cols < 4 || rows < 4 || nBands < 3) return false;
+    for (int b = 1; b <= 3; ++b) {
+        GDALRasterBand* band = ds->GetRasterBand(b);
+        if (!band || band->GetRasterDataType() != GDT_Byte) return false;
+    }
+
+    constexpr unsigned char kPaper = 248;  // 용지 흰색(압축 잡음 포함)
+    int minX = cols;
+    int minY = rows;
+    int maxX = -1;
+    int maxY = -1;
+    std::vector<unsigned char> row(static_cast<size_t>(cols) * 3);
+    const int bands[3] = {1, 2, 3};
+    for (int y = 0; y < rows; ++y) {
+        const CPLErr err = ds->RasterIO(GF_Read, 0, y, cols, 1, row.data(), cols, 1,
+                                        GDT_Byte, 3, bands, 3, 0, 1);
+        if (err != CE_None) return false;
+        for (int x = 0; x < cols; ++x) {
+            const unsigned char r = row[static_cast<size_t>(x) * 3];
+            const unsigned char g = row[static_cast<size_t>(x) * 3 + 1];
+            const unsigned char b = row[static_cast<size_t>(x) * 3 + 2];
+            if (r >= kPaper && g >= kPaper && b >= kPaper) continue;
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+        }
+    }
+    if (maxX < minX || maxY < minY) return false;
+    const int w = maxX - minX + 1;
+    const int h = maxY - minY + 1;
+    if (w < 4 || h < 4) return false;
+    out->x0 = minX;
+    out->y0 = minY;
+    out->w = w;
+    out->h = h;
+    const double frac = static_cast<double>(w) * static_cast<double>(h)
+        / (static_cast<double>(cols) * static_cast<double>(rows));
+    out->cropped = frac < 0.97;
+    return true;
+}
+
+void knockOutSectionPaper(QgsRasterLayer* rl)
+{
+    if (!rl || !rl->isValid() || rl->bandCount() < 3) return;
+    QgsRasterRenderer* rend = rl->renderer();
+    if (!rend) return;
+    auto* trans = new QgsRasterTransparency();
+    QVector<QgsRasterTransparency::TransparentThreeValuePixel> whites;
+    whites.append(QgsRasterTransparency::TransparentThreeValuePixel(255, 255, 255, 0.0, 12, 12, 12));
+    trans->setTransparentThreeValuePixelList(whites);
+    rend->setRasterTransparency(trans);
+}
 
 void inspectRaster(QgsRasterLayer* rl, SectionPlane* out)
 {
@@ -174,6 +250,10 @@ void inspectRaster(QgsRasterLayer* rl, SectionPlane* out)
     out->extent = rl->extent();
     out->flatten = false;
     out->worldPlacement = false;
+    out->cropX0 = 0;
+    out->cropY0 = 0;
+    out->cropW = 0;
+    out->cropH = 0;
     GDALAllRegister();
     GDALDataset* ds = static_cast<GDALDataset*>(
         GDALOpen(rl->source().toUtf8().constData(), GA_ReadOnly));
@@ -182,6 +262,8 @@ void inspectRaster(QgsRasterLayer* rl, SectionPlane* out)
     ds->GetGeoTransform(gt);
     const int cols = ds->GetRasterXSize();
     const int rows = ds->GetRasterYSize();
+    PhotoBox photo;
+    const bool hasPhoto = findPhotoPixelBox(ds, &photo);
     GDALClose(ds);
     if (cols <= 0 || rows <= 0) return;
 
@@ -195,10 +277,25 @@ void inspectRaster(QgsRasterLayer* rl, SectionPlane* out)
     const double yBotLeft = gt[3] + static_cast<double>(rows) * gt[5];
     const bool elevFromFile = looksLikeOrthometricElev(yTopLeft, yBotLeft);
 
-    out->lengthM = static_cast<double>(cols) * colStep;
-    out->heightM = static_cast<double>(rows) * rowStep;
+    int useX0 = 0;
+    int useY0 = 0;
+    int useW = cols;
+    int useH = rows;
+    if (hasPhoto && photo.cropped) {
+        useX0 = photo.x0;
+        useY0 = photo.y0;
+        useW = photo.w;
+        useH = photo.h;
+        out->cropX0 = useX0;
+        out->cropY0 = useY0;
+        out->cropW = useW;
+        out->cropH = useH;
+    }
 
-    if (!rotated && elevFromFile && yLooksLikeElevation(out->extent)) {
+    out->lengthM = static_cast<double>(useW) * colStep;
+    out->heightM = static_cast<double>(useH) * rowStep;
+
+    if (!rotated && elevFromFile && yLooksLikeElevation(out->extent) && out->cropW == 0) {
         out->flatten = false;
         out->lengthM = out->extent.width();
         out->heightM = out->extent.height();
@@ -207,14 +304,16 @@ void inspectRaster(QgsRasterLayer* rl, SectionPlane* out)
     }
 
     if (elevFromFile && std::abs(gt[5]) > 0.0) {
-        // 이미 단면 평면(Y=해발). 전단이 있어도 표고 높이는 gt[5]만.
-        out->heightM = std::abs(static_cast<double>(rows) * gt[5]);
-        out->elevBottom = std::min(yTopLeft, yBotLeft);
+        // 이미 단면 평면(Y=해발). 하단을 자른 만큼 해발 원점을 올린다.
+        const double yStep = std::abs(gt[5]);
+        const int padBottom = rows - useY0 - useH;
+        out->heightM = static_cast<double>(useH) * yStep;
+        out->elevBottom = std::min(yTopLeft, yBotLeft) + static_cast<double>(padBottom) * yStep;
     } else {
         // 지도에 눕힌 4×4. 픽셀 세로 길이가 벽 높이. 원점은 표고 보정.
         out->worldPlacement = true;
         out->elevBottom = 0.0;
-        out->heightM = static_cast<double>(rows) * rowStep;
+        out->heightM = static_cast<double>(useH) * rowStep;
     }
 
     out->flatten = true;
@@ -273,10 +372,20 @@ QgsRasterLayer* makeNorthUpDisplay(QgsRasterLayer* src,
         GDALClose(ds);
         return nullptr;
     }
-    const double px = plane.lengthM / static_cast<double>(cols);
-    const double py = plane.heightM / static_cast<double>(rows);
+    const int srcX = plane.cropW > 0 ? plane.cropX0 : 0;
+    const int srcY = plane.cropH > 0 ? plane.cropY0 : 0;
+    const int srcW = plane.cropW > 0 ? plane.cropW : cols;
+    const int srcH = plane.cropH > 0 ? plane.cropH : rows;
+    if (srcW <= 0 || srcH <= 0 || srcX < 0 || srcY < 0
+        || srcX + srcW > cols || srcY + srcH > rows) {
+        GDALClose(ds);
+        return nullptr;
+    }
+    const double px = plane.lengthM / static_cast<double>(srcW);
+    const double py = plane.heightM / static_cast<double>(srcH);
     const double elevTop = plane.elevBottom + plane.heightM;
     double ngt[6] = {0.0, px, 0.0, elevTop, 0.0, -py};
+    const bool cropped = plane.cropW > 0;
 
     QString outPath = QDir::temp().filePath(
         QStringLiteral("ka_section_%1.tif").arg(src->id()));
@@ -285,7 +394,7 @@ QgsRasterLayer* makeNorthUpDisplay(QgsRasterLayer* src,
     QString wkt = planeCrs.isValid() ? planeCrs.toWkt() : QString();
     GDALDriver* drv = GetGDALDriverManager()->GetDriverByName("GTiff");
     GDALDataset* copy = nullptr;
-    if (drv) {
+    if (drv && !cropped) {
         char** copts = CSLSetNameValue(nullptr, "TILED", "YES");
         copy = drv->CreateCopy(QDir::fromNativeSeparators(outPath).toUtf8().constData(),
                                ds, FALSE, copts, nullptr, nullptr);
@@ -303,7 +412,7 @@ QgsRasterLayer* makeNorthUpDisplay(QgsRasterLayer* src,
         QString xml;
         QTextStream ts(&xml);
         ts << QStringLiteral("<VRTDataset rasterXSize=\"%1\" rasterYSize=\"%2\">\n")
-              .arg(cols).arg(rows);
+              .arg(srcW).arg(srcH);
         if (!wkt.isEmpty())
             ts << QStringLiteral("  <SRS>") << wkt << QStringLiteral("</SRS>\n");
         ts << QStringLiteral("  <GeoTransform>0, %1, 0, %2, 0, %3</GeoTransform>\n")
@@ -330,10 +439,10 @@ QgsRasterLayer* makeNorthUpDisplay(QgsRasterLayer* src,
                                  "DataType=\"%3\" BlockXSize=\"%4\" BlockYSize=\"%5\"/>\n")
                     .arg(cols).arg(rows).arg(QLatin1String(dt))
                     .arg(blockX > 0 ? blockX : cols).arg(blockY > 0 ? blockY : 1)
-               << QStringLiteral("      <SrcRect xOff=\"0\" yOff=\"0\" xSize=\"%1\" ySize=\"%2\"/>\n")
-                    .arg(cols).arg(rows)
+               << QStringLiteral("      <SrcRect xOff=\"%1\" yOff=\"%2\" xSize=\"%3\" ySize=\"%4\"/>\n")
+                    .arg(srcX).arg(srcY).arg(srcW).arg(srcH)
                << QStringLiteral("      <DstRect xOff=\"0\" yOff=\"0\" xSize=\"%1\" ySize=\"%2\"/>\n")
-                    .arg(cols).arg(rows)
+                    .arg(srcW).arg(srcH)
                << QStringLiteral("    </SimpleSource>\n")
                << QStringLiteral("  </VRTRasterBand>\n");
         }
@@ -361,6 +470,7 @@ QgsRasterLayer* makeNorthUpDisplay(QgsRasterLayer* src,
     if (planeCrs.isValid())
         layer->setCrs(planeCrs);
     sharpenSectionRaster(layer);
+    knockOutSectionPaper(layer);
     project->addMapLayer(layer, false);
     return layer;
 }
@@ -554,6 +664,7 @@ SectionLayoutResult SectionLayoutService::buildSectionLayout(
             mapLayers.append(display);
         } else {
             sharpenSectionRaster(plane.src);
+            knockOutSectionPaper(plane.src);
             mapLayers.append(plane.src);
         }
     }

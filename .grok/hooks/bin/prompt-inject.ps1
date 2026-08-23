@@ -1,12 +1,17 @@
-# UserPromptSubmit — excavation HGIS loop
+# UserPromptSubmit — excavation HGIS loop + new-turn graph/loop state
 $ErrorActionPreference = 'SilentlyContinue'
+. (Join-Path $PSScriptRoot 'graph-loop-state.ps1')
 $raw = [Console]::In.ReadToEnd()
 $isExpert = $false
 if (-not [string]::IsNullOrWhiteSpace($raw)) {
   try {
     $evt = $raw | ConvertFrom-Json
-    if ($evt.subagentType) { $isExpert = $true }
+    if (Test-KaIsExpertEvent $evt) { $isExpert = $true }
   } catch { }
+}
+# Parent turn only: experts must not wipe the parent's this-turn write/graph log.
+if (-not $isExpert) {
+  try { Reset-KaTurnState } catch { }
 }
 $here = $PSScriptRoot
 $name = if ($isExpert) { 'excavation-loop-expert.txt' } else { 'excavation-loop.txt' }

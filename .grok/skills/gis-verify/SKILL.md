@@ -1,10 +1,10 @@
 ---
 name: gis-verify
 description: >
-  GIS-first diagnosis for map, CRS, WMS/VWorld, digitize, layout, and legend
+  GIS-first diagnosis for map, CRS, WMS/VWorld, digitize, 조판, and legend
   bugs in ka-hgis. Use when the user reports 지도가 안 보임, 지적, 위성,
-  EPSG, WMS, GetMap, 디지타이즈, 범례, or runs /gis-verify.
-when-to-use: Map / CRS / WMS / digitize / layout / legend problems
+  EPSG, WMS, GetMap, 디지타이즈, 범례, 조판, or runs /gis-verify.
+when-to-use: Map / CRS / WMS / digitize / 조판 / layout / legend problems
 ---
 
 # GIS-first verify
@@ -22,7 +22,13 @@ Name these objects (agent work — do not ask the user to diagnose EPSG/WMS):
 5. WMS GetCapabilities / GetMap / scale
 6. Edit buffer (`startEditing` → modify → `commitChanges`)
 
-Read in-repo truth: `docs/vendor/qgis-manual-3.44/`, `src/core/LayerOps.*`, `src/app/MainWindow.*`.
+Read in-repo truth: `docs/vendor/qgis-manual-3.44/`, `src/core/LayerOps.*`, `src/app/MainWindow.*`, `docs/ERROR_REGRESSION.md`.
+
+지적 WMS is frozen: tiled `crs=EPSG:3857`, KEY/DOMAIN, `tilePixelRatio=2`,
+layers `lp_pa_cbnd_bonbun,lp_pa_cbnd_bubun`. Do not put 5186/5187/5179 in the
+WMS CRS list (Caps bbox is 4326 only; work CRS is OTF `destinationCrs`).
+Paint order: 조사 → 지적 → 위성. Wide zoom → empty PNG; parcels show near 1:2000.
+조판 attach/map-item order: `/ka-drawing-studio` and rule `41-drawing-studio.md`.
 
 ## Graph (read-only, at most these)
 

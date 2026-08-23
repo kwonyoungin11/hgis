@@ -5,6 +5,7 @@
 #include <QColor>
 class QgsProject;
 class QgsVectorLayer;
+class QgsRasterLayer;
 class QgsMapLayer;
 class QgsMapCanvas;
 class QgsRectangle;
@@ -65,6 +66,8 @@ public:
   static bool addVworldBaseMap(QgsProject* project, QgsMapCanvas* canvas, const QString& apiKey, QString* errorOut = nullptr);
 
   static bool addVworldSatelliteMap(QgsProject* project, QgsMapCanvas* canvas, const QString& apiKey, QString* errorOut = nullptr);
+  static void applyCanvasScreenDpi(QgsMapCanvas* canvas);
+  static void refreshXyzBasemapTiles(QgsMapCanvas* canvas);
 
   static bool addVworldCadastralMap(QgsProject* project, QgsMapCanvas* canvas, const QString& apiKey, QString* errorOut = nullptr);
   // VWorld GetCapabilities only publish 4326 (and 900913/3857). 5186/5187/5179
@@ -98,7 +101,7 @@ public:
 
   static QgsRectangle koreaExtentForCrs(const QString& epsgAuthId);
 
-  static void zoomToKorea(QgsMapCanvas* canvas, const QString& epsgAuthId);
+  static void zoomToKorea(QgsMapCanvas* canvas, const QString& epsgAuthId, bool refresh = true);
   static void syncMapCanvas(QgsProject* project, QgsMapCanvas* canvas, bool zoomKorea = true);
   static QList<QgsMapLayer*> visibleLayersPaintOrder(QgsProject* project);
   static bool zoomToLayerMax(QgsMapCanvas* canvas, QgsMapLayer* layer);
@@ -129,6 +132,9 @@ public:
                                  bool insertAtBottom = false);
   static void markSurveyLayer(QgsMapLayer* layer, const QString& layerKey);
   static void markReferenceLayer(QgsMapLayer* layer);
+  // RGB GeoTIFF 용지 흰색을 투명으로. 이미 적용돼 있으면 그대로 둔다.
+  static void knockOutRasterPaper(QgsRasterLayer* layer);
+  static void knockOutProjectRasterPaper(QgsProject* project);
   static QString layerKeyOf(const QgsMapLayer* layer);
   static bool isReferenceLayer(const QgsMapLayer* layer);
   static bool isBasemapLayer(const QgsMapLayer* layer);

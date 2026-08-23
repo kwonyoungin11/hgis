@@ -1,4 +1,5 @@
 #include "LayerOps.h"
+#include "GeorefService.h"
 #include "VworldSettings.h"
 #include <QDateTime>
 #include <QFile>
@@ -45,6 +46,8 @@
 #include <qgsbilinearrasterresampler.h>
 #include <qgsrasterresamplefilter.h>
 #include <qgsrasterdataprovider.h>
+#include <qgsrasterrenderer.h>
+#include <qgsrastertransparency.h>
 #include <qgsnetworkaccessmanager.h>
 #include <qgslayertreegroup.h>
 #include <qgsprojectviewsettings.h>
@@ -581,6 +584,36 @@ void LayerOps::markSurveyLayer(QgsMapLayer* layer, const QString& layerKey) {
   layer->setCustomProperty(QString::fromUtf8(kPropLayerRole), QString::fromUtf8(kRoleSurvey));
 }
 
+void LayerOps::knockOutRasterPaper(QgsRasterLayer* layer) {
+  if (!layer || !layer->isValid()) return;
+  if (isBasemapLayer(layer)) return;
+  // 내장 GT가 있는 GeoTIFF를 맞추기 대기로 숨기면 지도에는 보여도 조판에서 빠진다.
+  if (isAlignPending(layer) && !GeorefService::looksUnreferencedRaster(layer))
+    setAlignPending(layer, false);
+  if (layer->bandCount() < 3) return;
+  QgsRasterRenderer* rend = layer->renderer();
+  if (!rend) return;
+  if (const QgsRasterTransparency* old = rend->rasterTransparency()) {
+    const auto list = old->transparentThreeValuePixelList();
+    for (const auto& px : list) {
+      if (std::abs(px.red - 255.0) < 1e-6 && px.opacity < 0.01)
+        return;
+    }
+  }
+  auto* trans = new QgsRasterTransparency();
+  QVector<QgsRasterTransparency::TransparentThreeValuePixel> whites;
+  whites.append(QgsRasterTransparency::TransparentThreeValuePixel(255, 255, 255, 0.0, 16, 16, 16));
+  trans->setTransparentThreeValuePixelList(whites);
+  rend->setRasterTransparency(trans);
+  layer->triggerRepaint();
+}
+
+void LayerOps::knockOutProjectRasterPaper(QgsProject* project) {
+  if (!project) return;
+  for (QgsMapLayer* ml : project->mapLayers())
+    knockOutRasterPaper(qobject_cast<QgsRasterLayer*>(ml));
+}
+
 void LayerOps::markReferenceLayer(QgsMapLayer* layer) {
   if (!layer) return;
   layer->setCustomProperty(QString::fromUtf8(kPropLayerRole), QString::fromUtf8(kRoleReference));
@@ -894,8 +927,17 @@ QList<QgsMapLayer*> LayerOps::visibleLayersPaintOrder(QgsProject* project) {
   return visible;
 }
 
+void LayerOps::applyCanvasScreenDpi(QgsMapCanvas* canvas) {
+  if (!canvas) return;
+  const qreal dpr = canvas->devicePixelRatioF();
+  if (dpr > 0.05)
+    canvas->mapSettings().setDevicePixelRatio(static_cast<float>(dpr));
+}
+
 void LayerOps::syncMapCanvas(QgsProject* project, QgsMapCanvas* canvas, bool zoomKorea) {
   if (!project || !canvas) return;
+  knockOutProjectRasterPaper(project);
+  applyCanvasScreenDpi(canvas);
 
   QList<QgsMapLayer*> visible = visibleLayersPaintOrder(project);
   const bool layersChanged = (visible != canvas->layers());
@@ -910,8 +952,10 @@ void LayerOps::syncMapCanvas(QgsProject* project, QgsMapCanvas* canvas, bool zoo
     canvas->setLayers(visible);
   canvas->setCachingEnabled(true);
   canvas->setRenderFlag(true);
-  canvas->freeze(false);
-  canvas->setPreviewJobsEnabled(true);
+  const bool wasFrozen = canvas->isFrozen();
+  if (!wasFrozen)
+    canvas->freeze(false);
+  canvas->setPreviewJobsEnabled(false);
   canvas->setParallelRenderingEnabled(true);
 
   if (zoomKorea) {
@@ -1186,13 +1230,13 @@ bool LayerOps::addOsmBasemap(QgsProject* project, QgsMapCanvas* canvas, QString*
   ensureTileNetworkIdentity();
   const QStringList uris = {
       QStringLiteral(
-          "type=xyz&url=https://tile.openstreetmap.org/%7Bz%7D/%7Bx%7D/%7By%7D.png&zmax=19&zmin=0&crs=EPSG:3857"),
+          "type=xyz&url=https://tile.openstreetmap.org/%7Bz%7D/%7Bx%7D/%7By%7D.png&zmax=19&zmin=0&crs=EPSG:3857&tilePixelRatio=1"),
       QStringLiteral(
-          "type=xyz&url=https://tile.openstreetmap.org/%7Bz%7D/%7Bx%7D/%7By%7D.png&zmax=19&zmin=0"),
+          "type=xyz&url=https://tile.openstreetmap.org/%7Bz%7D/%7Bx%7D/%7By%7D.png&zmax=19&zmin=0&tilePixelRatio=1"),
       QStringLiteral(
-          "type=xyz&url=https://basemaps.cartocdn.com/light_all/%7Bz%7D/%7Bx%7D/%7By%7D.png&zmax=20&zmin=0&crs=EPSG:3857"),
+          "type=xyz&url=https://basemaps.cartocdn.com/light_all/%7Bz%7D/%7Bx%7D/%7By%7D.png&zmax=20&zmin=0&crs=EPSG:3857&tilePixelRatio=1"),
       QStringLiteral(
-          "type=xyz&url=https://a.basemaps.cartocdn.com/light_all/%7Bz%7D/%7Bx%7D/%7By%7D.png&zmax=20&zmin=0"),
+          "type=xyz&url=https://a.basemaps.cartocdn.com/light_all/%7Bz%7D/%7Bx%7D/%7By%7D.png&zmax=20&zmin=0&tilePixelRatio=1"),
   };
   QString lastErr;
   for (int i = 0; i < uris.size(); ++i) {
@@ -1244,11 +1288,11 @@ bool LayerOps::addVworldBaseMap(QgsProject* project, QgsMapCanvas* canvas, const
   const QStringList uris = {
       QStringLiteral(
           "type=xyz&url=https://api.vworld.kr/req/wmts/1.0.0/%1/Base/%7Bz%7D/%7By%7D/%7Bx%7D.png"
-          "&zmax=19&zmin=6&crs=EPSG:3857")
+          "&zmax=19&zmin=6&crs=EPSG:3857&tilePixelRatio=1")
           .arg(key),
       QStringLiteral(
           "type=xyz&url=https://xdworld.vworld.kr/2d/Base/service/%7Bz%7D/%7Bx%7D/%7By%7D.png"
-          "&zmax=19&zmin=6&crs=EPSG:3857"),
+          "&zmax=19&zmin=6&crs=EPSG:3857&tilePixelRatio=1"),
   };
   const bool ok =
       addBasemapWithFallbacks(project, canvas, uris, QStringLiteral("VWorld 배경"), errorOut);
@@ -1262,25 +1306,33 @@ bool LayerOps::addVworldBaseMap(QgsProject* project, QgsMapCanvas* canvas, const
   return ok;
 }
 
+void LayerOps::refreshXyzBasemapTiles(QgsMapCanvas* canvas) {
+  if (!canvas) return;
+  applyCanvasScreenDpi(canvas);
+  canvas->clearCache();
+  canvas->refreshAllLayers();
+  canvas->refresh();
+}
+
 bool LayerOps::addVworldSatelliteMap(QgsProject* project, QgsMapCanvas* canvas, const QString& apiKey, QString* errorOut) {
   const QString key = apiKey.trimmed();
   QStringList uris;
   if (!key.isEmpty()) {
     uris << QStringLiteral(
                 "type=xyz&url=https://api.vworld.kr/req/wmts/1.0.0/%1/Satellite/%7Bz%7D/%7By%7D/%7Bx%7D.jpeg"
-                "&zmax=19&zmin=6&crs=EPSG:3857&http-header:referer=https://localhost")
+                "&zmax=19&zmin=6&crs=EPSG:3857&tilePixelRatio=1&http-header:referer=https://localhost")
                 .arg(key);
     uris << QStringLiteral(
                 "type=xyz&url=https://api.vworld.kr/req/wmts/1.0.0/%1/Satellite/%7Bz%7D/%7By%7D/%7Bx%7D.jpeg"
-                "&zmax=19&zmin=6&crs=EPSG:3857")
+                "&zmax=19&zmin=6&crs=EPSG:3857&tilePixelRatio=1")
                 .arg(key);
   }
   uris << QStringLiteral(
       "type=xyz&url=https://xdworld.vworld.kr/2d/Satellite/service/%7Bz%7D/%7Bx%7D/%7By%7D.jpeg"
-      "&zmax=19&zmin=6&crs=EPSG:3857&http-header:referer=https://localhost");
+      "&zmax=19&zmin=6&crs=EPSG:3857&tilePixelRatio=1&http-header:referer=https://localhost");
   uris << QStringLiteral(
       "type=xyz&url=https://xdworld.vworld.kr/2d/Satellite/service/%7Bz%7D/%7Bx%7D/%7By%7D.jpeg"
-      "&zmax=19&zmin=6&crs=EPSG:3857");
+      "&zmax=19&zmin=6&crs=EPSG:3857&tilePixelRatio=1");
   const bool ok =
       addBasemapWithFallbacks(project, canvas, uris, QStringLiteral("VWorld 위성"), errorOut);
   if (ok && canvas) {
@@ -1289,9 +1341,7 @@ bool LayerOps::addVworldSatelliteMap(QgsProject* project, QgsMapCanvas* canvas, 
                                  : QStringLiteral("EPSG:5186");
     LayerOps::ensureOtfEnabled(project, canvas, workAuth);
     zoomCanvasToWorkingScale(canvas, workAuth, 50000.0);
-    canvas->clearCache();
-    canvas->refreshAllLayers();
-    canvas->refresh();
+    refreshXyzBasemapTiles(canvas);
   }
   return ok;
 }
@@ -1536,11 +1586,11 @@ bool LayerOps::addVworldHybridMap(QgsProject* project, QgsMapCanvas* canvas, con
   const QStringList uris = {
       QStringLiteral(
           "type=xyz&url=https://api.vworld.kr/req/wmts/1.0.0/%1/Hybrid/%7Bz%7D/%7By%7D/%7Bx%7D.png"
-          "&zmax=19&zmin=0&crs=EPSG:3857")
+          "&zmax=19&zmin=0&crs=EPSG:3857&tilePixelRatio=1")
           .arg(key),
       QStringLiteral(
           "type=xyz&url=https://xdworld.vworld.kr/2d/Hybrid/service/%7Bz%7D/%7Bx%7D/%7By%7D.png"
-          "&zmax=19&zmin=0&crs=EPSG:3857"),
+          "&zmax=19&zmin=0&crs=EPSG:3857&tilePixelRatio=1"),
   };
   return addBasemapWithFallbacks(project, canvas, uris, QStringLiteral("VWorld 하이브리드"), errorOut);
 }
@@ -1888,7 +1938,7 @@ bool LayerOps::clampCanvasToKorea(QgsMapCanvas* canvas) {
   return false;
 }
 
-void LayerOps::zoomToKorea(QgsMapCanvas* canvas, const QString& epsgAuthId) {
+void LayerOps::zoomToKorea(QgsMapCanvas* canvas, const QString& epsgAuthId, bool refresh) {
   if (!canvas) return;
   QgsRectangle ext = koreaExtentForCrs(epsgAuthId);
   if (ext.isEmpty() || !ext.isFinite()) {
@@ -1908,6 +1958,7 @@ void LayerOps::zoomToKorea(QgsMapCanvas* canvas, const QString& epsgAuthId) {
   }
   canvas->setExtent(ext);
   canvas->setRenderFlag(true);
+  if (!refresh) return;
   canvas->freeze(false);
   canvas->refreshAllLayers();
   canvas->refresh();

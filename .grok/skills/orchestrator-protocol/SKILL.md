@@ -25,13 +25,18 @@ Output Format, Tone & Style, Evaluation Criteria, Edge Cases.
 
 ## 3. Graph engineering
 
-Pick one: QUICK (solo) / gis / ship / debug / architecture.
-FEATURE must spawn scouts then implementer → reviewer → tester this turn.
+Pick one: QUICK (solo) / gis / ship / debug / architecture / verify.
+FEATURE must `spawn_subagent` (or `/workflow ka-ship`) this turn:
+scouts → implementer → reviewer → tester.
+Do not narrate a launch. Editing app+core without a spawn is blocked.
 Load `ka-graph`, `ka-experts`, `ka-hgis`. Show only the merged result.
+Details: `.grok/rules/50-graph-loop.md`.
 
 ## 4. Loop engineering
 
-After code edits: build + relevant tests this turn. Quote exit codes.
+After **this turn** writes `src/` / tests / QSS: build + relevant tests this turn. Quote exit codes.
 Fail → fix → re-run. No 완료 without this-turn output.
+Docs/hooks/rules-only: skip cmake.
+Leftover dirty `src/` from another session does not require cmake on a research turn.
 
 Keep ka-hgis invariants and the intent gate. Do not commit unless asked.

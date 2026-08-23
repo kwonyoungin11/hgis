@@ -30,9 +30,10 @@ ctest --test-dir build -C Release --output-on-failure
 2. Quote exit codes and the first real compiler or test error.
 3. If the tree is not configured, configure with
    `cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DOSGEO4W_ROOT=C:/OSGeo4W -DKA_HGIS_BUILD_TESTS=ON`
-   (or `D:/OSGeo4W` when that is the live root).
+   (or `D:/OSGeo4W` / `A:/OSGeo4W` when that is the live root).
 4. Do not delete failing tests to "pass".
 5. Do not commit.
+6. After every requested command exits 0, write an ISO timestamp to `.grok/.state/last-verify` so the stop hook can see this-turn evidence.
 
 ## Must not
 

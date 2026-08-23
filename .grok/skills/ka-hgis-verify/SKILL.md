@@ -29,15 +29,18 @@ Prefer `.\scripts\build-now.ps1` only when the tree is already configured for Ni
 
 ## Steps
 
-1. Name what changed (`src/app`, `src/core`, tests, scripts, docs-only).
-2. If docs-only / rules-only: do **not** run a full build; say so.
-3. If C++/CMake/tests changed: run **cmake --build** then **ctest**. Quote exit codes.
-4. If startup/menu/UI path changed: also `--smoke-quit`.
+1. Name what changed **this turn** (`src/app`, `src/core`, tests, scripts, docs/hooks/rules-only).
+2. If docs/hooks/rules/skills-only: do **not** run a full build; say the loop gate does not apply.
+3. If **this turn** wrote C++/CMake/tests: run **cmake --build** then **ctest**. Quote exit codes.
+4. If startup/menu/UI path changed this turn: also `--smoke-quit`.
 5. After C++ edits, query `lsp` (clangd) on touched symbols when the tool is available.
 6. Do not claim success from a previous turn's log.
+7. After a green cmake/ctest, write `.grok/.state/last-verify` (ISO timestamp). Post-tool also stamps when those commands run.
+8. Leftover dirty `src/` from another session is **not** a reason to cmake on a research turn.
 
 ## Fail closed
 
 - Non-zero cmake/ctest/smoke → report the first real error; do not delete failing tests.
 - Pre-existing failures: name them; do not hide them as "pass".
+- FEATURE parent must spawn `ka-tester` rather than self-certify.
 ---

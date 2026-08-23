@@ -468,14 +468,14 @@ void styleAlignedRasterOverlay(QgsRasterLayer* layer) {
 
 bool looksUnreferencedRaster(const QgsRasterLayer* layer) {
   if (!layer || !layer->isValid()) return true;
-  const QString src = layer->source();
-  if (isImagePath(src) && !QFile::exists(worldFilePathFor(src)))
-    return true;
   const int pw = layer->width();
   const int ph = layer->height();
   if (pw < 2 || ph < 2) return true;
   const QgsRectangle e = layer->extent();
   if (e.isEmpty() || !e.isFinite()) return true;
+  // 픽셀 평면(0..폭, 0..높이)에만 앉은 그림. 월드파일·내장 GT가 없어도
+  // 여기 해당하면 맞추기 대상이다. 내장 GT가 지도 좌표면 참조된 것이다
+  // (사이드카 .tfw가 없다고 맞추기 대기로 숨기면 안 된다).
   if (e.xMinimum() > -2.0 && e.yMinimum() > -2.0 && e.xMaximum() < pw + 2.0
       && e.yMaximum() < ph + 2.0)
     return true;

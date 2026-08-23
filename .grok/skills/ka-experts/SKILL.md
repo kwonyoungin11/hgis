@@ -43,6 +43,13 @@ Host-owned equivalent: `/workflow ka-council` (scout panel) or `/workflow ka-shi
 - QUICK (one symbol / typo) still stays solo — do not summon a council.
 - Never idle waiting for a human between scout and implement on FEATURE.
 - ARCHITECTURE still pauses for the user after `ka-architect`.
+- After implement: `ka-reviewer` then `ka-tester` the same turn. Do not claim 완료 from the parent’s memory of an old build.
+
+## Fail closed
+
+Stop hook: app+core this turn with empty `turn-graph` → GRAPH block.
+Loop: this-turn `src/` write + 완료 without verify stamp → LOOP block.
+See `.grok/rules/50-graph-loop.md`.
 
 ## Invariants (copy into every worker)
 

@@ -3,7 +3,8 @@ name: ka-hgis
 description: >
   ka-hgis Grok Build workflow — QGIS layer lifecycle, digitize/export invariants,
   Windows OSGeo4W verify. Use when editing this C++/Qt6 HGIS, touching layers/CRS/export,
-  or when the user mentions 새 조사, 디지타이즈, 편집저장, 제출패키지, 위성, 지적.
+  or when the user mentions 새 조사, 디지타이즈, 편집저장, 제출패키지, 위성, 지적,
+  조판, 맞추기, 단면도.
 ---
 
 # ka-hgis (Grok Build)
@@ -26,6 +27,16 @@ This repo is a standalone C++20/Qt6 desktop HGIS linked to OSGeo4W qgis-dev. Not
 | C++ symbols / diagnostics | **clangd** via `lsp` |
 | In-repo manuals | `docs/vendor/qgis-manual-3.44/` |
 
+## Specialist skills (load instead of cloning this file)
+
+| Topic | Skill / rule |
+| --- | --- |
+| 조판 / 축척자 / 좌표점 | `/ka-drawing-studio` · `.grok/rules/41-drawing-studio.md` |
+| 제출 SHP+PDF | `/ka-submit-package` |
+| 맞추기 | `/ka-georef-align` |
+| 단면도 | `.grok/rules/40-section-studio.md` |
+| 지적/위성 안 보임 | `/gis-verify` · `docs/ERROR_REGRESSION.md` |
+
 ## Invariants (never violate)
 
 - Legend stays empty until the user draws / imports / opens that domain layer
@@ -46,3 +57,5 @@ ctest --test-dir build -C Release --output-on-failure
 ```
 
 Do not commit unless the user asks.
+
+Graph: FEATURE (app+core) must spawn experts this turn. Loop: this-turn `src/` writes need cmake/ctest before 완료. Docs/hooks-only skip cmake. See `.grok/rules/50-graph-loop.md`.

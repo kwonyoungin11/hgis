@@ -1928,6 +1928,7 @@ QgsVectorLayer* KaDrawingStudio::blankMapLayer() {
 
 void KaDrawingStudio::applyLayersToMap(QgsLayoutItemMap* map, bool includeLiveBasemap, bool refitExtent) {
   if (!map || !m_project) return;
+  LayerOps::knockOutProjectRasterPaper(m_project);
   QList<QgsMapLayer*> layers = LayerOps::visibleLayersPaintOrder(m_project);
   if (!includeLiveBasemap) {
     QList<QgsMapLayer*> safe;

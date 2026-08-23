@@ -85,6 +85,7 @@ private slots:
   void emptySurveyDrawingShowsKoreanHint();
   void zoomToLayerMax_movesCanvasToFeature();
   void zoomToLayerMax_movesCanvasToPointFeature();
+  void zoomToKorea_refreshFalseSetsExtentWithoutUnfreeze();
   void isolateAndZoom_hidesOtherSurveyKeepsReference();
   void addVworldSatellite_allowsEmptyKeyViaPublicTiles();
   void addVworldSatellite_usesOfficialWmtsWhenKeyPresent();
@@ -583,6 +584,16 @@ void TestWorkflow::vworldLayerOpsTest() {
   QVERIFY2(LayerOps::addVworldBaseMap(&proj, nullptr, testKey, &err), qPrintable(err));
   QVERIFY(projectHasLayerNamedLike(&proj, QStringLiteral("VWorld 배경")));
   QVERIFY(LayerOps::setLayerOpacity(&proj, nullptr, QStringLiteral("VWorld 배경"), 0.5));
+  {
+    QgsMapLayer* base = nullptr;
+    for (QgsMapLayer* l : proj.mapLayers()) {
+      if (l && l->name().contains(QStringLiteral("배경")))
+        base = l;
+    }
+    QVERIFY(base);
+    QVERIFY2(base->source().contains(QStringLiteral("tilePixelRatio=1")),
+             qPrintable(base->source().left(160)));
+  }
 
   QVERIFY2(LayerOps::addVworldSatelliteMap(&proj, nullptr, testKey, &err), qPrintable(err));
   QVERIFY(projectHasLayerNamedLike(&proj, QStringLiteral("VWorld 위성")));
@@ -591,6 +602,16 @@ void TestWorkflow::vworldLayerOpsTest() {
 
   QVERIFY2(LayerOps::addVworldHybridMap(&proj, nullptr, testKey, &err), qPrintable(err));
   QVERIFY(projectHasLayerNamedLike(&proj, QStringLiteral("VWorld 하이브리드")));
+  {
+    QgsMapLayer* hyb = nullptr;
+    for (QgsMapLayer* l : proj.mapLayers()) {
+      if (l && l->name().contains(QStringLiteral("하이브리드")))
+        hyb = l;
+    }
+    QVERIFY(hyb);
+    QVERIFY2(hyb->source().contains(QStringLiteral("tilePixelRatio=1")),
+             qPrintable(hyb->source().left(160)));
+  }
 
   err.clear();
   const bool cad = LayerOps::addVworldCadastralMap(&proj, nullptr, testKey, &err);
@@ -825,6 +846,8 @@ void TestWorkflow::osmBasemapValidWithExtent() {
   }
   QVERIFY2(rl, "OSM/Carto layer missing");
   QVERIFY2(rl->isValid(), qPrintable(rl->error().message()));
+  QVERIFY2(rl->source().contains(QStringLiteral("tilePixelRatio=1")),
+           "OSM/Carto XYZ must request 256px tiles, not @2x");
   const QgsRectangle ext = rl->extent();
   QVERIFY2(ext.isFinite() && !ext.isEmpty(), "basemap extent empty");
   QVERIFY(LayerOps::hasVisibleReferenceLayer(&proj));
@@ -1123,6 +1146,17 @@ void TestWorkflow::zoomToLayerMax_movesCanvasToFeature() {
   QVERIFY2(after.width() < before.width(), "zoom must be tighter than Korea overview");
 }
 
+void TestWorkflow::zoomToKorea_refreshFalseSetsExtentWithoutUnfreeze() {
+  QgsMapCanvas canvas;
+  canvas.resize(640, 480);
+  canvas.setDestinationCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  canvas.freeze(true);
+  LayerOps::zoomToKorea(&canvas, QStringLiteral("EPSG:5186"), false);
+  QVERIFY2(canvas.isFrozen(), "refresh=false must not thaw (no Korea-wide tile fetch)");
+  const QgsRectangle ext = canvas.extent();
+  QVERIFY2(ext.isFinite() && ext.width() > 0.0 && ext.height() > 0.0, "setExtent still runs");
+}
+
 void TestWorkflow::isolateAndZoom_hidesOtherSurveyKeepsReference() {
   QgsProject proj;
   QgsMapCanvas canvas;
@@ -1185,6 +1219,8 @@ void TestWorkflow::addVworldSatellite_usesOfficialWmtsWhenKeyPresent() {
   QVERIFY2(src.contains(QStringLiteral("api.vworld.kr")), qPrintable(src.left(160)));
   QVERIFY2(src.contains(QStringLiteral("TEST-KEY-123")), "official WMTS must include the given key");
   QVERIFY2(!src.contains(QStringLiteral("xdworld")), "must not prefer xdworld when a key is given");
+  QVERIFY2(src.contains(QStringLiteral("tilePixelRatio=1")),
+           "HiDPI must request 256px VWorld tiles, not @2x / z+1");
 }
 
 void TestWorkflow::addVworldSatellite_syncPutsLayerOnCanvasWithExtent() {

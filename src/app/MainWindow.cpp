@@ -170,7 +170,7 @@
 #endif
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
-  setWindowTitle(QStringLiteral("유적 HGIS"));
+  setWindowTitle(QStringLiteral("필드고고학GIS"));
   setWindowIcon(KaIcons::appIcon());
   resize(1280, 900);
   m_status = new KaStatusBar(this);
@@ -230,6 +230,9 @@ bool MainWindow::openSurveyGpkg(const QString& gpkgPath) {
   t.start();
   m_surveyPath = gpkgPath;
   loadSurveyLayers(gpkgPath);
+#if KA_HGIS_HAS_QGIS
+  applyStartupMap();
+#endif
   rememberSurvey(gpkgPath, QFileInfo(gpkgPath).completeBaseName());
   showMapWorkspace();
   KaCrashGuard::logLine(
@@ -844,7 +847,7 @@ void MainWindow::buildUi() {
   m_canvas->setCachingEnabled(true);
   m_canvas->setParallelRenderingEnabled(true);
   m_canvas->setMapUpdateInterval(60);
-  m_canvas->setPreviewJobsEnabled(true);
+  m_canvas->setPreviewJobsEnabled(false);
   m_canvas->setAcceptDrops(true);
   m_canvas->setSegmentationTolerance(2.0);
   const QgsCoordinateReferenceSystem crs(m_workCrs);
@@ -1559,7 +1562,7 @@ void MainWindow::openRecentSurvey(const QString& path) {
   if (ext == QLatin1String("gpkg")) {
     if (openSurveyGpkg(path)) {
       rememberSurvey(path, QFileInfo(path).completeBaseName());
-      setWindowTitle(QStringLiteral("유적 HGIS — %1").arg(QFileInfo(path).completeBaseName()));
+      setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(QFileInfo(path).completeBaseName()));
       showMapWorkspace();
     }
     return;
@@ -1576,7 +1579,7 @@ void MainWindow::openRecentSurvey(const QString& path) {
   if (m_canvas) m_canvas->refresh();
   ensureDefaultBasemaps();
   rememberSurvey(path, QFileInfo(path).completeBaseName());
-  setWindowTitle(QStringLiteral("유적 HGIS — %1").arg(QFileInfo(path).completeBaseName()));
+  setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(QFileInfo(path).completeBaseName()));
   showMapWorkspace();
   updateNextActionStatus();
 #endif
@@ -1683,7 +1686,7 @@ void MainWindow::newSurvey() {
     b86->setChecked(!m_workCrs.contains(QLatin1String("5187")));
   if (auto* b87 = findChild<QToolButton*>(QStringLiteral("btnCrs5187")))
     b87->setChecked(m_workCrs.contains(QLatin1String("5187")));
-  setWindowTitle(QStringLiteral("유적 HGIS — %1").arg(name));
+  setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(name));
   rememberSurvey(path, name);
   showMapWorkspace();
   updateNextActionStatus();
@@ -1745,6 +1748,7 @@ void MainWindow::applyStartupMap() {
 #if KA_HGIS_HAS_QGIS
   LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, m_workCrs);
   LayerOps::setWorkCrs(QgsProject::instance(), m_canvas, m_workCrs, nullptr, false);
+  if (m_canvas) m_canvas->freeze(true);
   LayerOps::applyKoreaMapLimits(QgsProject::instance(), m_canvas);
   updateNextActionStatus();
   ensureDefaultBasemaps();
@@ -1758,19 +1762,24 @@ void MainWindow::ensureStartupViewReady() {
 #if KA_HGIS_HAS_QGIS
   if (!m_canvas || m_startupViewApplied) return;
   if (m_canvas->width() < 40 || m_canvas->height() < 40) return;
+  m_canvas->freeze(true);
+  LayerOps::applyCanvasScreenDpi(m_canvas);
   LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, m_workCrs);
   LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
-  LayerOps::zoomToKorea(m_canvas, m_workCrs);
+  m_canvas->freeze(true);
+  LayerOps::zoomToKorea(m_canvas, m_workCrs, false);
   m_canvas->zoomScale(25000.0, true);
   LayerOps::clampCanvasToKorea(m_canvas);
-  m_canvas->refreshAllLayers();
-  m_canvas->refresh();
+  m_canvas->freeze(false);
+  LayerOps::refreshXyzBasemapTiles(m_canvas);
   m_startupViewApplied = true;
   QTimer::singleShot(200, this, [this]() {
     if (!m_canvas) return;
     if (m_canvas->scale() > 40000.0 || m_canvas->scale() < 8000.0)
       m_canvas->zoomScale(25000.0, true);
   });
+  QTimer::singleShot(600, this, [this]() { LayerOps::refreshXyzBasemapTiles(m_canvas); });
+  QTimer::singleShot(1800, this, [this]() { LayerOps::refreshXyzBasemapTiles(m_canvas); });
 #endif
 }
 
@@ -2468,8 +2477,18 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
 
   const bool onCanvas = m_canvas &&
       (watched == m_canvas || watched == m_canvas->viewport());
-  if (onCanvas && event->type() == QEvent::Resize && !m_startupViewApplied)
-    QTimer::singleShot(0, this, [this]() { ensureStartupViewReady(); });
+  if (onCanvas) {
+    const QEvent::Type t = event->type();
+    if (t == QEvent::Resize || t == QEvent::Show
+#if QT_VERSION >= QT_VERSION_CHECK(6, 6, 0)
+        || t == QEvent::DevicePixelRatioChange
+#endif
+    ) {
+      LayerOps::applyCanvasScreenDpi(m_canvas);
+    }
+    if (t == QEvent::Resize && !m_startupViewApplied)
+      QTimer::singleShot(0, this, [this]() { ensureStartupViewReady(); });
+  }
   if (onCanvas && event->type() == QEvent::KeyPress) {
     auto* ke = static_cast<QKeyEvent*>(event);
     if (ke && (ke->matches(QKeySequence::Undo) ||
@@ -2780,10 +2799,10 @@ void MainWindow::loadSurveyLayers(const QString& gpkgOrStub) {
   LayoutService::ensureDefaultLayouts(proj);
   LayerOps::pruneEmptyLegendGroups(proj);
   if (m_canvas) {
+    m_canvas->freeze(true);
     LayerOps::ensureOtfEnabled(proj, m_canvas, m_workCrs);
     LayerOps::syncMapCanvas(proj, m_canvas, false);
-    LayerOps::zoomToKorea(m_canvas, m_workCrs);
-    m_canvas->refresh();
+    LayerOps::zoomToKorea(m_canvas, m_workCrs, false);
   }
   refreshLayerEmptyState();
 #else
@@ -4933,7 +4952,7 @@ void MainWindow::openProject() {
   if (path.isEmpty()) return;
   if (QFileInfo(path).suffix().compare(QLatin1String("gpkg"), Qt::CaseInsensitive) == 0) {
     if (openSurveyGpkg(path))
-      setWindowTitle(QStringLiteral("유적 HGIS — %1").arg(QFileInfo(path).completeBaseName()));
+      setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(QFileInfo(path).completeBaseName()));
     return;
   }
   if (!QgsProject::instance()->read(path)) {
@@ -4951,7 +4970,7 @@ void MainWindow::openProject() {
   LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, true);
   if (m_canvas) m_canvas->refresh();
   ensureDefaultBasemaps();
-  setWindowTitle(QStringLiteral("유적 HGIS — %1").arg(QFileInfo(path).completeBaseName()));
+  setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(QFileInfo(path).completeBaseName()));
   rememberSurvey(path, QFileInfo(path).completeBaseName());
   showMapWorkspace();
   updateNextActionStatus();
@@ -5279,26 +5298,11 @@ bool MainWindow::addRasterFromPath(const QString& path) {
   const bool geotiff = path.toLower().endsWith(QLatin1String(".tif"))
                        || path.toLower().endsWith(QLatin1String(".tiff"))
                        || path.toLower().endsWith(QLatin1String(".gtiff"));
-  if (geotiff && !unrefImage) {
-    if (QgsRasterRenderer* rend = rl->renderer()) {
-      auto* trans = new QgsRasterTransparency();
-      if (rl->bandCount() >= 3) {
-        QVector<QgsRasterTransparency::TransparentThreeValuePixel> whites;
-        whites.append(QgsRasterTransparency::TransparentThreeValuePixel(255, 255, 255, 0.0, 12, 12, 12));
-        whites.append(QgsRasterTransparency::TransparentThreeValuePixel(0, 0, 0, 0.0, 1, 1, 1));
-        trans->setTransparentThreeValuePixelList(whites);
-      } else {
-        QVector<QgsRasterTransparency::TransparentSingleValuePixel> vals;
-        vals.append(QgsRasterTransparency::TransparentSingleValuePixel(250, 255, 0.0));
-        vals.append(QgsRasterTransparency::TransparentSingleValuePixel(0, 2, 0.0));
-        trans->setTransparentSingleValuePixelList(vals);
-      }
-      rend->setRasterTransparency(trans);
-    }
-  }
   LayerOps::markReferenceLayer(rl);
   LayerOps::applyLegendCrsLabel(rl);
   QgsProject::instance()->addMapLayer(rl, true);
+  if (geotiff)
+    LayerOps::knockOutRasterPaper(rl);
   if (m_layerTree) m_layerTree->setCurrentLayer(rl);
   if (unrefImage) {
     if (QgsLayerTreeLayer* n = QgsProject::instance()->layerTreeRoot()->findLayer(rl->id()))
@@ -5418,12 +5422,24 @@ void MainWindow::exportReportLayout() {
 
 
 void MainWindow::showAbout() {
-  QMessageBox::about(this, QStringLiteral("정보"),
-    QStringLiteral("유적 HGIS (ka-hgis) 0.3.0\n"
-                   "C++/Qt6 + QGIS 4.x libraries\n"
-                   "작업 CRS: 5186/5187 | 업로드: 5179\n"
-                   "위치검색: 주소·지번·지역·상호\n"
-                   "License: GNU GPLv2 or later"));
+  QMessageBox::about(
+      this, QStringLiteral("정보"),
+      QStringLiteral(
+          "필드고고학GIS  버전 1\n"
+          "동국문화재연구원\n"
+          "향후 업데이트 진행\n"
+          "\n"
+          "QGIS를 포크하지 않고 qgis_core / qgis_gui를 링크합니다.\n"
+          "작업 CRS: EPSG:5186/5187  ·  업로드: EPSG:5179\n"
+          "\n"
+          "저작권·라이선스\n"
+          "QGIS  © QGIS Development Team  ·  GNU GPL v2 이상\n"
+          "Qt    © The Qt Company Ltd.  ·  LGPLv3 / GPLv2+\n"
+          "GDAL/OGR  © OSGeo  ·  MIT/X11\n"
+          "PROJ  © PROJ contributors  ·  MIT\n"
+          "GEOS  © GEOS contributors  ·  LGPLv2.1\n"
+          "\n"
+          "본 소프트웨어는 GNU GPL v2 이상으로 배포됩니다."));
 }
 
 

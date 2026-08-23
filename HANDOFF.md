@@ -104,9 +104,11 @@ This machine: OSGeo `A:\OSGeo4W` (dev-env also accepts C: / D:). CMake `C:\CMake
 | Session now | `.grok/NOW.md` |
 | Cursor → Grok | `.cursor/rules/grok-ka-hgis.mdc` |
 | Section invariants | `.grok/rules/40-section-studio.md` |
+| Drawing-studio invariants | `.grok/rules/41-drawing-studio.md` |
 | Product SSOT | `HANDOFF.md` + `docs/HANDOFF.md` |
 | Preset (MCP/skills/hooks/LSP/graph) | `.grok/rules/00-grok-preset.md` |
+| Graph + loop (fail closed) | `.grok/rules/50-graph-loop.md` · stop-gate this-turn writes |
 | clangd | `.clangd` + `.grok/lsp.json` |
-| Skills | `/ka-experts` `/ka-graph` `/gis-verify` `/ka-hgis-verify` |
+| Skills | `/ka-experts` `/ka-graph` `/gis-verify` `/ka-hgis-verify` `/ka-drawing-studio` `/ka-submit-package` `/ka-georef-align` |
 | Experts | `ka-scout` `ka-implementer` `ka-reviewer` `ka-debugger` `ka-architect` `ka-tester` `qgis-api` `gis-protocol` `field-check` |
 | Workflows | `/workflow ka-ship` `/workflow ka-council` `/workflow ka-verify` |

@@ -56,6 +56,7 @@ vprompt += "MUST DO: $env:PATH = 'C:\\CMake\\bin;' + $env:PATH; . .\\scripts\\de
 vprompt += "cmake --build build --config Release; ctest --test-dir build -C Release --output-on-failure.";
 vprompt += smoke_bit;
 vprompt += " MUST NOT: edit product source; delete tests; claim pass without this turn's output. ";
+vprompt += " After pass, write an ISO timestamp to .grok/.state/last-verify. ";
 vprompt += "Return pass=true only if every requested command exited 0. evidence = exit codes + first error.";
 
 let verify = agent(vprompt, #{

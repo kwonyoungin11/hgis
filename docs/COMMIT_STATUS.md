@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-23 08:44:29 +09:00 |
+| Updated (local) | 2026-08-23 15:08:48 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `cursor/pro-drawing-and-map-services` |
-| HEAD short | `bbec31e` |
-| HEAD full | `bbec31e11d661a0975ae9487ec20c3c0091d754b` |
-| HEAD date | 2026-08-23 08:44:15 +0900 |
+| HEAD short | `033fffa` |
+| HEAD full | `033fffaa24052dd30e1d02e9da767237d075ad15` |
+| HEAD date | 2026-08-23 08:44:29 +0900 |
 | HEAD author | kwonypungin <kyi25@nate.com> |
-| HEAD subject | Ship section drawing studio so Descartes GeoTIFF sheets can continue on another machine. |
-| Total commits | 33 |
+| HEAD subject | Refresh COMMIT_STATUS after section studio ship. |
+| Total commits | 34 |
 | Upstream | `origin/cursor/pro-drawing-and-map-services` |
 | Sync | up to date with origin/cursor/pro-drawing-and-map-services |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (5 paths) |
+| Working tree dirty | **yes** (49 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Ship section drawing studio so Descartes GeoTIFF sheets can continue on another machine. (`bbec31e` @ 2026-08-23 08:44:15 +0900)
+- **Recorded tip when this file was written:** Refresh COMMIT_STATUS after section studio ship. (`033fffa` @ 2026-08-23 08:44:29 +0900)
 - **Remote sync at write time:** up to date with origin/cursor/pro-drawing-and-map-services
-- **Uncommitted local changes at write time:** yes (5 paths)
+- **Uncommitted local changes at write time:** yes (49 paths)
 
 ### Read this correctly
 
@@ -49,11 +49,13 @@
 - `3bd6ff8` commit progress ledger ??Refresh COMMIT_STATUS after teal chrome and digitize ship.
 - `c4cc35c` commit progress ledger ??Refresh COMMIT_STATUS after buffer and new-survey reset.
 - `cf52276` commit progress ledger ??Refresh COMMIT_STATUS after start page and layout coord ship.
+- `033fffa` commit progress ledger ??Refresh COMMIT_STATUS after section studio ship.
 
 ## Recent commits (newest first, max 30)
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `033fffa` | 2026-08-23T08:44:29+09:00 | Refresh COMMIT_STATUS after section studio ship. |
 | `bbec31e` | 2026-08-23T08:44:15+09:00 | Ship section drawing studio so Descartes GeoTIFF sheets can continue on another machine. |
 | `4a7f44d` | 2026-08-21T23:37:43+09:00 | Update Grok agent rules and hooks for the excavation GIS loop. |
 | `be276e4` | 2026-08-21T23:37:27+09:00 | Draw layout rasters in a single pass so tiled basemaps stop leaving blank chunks. |
@@ -83,12 +85,59 @@
 | `15fc5a4` | 2026-08-09T18:53:48+09:00 | Align survey layer lifecycle with QGIS: empty legend until draw. |
 | `3129ef6` | 2026-08-09T18:53:46+09:00 | Harden digitize capture tool finish and keep drawing session. |
 | `ca3a77e` | 2026-08-09T18:53:44+09:00 | Fix domain layer symbology so digitized features render on canvas. |
-| `f659bdb` | 2026-08-09T18:53:27+09:00 | Add QGIS 3.44 manuals as design guide and agent SSOT rules. |
 
 ## Staged in this commit
 
 ```
-M	docs/COMMIT_STATUS.md
+M	.cursor/rules/grok-ka-hgis.mdc
+M	.grok/agents/ka-implementer.md
+M	.grok/agents/ka-tester.md
+M	.grok/hooks/bin/excavation-loop.txt
+A	.grok/hooks/bin/graph-loop-state.ps1
+M	.grok/hooks/bin/post-tool.ps1
+A	.grok/hooks/bin/pre-tool-impl.ps1
+M	.grok/hooks/bin/pre-tool.ps1
+M	.grok/hooks/bin/prompt-inject.ps1
+A	.grok/hooks/bin/self-check-graph-loop.ps1
+M	.grok/hooks/bin/session-start.ps1
+M	.grok/hooks/bin/stop-gate.ps1
+M	.grok/hooks/ka-hgis.json
+M	.grok/hooks/orchestrator-protocol.json
+M	.grok/hooks/run.cmd
+M	.grok/hooks/scripts/orchestrator-stop-gate.ps1
+M	.grok/rules/00-grok-preset.md
+M	.grok/rules/00-orchestrator-protocol.md
+M	.grok/rules/30-excavation-gis-loop.md
+A	.grok/rules/41-drawing-studio.md
+A	.grok/rules/50-graph-loop.md
+M	.grok/skills/gis-verify/SKILL.md
+A	.grok/skills/ka-drawing-studio/SKILL.md
+M	.grok/skills/ka-experts/SKILL.md
+A	.grok/skills/ka-georef-align/SKILL.md
+M	.grok/skills/ka-graph/SKILL.md
+M	.grok/skills/ka-hgis-verify/SKILL.md
+M	.grok/skills/ka-hgis/SKILL.md
+A	.grok/skills/ka-submit-package/SKILL.md
+M	.grok/skills/orchestrator-protocol/SKILL.md
+M	.grok/workflows/ka-ship.rhai
+M	.grok/workflows/ka-verify.rhai
+M	AGENTS.md
+M	HANDOFF.md
+M	dist/ka-hgis-portable/README.txt
+M	dist/ka-hgis-portable/ka-hgis.exe
+A	"dist/ka-hgis-portable/\354\202\254\354\232\251\353\262\225.txt"
+M	docs/HANDOFF.md
+M	scripts/make-portable.ps1
+M	src/app/KaApplication.cpp
+M	src/app/KaDrawingStudio.cpp
+M	src/app/MainWindow.cpp
+M	src/core/GeorefService.cpp
+M	src/core/LayerOps.cpp
+M	src/core/LayerOps.h
+M	src/core/SectionLayoutService.cpp
+M	tests/test_georef.cpp
+M	tests/test_section_layout.cpp
+M	tests/test_workflow.cpp
 ```
 ## Other PC checklist
 

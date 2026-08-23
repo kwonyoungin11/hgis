@@ -5,6 +5,9 @@ if (-not $root) { $root = (Get-Location).Path }
 
 $state = Join-Path $root ".grok\.state"
 New-Item -ItemType Directory -Force -Path $state | Out-Null
+# New session = new turn. Keep last-verify (cross-turn evidence).
+Set-Content -LiteralPath (Join-Path $state 'turn-src-writes.txt') -Value '' -Encoding ascii
+Set-Content -LiteralPath (Join-Path $state 'turn-graph.txt') -Value '' -Encoding ascii
 
 $clangd = Join-Path $env:USERPROFILE ".grok\tools\clangd\clangd.exe"
 $cmakeCandidates = @(

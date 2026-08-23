@@ -95,7 +95,7 @@ See `.grok/rules/00-grok-preset.md`.
 3. In-repo QGIS manuals under `docs/vendor/qgis-manual-3.44/` for `Qgs*` behavior
 4. context7 MCP only after in-repo `Qgs*` usage is missing; sequential-thinking only on FEATURE/ARCHITECTURE
 5. Do **not** spawn parallel subagents for single-file known fixes
-6. Project skills: `/ka-experts` (전문가소환), `/ka-graph`, `/gis-verify`, `/ka-hgis-verify`
+6. Project skills: `/ka-experts` (전문가소환), `/ka-graph`, `/gis-verify`, `/ka-hgis-verify`, `/ka-drawing-studio`, `/ka-submit-package`, `/ka-georef-align`
 
 ---
 
@@ -124,6 +124,8 @@ intent → /ka-experts ship (or /workflow ka-ship)
 - MainWindow is a hotspot: extract to core instead of growing MainWindow further
 - GIS unknown: graph `gis` first (`qgis-api` ∥ `gis-protocol` ∥ `field-check`)
 - Do not idle between scout and implement
+- Fail closed: editing `src/app` **and** `src/core` this turn without `spawn_subagent` / `/workflow ka-ship` is FEATURE and is blocked
+- After implement: `ka-reviewer` then `ka-tester` the same turn. Parent does not self-certify cmake
 
 ### C) ARCHITECTURE
 
@@ -182,10 +184,12 @@ ctest --test-dir build -C Release --output-on-failure
 
 **Evidence before “done”:**
 
-- Compile success for changed targets
+- Compile success for changed targets **this turn** (quote exit codes)
 - ctest pass (or explicitly note pre-existing failures only)
-- `--smoke-quit` if startup/UI/menu path changed
+- `--smoke-quit` if startup/UI/menu path changed this turn
 - Invariants intact (layer_key, CRS export 5179, no layer wipe, no secret keys)
+- Docs/hooks/rules-only: skip cmake; leftover dirty `src/` from another session does not require cmake on a research turn
+- Graph + loop contract: `.grok/rules/50-graph-loop.md`
 
 ---
 
@@ -245,4 +249,6 @@ Resume failed workers with session continuation; do not re-discover from zero.
 ## Grok Build orchestrator
 
 QUICK is solo. FEATURE/ARCHITECTURE summon `/ka-experts` so work does not stall in one context.
+Graph: emit `spawn_subagent` this turn (or `/workflow ka-ship`). Loop: this-turn `src/` writes need cmake/ctest before 완료.
 Still keep: intent gate, small plan, root-cause fixes, verify-before-done (`/ka-hgis-verify`), no commit without ask.
+See `.grok/rules/50-graph-loop.md`.

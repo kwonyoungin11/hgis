@@ -24,7 +24,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash|Write|Edit|search_replace|run_terminal_command",
+        "matcher": "Bash|Write|write|Edit|search_replace|StrReplace|ApplyPatch|Shell|run_terminal_command",
         "hooks": [
           {
             "type": "command",
@@ -35,6 +35,18 @@
       }
     ],
     "PostToolUse": [
+      {
+        "matcher": "Bash|Write|write|Edit|search_replace|StrReplace|ApplyPatch|Shell|run_terminal_command|spawn_subagent|Task|workflow",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd.exe /d /c .grok\\hooks\\run.cmd post-tool",
+            "timeout": 8
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
       {
         "matcher": "Bash|run_terminal_command",
         "hooks": [

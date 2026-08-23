@@ -47,6 +47,8 @@ Fill gaps yourself. Do not dump this rewrite to the user unless they ask.
 
 ## Step 3 — graph engineering (pick ONE)
 
+Operational copy: `.grok/rules/50-graph-loop.md`.
+
 | Graph | Spawn this turn |
 | --- | --- |
 | QUICK (one file / typo) | parent only |
@@ -54,16 +56,22 @@ Fill gaps yourself. Do not dump this rewrite to the user unless they ask.
 | ship / FEATURE | `ka-scout` app ∥ core → `ka-implementer` → `ka-reviewer` → `ka-tester` |
 | debug | `ka-debugger` ∥ scout ∥ `qgis-api` if map |
 | architecture | `ka-architect` + `plan`, then wait for the user |
+| verify | `ka-tester` |
 
-Emit `spawn_subagent` this turn. Do not narrate a launch without the tool call.
+Emit `spawn_subagent` or `/workflow ka-ship` **this turn**. Do not narrate a launch without the tool call.
 Worker prompts: TASK / EXPECTED OUTCOME / MUST DO / MUST NOT DO / CONTEXT.
 Activate `ka-graph`, `ka-experts`, `ka-hgis`, `ka-hgis-verify` as they match.
 Skip spawning only for a one-word greeting. Still do Step 1–2.
+Editing `src/app` **and** `src/core` this turn without a spawn is FEATURE and is blocked.
 
 ## Step 4 — loop engineering (verify-fix-verify)
 
-After `src/` / QSS / UI edits: `cmake --build` then relevant `ctest` this turn. Quote exit codes.
+Trigger is **this turn’s writes** to `src/` `tests/` `CMakeLists.txt` `*.qss`, not leftover git dirty.
+
+After those writes: `cmake --build` then relevant `ctest` this turn. Quote exit codes.
 If verify fails: fix and re-run. Do not claim 완료 / fixed without this-turn output.
+Docs/hooks/rules-only: do **not** run cmake; say the gate does not apply.
+After C++ FEATURE implement, spawn `ka-tester`. Parent must not self-certify.
 
 ## Product invariants (ka-hgis)
 

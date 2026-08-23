@@ -27,18 +27,26 @@ Also available: `/workflow feature-ship`, `/workflow review-changes`.
 
 ## FEATURE (default when not a one-liner)
 
-1. Same-turn parallel scouts (`background: true`).
-2. One `ka-implementer`.
-3. `ka-reviewer` then `ka-tester`. Fail closed.
+1. Same-turn parallel scouts (`background: true`). Emit `spawn_subagent` in the first tool batch.
+2. Wait (`get_command_or_subagent_output`). Then one `ka-implementer`.
+3. `ka-reviewer` then `ka-tester`. Fail closed. Parent does not self-certify cmake.
 4. Do not idle between scout and implement.
+5. Prefer `/workflow ka-ship {"objective":"…"}` when the host should own the whole DAG.
 
 ## Worker contract
 
 TASK / EXPECTED OUTCOME / MUST DO / MUST NOT DO / CONTEXT (invariants). Resume, do not re-discover.
+
+## Fail closed
+
+- `src/app` + `src/core` this turn and no spawn → GRAPH ENGINEERING (stop hook).
+- C++ this turn + 완료 claim + no `last-verify` / ctest in the reply → LOOP ENGINEERING.
+- Research/status with only old dirty `src/` → not a loop failure.
 
 ## Do not
 
 - Council on a one-symbol typo
 - Same-model rubber stamps with no cmake/ctest/GetMap evidence
 - Two writers on one file without `worktree`
+- Narrate “experts launched” without `spawn_subagent` / `workflow`
 ---

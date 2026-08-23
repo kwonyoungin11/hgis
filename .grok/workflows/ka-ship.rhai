@@ -148,7 +148,8 @@ if (impl.output != () && impl.output.verify_cmd != ()) { vcmd = impl.output.veri
 let tester = agent(
     "You are ka-tester. Run: " + vcmd
         + " Use scripts/dev-env.ps1 and CMake on PATH (C:\\CMake\\bin or Program Files\\CMake\\bin)."
-        + " pass=true only if every command exited 0. evidence = exit codes + first error.",
+        + " pass=true only if every command exited 0. evidence = exit codes + first error."
+        + " After pass, write an ISO timestamp to .grok/.state/last-verify.",
     #{
         label: "ka-tester",
         agent_type: "ka-tester",

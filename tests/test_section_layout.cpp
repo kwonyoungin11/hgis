@@ -29,6 +29,8 @@
 #include <qgsprintlayout.h>
 #include <qgsproject.h>
 #include <qgsrasterlayer.h>
+#include <qgsrasterrenderer.h>
+#include <qgsrastertransparency.h>
 
 #include <gdal.h>
 #include <cpl_conv.h>
@@ -86,6 +88,7 @@ private slots:
     void buildLayoutRasterCornersAligned();
     // ---- Task 3 ???: scaleDenominator ?? ?? ----
     void buildLayoutScaleDenominator();
+    void buildLayoutCropsWhiteMargin();
 
 private:
     QString m_tiffPath; // Task 3 ???? ?? GeoTIFF ??
@@ -889,6 +892,60 @@ void TestSectionLayout::buildLayoutScaleDenominator()
              qPrintable(QStringLiteral("map width: %1mm, expected ~200mm").arg(mapItem->rect().width(), 0, 'f', 2)));
     QVERIFY2(std::abs(mapItem->rect().height() -  40.0) < 1.0,
              qPrintable(QStringLiteral("map height: %1mm, expected ~40mm").arg(mapItem->rect().height(), 0, 'f', 2)));
+}
+
+void TestSectionLayout::buildLayoutCropsWhiteMargin()
+{
+    const QString path = QDir::temp().filePath(QStringLiteral("ka_test_section_white_margin.tif"));
+    GDALDriverH drv = GDALGetDriverByName("GTiff");
+    QVERIFY2(drv, "GTiff driver missing");
+    const int cols = 40;
+    const int rows = 20;
+    GDALDatasetH ds = GDALCreate(drv, qUtf8Printable(path), cols, rows, 3, GDT_Byte, nullptr);
+    QVERIFY2(ds, "white-margin GeoTIFF create failed");
+    double gt[6] = {0.0, 0.01, 0.0, 0.20, 0.0, -0.01};
+    GDALSetGeoTransform(ds, gt);
+    std::vector<unsigned char> r(cols * rows, 255);
+    std::vector<unsigned char> g(cols * rows, 255);
+    std::vector<unsigned char> b(cols * rows, 255);
+    for (int y = 4; y < 16; ++y) {
+        for (int x = 8; x < 32; ++x) {
+            r[y * cols + x] = 120;
+            g[y * cols + x] = 80;
+            b[y * cols + x] = 50;
+        }
+    }
+    GDALRasterIO(GDALGetRasterBand(ds, 1), GF_Write, 0, 0, cols, rows, r.data(), cols, rows, GDT_Byte, 0, 0);
+    GDALRasterIO(GDALGetRasterBand(ds, 2), GF_Write, 0, 0, cols, rows, g.data(), cols, rows, GDT_Byte, 0, 0);
+    GDALRasterIO(GDALGetRasterBand(ds, 3), GF_Write, 0, 0, cols, rows, b.data(), cols, rows, GDT_Byte, 0, 0);
+    GDALClose(ds);
+
+    QgsProject proj;
+    auto* layer = new QgsRasterLayer(path, QStringLiteral("white_margin"), QStringLiteral("gdal"));
+    QVERIFY2(layer->isValid(), "white-margin layer invalid");
+    proj.addMapLayer(layer, false);
+
+    const auto res = SectionLayoutService::buildSectionLayout(&proj, {layer}, SectionLayoutOptions{});
+    QVERIFY2(res.errorKo.isEmpty(), qPrintable(res.errorKo));
+    QVERIFY2(std::abs(res.appliedExtent.width() - 0.24) < 0.02,
+             qPrintable(QStringLiteral("width %1 expected 0.24m after crop")
+                            .arg(res.appliedExtent.width(), 0, 'f', 4)));
+    QVERIFY2(std::abs(res.appliedExtent.height() - 0.12) < 0.02,
+             qPrintable(QStringLiteral("height %1 expected 0.12m after crop")
+                            .arg(res.appliedExtent.height(), 0, 'f', 4)));
+
+    bool knocked = false;
+    for (QgsMapLayer* ml : proj.mapLayers()) {
+        auto* rl = qobject_cast<QgsRasterLayer*>(ml);
+        if (!rl || !rl->renderer() || !rl->renderer()->rasterTransparency()) continue;
+        const auto list = rl->renderer()->rasterTransparency()->transparentThreeValuePixelList();
+        for (const auto& px : list) {
+            if (std::abs(px.red - 255.0) < 1e-6 && px.opacity < 0.01)
+                knocked = true;
+        }
+    }
+    QVERIFY2(knocked, "white paper pixels should be transparent");
+    QFile::remove(path);
 }
 
 #include "test_section_layout.moc"

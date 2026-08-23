@@ -1,7 +1,10 @@
 ﻿# Build a self-contained Windows folder: USB copy, no OSGeo4W install on the target PC.
+param(
+  [string]$OutDir = ""
+)
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$out = Join-Path $root "dist\ka-hgis-portable"
+$out = if ($OutDir) { $OutDir } else { Join-Path $root "dist\ka-hgis-portable" }
 $exe = Join-Path $root "build\Release\ka-hgis.exe"
 if (-not (Test-Path $exe)) { throw "Build ka-hgis.exe first (Release)." }
 
@@ -142,23 +145,26 @@ set "PROJ_LIB=%~dp0share\proj"
 start "" "%~dp0ka-hgis.exe"
 "@ -Encoding ASCII
 
-Set-Content -LiteralPath (Join-Path $out "README.txt") -Value @"
-ka-hgis portable (no OSGeo4W install on the target PC)
+$readmeKo = @"
+필드고고학GIS  포터블 (Windows 10/11 64비트)
 
-Copy this whole folder to another Windows 10/11 x64 PC (USB or share).
-No C:\OSGeo4W and no Visual Studio required.
+이 폴더 전체를 USB에 두면, QGIS/OSGeo4W를 설치하지 않은 다른 PC에서도 실행됩니다.
+Visual Studio 설치도 필요 없습니다.
 
-Run:
-  start.bat
-  or ka-hgis.exe
-  or run.bat
-
-VWorld 위성/지적은 도움말에서 API 키를 그 PC에 한 번 넣습니다. 키는 이 폴더에 넣지 마세요.
+실행:
+  start.bat     ← 이것을 더블클릭
+  또는 ka-hgis.exe
 
 주의:
-  - 폴더 안의 apps, bin, share 를 지우면 실행되지 않습니다.
-  - GPLv2+ (QGIS 라이브러리 링크). 공지: 앱 정보 창.
-"@ -Encoding UTF8
+  - apps, bin, share 폴더를 지우면 실행되지 않습니다.
+  - 폴더 이름에 한글이 있어도 되지만, 경로가 너무 길면 start.bat 을 쓰세요.
+  - VWorld 위성·지적 지도는 그 PC에서 도움말 → API 키를 한 번 넣습니다.
+  - GNU GPL v2 이상 (QGIS 라이브러리 링크). 자세한 공지는 앱 정보 창.
+
+제작: 동국문화재연구원  ·  버전 1
+"@
+Set-Content -LiteralPath (Join-Path $out "README.txt") -Value $readmeKo -Encoding UTF8
+Set-Content -LiteralPath (Join-Path $out "사용법.txt") -Value $readmeKo -Encoding UTF8
 
 Write-Host "Portable folder ready: $out"
 Get-ChildItem $out | Select-Object Name, Mode, @{n='MB';e={ if ($_.PSIsContainer) { '' } else { [math]::Round($_.Length/1MB,1) } }}

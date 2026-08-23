@@ -11,5 +11,6 @@ if not exist "%HOOK%" (
   echo run.cmd: missing %HOOK% 1>&2
   exit /b 1
 )
+set "GROK_HOOK_EVENT=%~1"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%HOOK%"
 exit /b %ERRORLEVEL%

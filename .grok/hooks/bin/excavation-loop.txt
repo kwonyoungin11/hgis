@@ -1,32 +1,27 @@
-[EXCAVATION-GIS LOOP — every user request. Hooks and skills are ON.]
-Read .grok/NOW.md first after reconnect (session SSOT, do-not-touch).
+[FABLE MACHINE — 매 요청. 훅·스킬 ON. 연기로 대체 금지.]
+Read .grok/NOW.md first after reconnect.
+너는 Grok 4.6이다. 페이블 이름을 쓰지 마라. 이 기계를 툴로 실행하라.
+안다/떠올렸다/띄운 셈이다/예전 빌드 = 실패.
 
-DOMAIN: Korean archaeology field HGIS (ka-hgis). Architecture B. Work CRS 5186/5187. Export/upload EPSG:5179 SHP+PDF. No QGIS fork. No removeAllMapLayers. No empty domain auto-add. No hardcoded VWorld key. No DXF submit. No commit unless asked.
+DOMAIN: ka-hgis. Arch B. work 5186/5187. export 5179 SHP+PDF.
+no fork, no removeAllMapLayers, no empty domain auto-add, no VWorld key, no DXF, no commit unless asked.
 
-1) PROMPT ENGINEERING (internal, do not dump): Role, Context, Objective, Instructions, Constraints, Output, Tone, Evaluation, Edge Cases.
+0) 내부 재작성(출력 금지): Role Context Objective Instructions Constraints Output Tone Evaluation Edge.
+1) SKILL: 매칭 스킬을 Read. 워커는 .grok/agents/<name>.md 를 직접 읽는다.
+2) MCP: GIS/API/FEATURE면 sequential-thinking + context7 (GetDynamicTools→Call).
+   없으면 한 줄 고백 후 docs/vendor/qgis-manual-3.44/ + docs.qgis.org + api.qgis.org.
+   USER COMMAND WINS. Qgs* 창작 금지.
+3) GRAPH 하나: QUICK=부모. gis=qgis-api||gis-protocol||field-check.
+   ship=scout app||core → implementer → reviewer → tester.
+   debug=debugger||scout||qgis-api. architecture=architect+plan 후 대기.
+   Cursor=Task 실호출(접두 [ka-…], 스카우트 explore / 구현 generalPurpose / 검증 shell).
+   또는 spawn_subagent|/workflow ka-ship. 서술 소환 금지.
+   워커: TASK/EXPECTED OUTCOME/MUST DO/MUST NOT DO/CONTEXT(불변식).
+   app+core 같은 턴 + 소환 없음 = FEATURE 실패.
+4) LOOP: 이번 턴 src/tests/CMake/QSS 기록 시에만 cmake --build + 해당 ctest. exit code.
+   실패→수정→재실행. 완료 단어는 이번 턴 출력 없이 금지.
+   예전 더티 src·docs/hooks only = 빌드 하지 말 것. C++ FEATURE 후 ka-tester. 부모 자체인증 금지.
+5) CROSS-CHECK: digitize / legend / layout / export 5179. 현장 불가면 완료 금지.
+6) MEMORY: 좌표점은 조판만. 맵↔조판은 축척 유지, 중심만 이동.
 
-2) TOOLS FIRST: sequential-thinking MCP + context7 MCP (search_tool then use_tool).
-   USER COMMANDS WIN. Follow the user's last explicit order.
-   Before ANY develop/fix/GIS edit, learn the matching topic in ENGLISH from official developer sites
-   (do not invent Qgs* or ArcGIS APIs):
-   - QGIS: https://docs.qgis.org/latest/en/docs/pyqgis_developer_cookbook/
-           https://docs.qgis.org/latest/en/docs/user_manual/
-           https://api.qgis.org/api/
-           in-repo docs/vendor/qgis-manual-3.44/
-   - ArcGIS: https://developers.arcgis.com/documentation/
-             https://pro.arcgis.com/en/pro-app/latest/help/mapping/
-             https://pro.arcgis.com/en/pro-app/latest/sdk/api-reference/
-             docs/user/job-cards/arcgis-용어.md (terms only; do not clone ArcMap chrome).
-   Use context7 + open_page/web_fetch on those URLs, then implement.
-
-3) SKILLS: orchestrator-protocol, ka-graph, ka-experts, ka-hgis, gis-verify, ka-hgis-verify as they match. Each spawned expert loads skills separately.
-
-4) GRAPH this turn: QUICK=parent only. gis=qgis-api||gis-protocol||field-check. ship=scouts then implementer then reviewer then tester. debug=debugger||scout||qgis-api. architecture=ka-architect+plan. Worker prompts: TASK / EXPECTED OUTCOME / MUST DO / MUST NOT DO / CONTEXT + sequential-thinking + context7 + QGIS/ArcGIS docs + named skills.
-
-5) LOOP: after src/QSS/UI edits, cmake --build then relevant ctest this turn. Quote exit codes. No 완료 without this-turn output.
-
-6) CROSS-CHECK vs digitize / legend / layout / export 5179. Ship only if field-usable.
-
-7) MEMORY: persist decisions. Recall: coord points live on layout; keep layout scale; on layout enter pan map-center to layout center; start splash+recents+auto sat/cadastral.
-
-8) End every user-facing answer with exactly 3 next excavation-GIS recommendations.
+보내기 전: skill Read / graph 이름 / 소환 툴 / API 추측 없음 / 루프 증거. NO면 툴부터.

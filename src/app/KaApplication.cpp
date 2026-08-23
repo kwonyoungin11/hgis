@@ -5,6 +5,7 @@
 #include "MainWindow.h"
 #include <QElapsedTimer>
 #include <QApplication>
+#include <QGuiApplication>
 #include <QPalette>
 #include <QColor>
 #include <QStyleFactory>
@@ -29,7 +30,10 @@
 #include <QLinearGradient>
 #include <QPixmap>
 #include <QFont>
+#include <QFontMetrics>
 #include <QPen>
+#include <QEventLoop>
+#include <QThread>
 #include <functional>
 #include <cstdlib>
 #include <QFileInfo>
@@ -541,6 +545,70 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
   return all ? 0 : 5;
 }
 
+// 전문가 프로그램 로딩 화면. 이름·제작처·링크 라이브러리 저작권을 읽을 시간을 준다.
+static QPixmap makeFieldSplashPixmap() {
+  QPixmap pm(720, 460);
+  QLinearGradient g(0, 0, 0, pm.height());
+  g.setColorAt(0.0, QColor(14, 18, 24));
+  g.setColorAt(0.55, QColor(22, 32, 46));
+  g.setColorAt(1.0, QColor(18, 28, 40));
+  QPainter p(&pm);
+  p.fillRect(pm.rect(), g);
+  p.setRenderHint(QPainter::Antialiasing, true);
+  p.setPen(QPen(QColor(201, 162, 39, 180), 1.2));
+  p.drawRect(pm.rect().adjusted(14, 14, -15, -15));
+  p.setPen(QPen(QColor(201, 162, 39, 70), 1));
+  p.drawLine(QPointF(48, 118), QPointF(pm.width() - 48, 118));
+
+  p.setPen(QColor(232, 220, 186));
+  p.setFont(QFont(QStringLiteral("Malgun Gothic"), 10));
+  p.drawText(QRect(48, 32, pm.width() - 96, 22), Qt::AlignLeft | Qt::AlignVCenter,
+             QStringLiteral("동국문화재연구원"));
+
+  p.setPen(Qt::white);
+  p.setFont(QFont(QStringLiteral("Malgun Gothic"), 28, QFont::Bold));
+  p.drawText(QRect(48, 58, pm.width() - 96, 48), Qt::AlignLeft | Qt::AlignVCenter,
+             QStringLiteral("필드고고학GIS"));
+
+  p.setPen(QColor(201, 162, 39));
+  p.setFont(QFont(QStringLiteral("Malgun Gothic"), 11, QFont::DemiBold));
+  p.drawText(QRect(48, 128, pm.width() - 96, 22), Qt::AlignLeft,
+             QStringLiteral("버전 1  ·  향후 업데이트 진행"));
+
+  p.setPen(QColor(210, 216, 224));
+  p.setFont(QFont(QStringLiteral("Malgun Gothic"), 9));
+  const QString notices = QStringLiteral(
+      "이 프로그램은 QGIS를 포크하지 않고 qgis_core / qgis_gui 라이브러리를 링크합니다.\n"
+      "\n"
+      "QGIS  © QGIS Development Team  ·  GNU GPL v2 이상\n"
+      "Qt    © The Qt Company Ltd.  ·  LGPLv3 / GPLv2+\n"
+      "GDAL/OGR  © OSGeo  ·  MIT/X11\n"
+      "PROJ  © PROJ contributors  ·  MIT\n"
+      "GEOS  © GEOS contributors  ·  LGPLv2.1\n"
+      "SQLite, PROJ 데이터, VWorld 배경지도는 각 저작권·이용약관을 따릅니다.\n"
+      "\n"
+      "본 소프트웨어는 GNU GPL v2 이상으로 배포됩니다.");
+  p.drawText(QRect(48, 162, pm.width() - 96, 230), Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap,
+             notices);
+
+  p.setPen(QColor(160, 168, 178));
+  p.setFont(QFont(QStringLiteral("Malgun Gothic"), 8));
+  p.drawText(QRect(48, pm.height() - 52, pm.width() - 96, 22), Qt::AlignLeft,
+             QStringLiteral("현장 조사를 불러오는 중…"));
+  p.end();
+  return pm;
+}
+
+static void holdSplash(QSplashScreen* splash, QCoreApplication* app, int ms) {
+  if (!splash || !app || ms <= 0) return;
+  QElapsedTimer hold;
+  hold.start();
+  while (hold.elapsed() < ms) {
+    app->processEvents(QEventLoop::AllEvents, 40);
+    QThread::msleep(20);
+  }
+}
+
 int KaApplication::run(int argc, char** argv) {
   // 충돌 시 심볼 스택·미니덤프가 남도록 가장 먼저 설치한다.
   KaCrashGuard::install();
@@ -575,10 +643,46 @@ int KaApplication::run(int argc, char** argv) {
   }
 #endif
 
+  // Keep 125/150/175% (4K) instead of snapping to 1x or 2x. Must precede QgsApplication.
+  QGuiApplication::setHighDpiScaleFactorRoundingPolicy(
+      Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
+
 #if KA_HGIS_HAS_QGIS
   // PROJ/GDAL 환경은 QgsApplication이 첫 좌표계 컨텍스트를 만들기 전에 준비돼야 한다.
   applyBundledRuntime();
   QgsApplication app(argc, argv, true);
+#else
+  QApplication app(argc, argv);
+  qWarning("Built without QGIS SDK (stub mode)");
+#endif
+
+  app.setApplicationName(QStringLiteral("ka-hgis"));
+  app.setApplicationDisplayName(QStringLiteral("필드고고학GIS"));
+  app.setOrganizationName(QStringLiteral("ka-hgis"));
+  app.setApplicationVersion(QStringLiteral("1"));
+  app.setStyle(QStringLiteral("Fusion"));
+  {
+    const QString icoPath = QDir(QCoreApplication::applicationDirPath())
+                                .filePath(QStringLiteral("../data/theme/ka-hgis.ico"));
+    const QString icoLocal = QDir(QCoreApplication::applicationDirPath())
+                                 .filePath(QStringLiteral("data/theme/ka-hgis.ico"));
+    QIcon appIco;
+    if (QFile::exists(icoLocal)) appIco = QIcon(icoLocal);
+    else if (QFile::exists(icoPath)) appIco = QIcon(icoPath);
+    app.setWindowIcon(appIco.isNull() ? KaIcons::appIcon() : appIco);
+  }
+  KaTheme::apply(&app);
+
+  QSplashScreen* splash = nullptr;
+  if (!smokeQuit && !qaPhase1) {
+    splash = new QSplashScreen(makeFieldSplashPixmap());
+    splash->show();
+    splash->showMessage(QStringLiteral("라이브러리를 불러오는 중…"),
+                        Qt::AlignBottom | Qt::AlignHCenter, QColor(200, 206, 214));
+    app.processEvents();
+  }
+
+#if KA_HGIS_HAS_QGIS
   const QString prefix = resolvePrefixPath();
   if (prefix.isEmpty()) {
     qCritical("QGIS_PREFIX_PATH/OSGEO4W_ROOT not set or qgis apps dir missing");
@@ -612,29 +716,6 @@ int KaApplication::run(int argc, char** argv) {
         if (level == Qgis::MessageLevel::Warning || level == Qgis::MessageLevel::Critical)
           KaCrashGuard::logLine(QStringLiteral("[qgis/%1] %2").arg(tag, message));
       });
-#else
-  QApplication app(argc, argv);
-  qWarning("Built without QGIS SDK (stub mode)");
-#endif
-
-  app.setApplicationName(QStringLiteral("ka-hgis"));
-  app.setApplicationDisplayName(QStringLiteral("유적 HGIS"));
-  // 배포 아이콘(딥블루 트라울+맵핀)이 있으면 그걸 쓰고, 없으면 그린 아이콘.
-  {
-    const QString icoPath = QDir(QCoreApplication::applicationDirPath())
-                                .filePath(QStringLiteral("../data/theme/ka-hgis.ico"));
-    const QString icoLocal = QDir(QCoreApplication::applicationDirPath())
-                                 .filePath(QStringLiteral("data/theme/ka-hgis.ico"));
-    QIcon appIco;
-    if (QFile::exists(icoLocal)) appIco = QIcon(icoLocal);
-    else if (QFile::exists(icoPath)) appIco = QIcon(icoPath);
-    app.setWindowIcon(appIco.isNull() ? KaIcons::appIcon() : appIco);
-  }
-  app.setOrganizationName(QStringLiteral("ka-hgis"));
-  app.setApplicationVersion(QStringLiteral("0.3.0"));
-  app.setStyle(QStringLiteral("Fusion"));
-  KaTheme::apply(&app);
-#if KA_HGIS_HAS_QGIS
   // 타일 요청이 순간 실패(VWorld 요청 제한·네트워크 흔들림)해도 프로바이더가 더
   // 재시도하도록 올린다(기본 3회). 위성지도가 반만 그려지는 주원인 완화.
   // 주의: 조직·앱 이름이 정해진 뒤에 써야 프로바이더가 읽는 저장소와 일치한다.
@@ -647,30 +728,6 @@ int KaApplication::run(int argc, char** argv) {
   }
 #endif
 
-  QSplashScreen* splash = nullptr;
-  if (!smokeQuit) {
-    QPixmap pm(640, 360);
-    QLinearGradient g(0, 0, 0, pm.height());
-    g.setColorAt(0.0, QColor(27, 36, 48));
-    g.setColorAt(1.0, QColor(23, 90, 176));
-    QPainter p(&pm);
-    p.fillRect(pm.rect(), g);
-    p.setRenderHint(QPainter::Antialiasing, true);
-    p.setPen(QPen(QColor(255, 255, 255, 48), 1));
-    p.drawRect(pm.rect().adjusted(10, 10, -11, -11));
-    p.setPen(Qt::white);
-    p.setFont(QFont(QStringLiteral("Malgun Gothic"), 28, QFont::Bold));
-    p.drawText(pm.rect().adjusted(0, -28, 0, 0), Qt::AlignCenter, QStringLiteral("유적 HGIS"));
-    p.setFont(QFont(QStringLiteral("Malgun Gothic"), 11));
-    p.setPen(QColor(232, 238, 245));
-    p.drawText(pm.rect().adjusted(0, 40, 0, 0), Qt::AlignCenter,
-               QStringLiteral("현장 조사를 불러오는 중…"));
-    p.end();
-    splash = new QSplashScreen(pm);
-    splash->show();
-    app.processEvents();
-  }
-
   if (VworldSettings::loadApiKey().isEmpty()) {
     const QByteArray envKey = qgetenv("VWORLD_API_KEY");
     if (!envKey.isEmpty())
@@ -681,6 +738,10 @@ int KaApplication::run(int argc, char** argv) {
   KaCrashGuard::logLine(QStringLiteral("[boot] 메인창 구성 %1 ms").arg(bootTimer.elapsed()));
   w.show();
   if (splash) {
+    splash->showMessage(QStringLiteral("준비 완료"), Qt::AlignBottom | Qt::AlignHCenter,
+                        QColor(200, 206, 214));
+    // 저작권·제작처를 읽을 수 있게 잠시 유지한다. 자동 스모크는 기다리지 않는다.
+    holdSplash(splash, &app, 4500);
     splash->finish(&w);
     delete splash;
     splash = nullptr;
