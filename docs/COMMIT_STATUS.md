@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-30 12:41:00 +09:00 |
+| Updated (local) | 2026-08-30 12:41:16 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `cursor/pro-drawing-and-map-services` |
-| HEAD short | `ff8c099` |
-| HEAD full | `ff8c09934353c2301191d179fe6454a0013ee836` |
-| HEAD date | 2026-08-23 15:08:48 +0900 |
-| HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Ship 4K-safe VWorld satellite tiles and pending field GIS work for another machine. |
-| Total commits | 35 |
+| HEAD short | `1eb3c3e` |
+| HEAD full | `1eb3c3ec35933aef2ba63e6053146518583b18bf` |
+| HEAD date | 2026-08-30 12:41:00 +0900 |
+| HEAD author | kwonypungin <kyi25@nate.com> |
+| HEAD subject | Ship Malgun Gothic field chrome, section/layout GIS work, and Grok unlazy expert harness. |
+| Total commits | 36 |
 | Upstream | `origin/cursor/pro-drawing-and-map-services` |
-| Sync | up to date with origin/cursor/pro-drawing-and-map-services |
+| Sync | ahead 1 of origin/cursor/pro-drawing-and-map-services (push pending) |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (110 paths) |
+| Working tree dirty | **yes** (2 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Ship 4K-safe VWorld satellite tiles and pending field GIS work for another machine. (`ff8c099` @ 2026-08-23 15:08:48 +0900)
-- **Remote sync at write time:** up to date with origin/cursor/pro-drawing-and-map-services
-- **Uncommitted local changes at write time:** yes (110 paths)
+- **Recorded tip when this file was written:** Ship Malgun Gothic field chrome, section/layout GIS work, and Grok unlazy expert harness. (`1eb3c3e` @ 2026-08-30 12:41:00 +0900)
+- **Remote sync at write time:** ahead 1 of origin/cursor/pro-drawing-and-map-services (push pending)
+- **Uncommitted local changes at write time:** yes (2 paths)
 
 ### Read this correctly
 
@@ -55,6 +55,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `1eb3c3e` | 2026-08-30T12:41:00+09:00 | Ship Malgun Gothic field chrome, section/layout GIS work, and Grok unlazy expert harness. |
 | `ff8c099` | 2026-08-23T15:08:48+09:00 | Ship 4K-safe VWorld satellite tiles and pending field GIS work for another machine. |
 | `033fffa` | 2026-08-23T08:44:29+09:00 | Refresh COMMIT_STATUS after section studio ship. |
 | `bbec31e` | 2026-08-23T08:44:15+09:00 | Ship section drawing studio so Descartes GeoTIFF sheets can continue on another machine. |
@@ -84,120 +85,11 @@
 | `e69ab63` | 2026-08-09T18:53:51+09:00 | Skip live VWorld tests when API key missing or rejected. |
 | `fedd10d` | 2026-08-09T18:53:49+09:00 | Add separate print layout editor window using QgsLayoutView. |
 | `15fc5a4` | 2026-08-09T18:53:48+09:00 | Align survey layer lifecycle with QGIS: empty legend until draw. |
-| `3129ef6` | 2026-08-09T18:53:46+09:00 | Harden digitize capture tool finish and keep drawing session. |
 
 ## Staged in this commit
 
 ```
-M	.gitignore
-M	.grok/NOW.md
-A	.grok/agents/arcgis-expert.md
-A	.grok/agents/ka-color.md
-A	.grok/agents/ka-developer.md
-A	.grok/agents/ka-symbol.md
-A	.grok/agents/ka-ui.md
-A	.grok/agents/ka-ux.md
-A	.grok/agents/qgis-expert.md
-A	.grok/commands/ka-arcgis.md
-A	.grok/commands/ka-design.md
-A	.grok/commands/ka-developer.md
-A	.grok/commands/ka-predev.md
-A	.grok/commands/ka-qgis.md
-A	.grok/commands/ka-tdd.md
-A	.grok/commands/unlazy.md
-M	.grok/hooks/bin/excavation-loop.txt
-A	.grok/hooks/bin/experts-inject.ps1
-A	.grok/hooks/bin/experts-team.txt
-M	.grok/hooks/bin/graph-loop-state.ps1
-M	.grok/hooks/bin/post-tool.ps1
-M	.grok/hooks/bin/pre-tool-impl.ps1
-M	.grok/hooks/bin/self-check-graph-loop.ps1
-A	.grok/hooks/bin/self-check-hooks.ps1
-A	.grok/hooks/bin/self-check-unlazy.ps1
-M	.grok/hooks/bin/session-start.ps1
-M	.grok/hooks/bin/stop-gate.ps1
-A	.grok/hooks/bin/unlazy-stop.ps1
-A	.grok/hooks/experts-team.json
-M	.grok/hooks/ka-hgis.json
-A	.grok/roles/arcgis-expert.toml
-A	.grok/roles/ka-color.toml
-A	.grok/roles/ka-developer.toml
-A	.grok/roles/ka-symbol.toml
-A	.grok/roles/ka-ui.toml
-A	.grok/roles/ka-ux.toml
-A	.grok/roles/qgis-expert.toml
-M	.grok/rules/00-grok-preset.md
-M	.grok/rules/00-orchestrator-protocol.md
-A	.grok/rules/21-predev.md
-M	.grok/rules/30-excavation-gis-loop.md
-A	.grok/rules/32-tdd.md
-A	.grok/rules/33-gis-design.md
-A	.grok/rules/34-expert-team.md
-A	.grok/rules/35-desktop-icon.md
-M	.grok/rules/40-section-studio.md
-M	.grok/rules/50-graph-loop.md
-A	.grok/skills/ka-arcgis/SKILL.md
-A	.grok/skills/ka-design/SKILL.md
-A	.grok/skills/ka-developer/SKILL.md
-M	.grok/skills/ka-experts/SKILL.md
-M	.grok/skills/ka-graph/SKILL.md
-M	.grok/skills/ka-hgis-verify/SKILL.md
-A	.grok/skills/ka-predev/SKILL.md
-A	.grok/skills/ka-qgis/SKILL.md
-A	.grok/skills/ka-tdd/SKILL.md
-A	.grok/skills/unlazy/.gitignore
-A	.grok/skills/unlazy/CHANGELOG.md
-A	.grok/skills/unlazy/CONTRIBUTING.md
-A	.grok/skills/unlazy/LICENSE
-A	.grok/skills/unlazy/README.md
-A	.grok/skills/unlazy/SECURITY.md
-A	.grok/skills/unlazy/SKILL.md
-A	.grok/skills/unlazy/package.json
-A	.grok/skills/unlazy/references/gates.md
-A	.grok/skills/unlazy/references/method.md
-A	.grok/skills/unlazy/references/orchestration.md
-A	.grok/skills/unlazy/references/parallel.md
-A	.grok/skills/unlazy/references/token-economy.md
-A	.grok/skills/unlazy/scripts/gate-check.mjs
-A	.grok/skills/unlazy/scripts/install-hooks.mjs
-A	.grok/skills/unlazy/scripts/lib/gates.mjs
-A	.grok/skills/unlazy/scripts/lib/regex-worker.mjs
-A	.grok/skills/unlazy/scripts/stop-hook.mjs
-A	.grok/skills/unlazy/templates/PLAN.md
-A	.grok/skills/unlazy/templates/gates-leaf.md
-A	.grok/skills/unlazy/templates/gates-node.md
-A	.grok/skills/unlazy/tests/hardening-tests.mjs
-A	.grok/skills/unlazy/tests/run-tests.mjs
-A	.grok/skills/unlazy/tests/self-check.mjs
-A	.grok/skills/unlazy/tests/stress-tests.mjs
-M	AGENTS.md
-M	HANDOFF.md
-M	data/theme/ka-hgis.qss
-M	dist/ka-hgis-portable/data/theme/ka-hgis.qss
-M	dist/ka-hgis-portable/ka-hgis.exe
 M	docs/COMMIT_STATUS.md
-M	docs/HANDOFF.md
-A	orca.yaml
-A	scripts/orca-worktree-setup.ps1
-A	scripts/publish-desktop.ps1
-M	src/app/KaDrawingStudio.cpp
-M	src/app/KaSectionDrawingStudio.cpp
-M	src/app/KaSectionDrawingStudio.h
-M	src/app/KaTheme.cpp
-M	src/app/MainWindow.cpp
-M	src/core/GeologyMapService.cpp
-M	src/core/LayerOps.cpp
-M	src/core/LayerOps.h
-M	src/core/LayoutService.cpp
-M	src/core/LayoutService.h
-M	src/core/RiverMapService.cpp
-M	src/core/SectionLayoutService.cpp
-M	src/core/SectionLayoutService.h
-M	src/core/SoilMapService.cpp
-M	tests/test_section_layout.cpp
-M	tests/test_section_studio.cpp
-M	tests/test_theme.cpp
-M	tests/test_workflow.cpp
 ```
 ## Other PC checklist
 
