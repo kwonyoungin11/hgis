@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd.exe /d /c .grok\\hooks\\run.cmd experts-inject",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

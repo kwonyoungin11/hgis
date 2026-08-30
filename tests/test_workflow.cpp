@@ -44,6 +44,8 @@
 #include <qgslayertreelayer.h>
 #include <qgscategorizedsymbolrenderer.h>
 #include <qgssinglesymbolrenderer.h>
+#include <qgslinesymbol.h>
+#include <qgssymbollayer.h>
 #include <qgsprintlayout.h>
 #include <qgslayoutrendercontext.h>
 #include <qgslayoutitemmap.h>
@@ -51,6 +53,7 @@
 #include <qgslayoutitemlabel.h>
 #include <qgslayoutitemscalebar.h>
 #include <qgslayoutitemlegend.h>
+#include <qgsfillsymbol.h>
 
 class TestWorkflow : public QObject {
   Q_OBJECT
@@ -61,6 +64,12 @@ private slots:
   void soilTerrainLegend_officialCodesAndStyle();
   void geologyEraLegend_icsColorsAndStyle();
   void riverLevelLegend_waterStyleAndNameLabels();
+  void thematicMapsScaleRangeTo1in100000();
+  void sectionLineKeepsMagentaWithHalo();
+  void featurePolyStrokeDarkerOnSatellite();
+  void exportPackagePrefersUserSheetPdf();
+  void sheetScaleBarUsesInkFill();
+  void layoutOpenDoesNotAutoStartCoordPoint();
   void reprojectAndMigrateFields();
   void georefWorldfileFromGcp();
   void convert5186PolygonTo5179Shp();
@@ -446,14 +455,115 @@ void TestWorkflow::riverLevelLegend_waterStyleAndNameLabels() {
   QCOMPARE(cat->categories().at(0).value().toString(), QStringLiteral("국가하천"));
   QCOMPARE(cat->categories().at(1).value().toString(), QStringLiteral("지방1급하천"));
   QCOMPARE(cat->categories().at(2).value().toString(), QStringLiteral("지방2급하천"));
-  // 국가하천 물색이 심볼에 반영된다(알파 제외 RGB 비교).
+  // 국가하천 물색 — 위성·지적 위에서 더 진한 파랑으로 강조.
   const QColor c0 = cat->categories().at(0).symbol()->color();
-  QCOMPARE(QColor(c0.red(), c0.green(), c0.blue()), QColor(42, 111, 176));
+  QCOMPARE(QColor(c0.red(), c0.green(), c0.blue()), QColor(0, 126, 212));
+  QVERIFY2(c0.blue() > c0.red() + 150, "수계 강조는 파란 채널이 빨강보다 훨씬 커야 한다");
   QVERIFY2(mem.labelsEnabled(), "river name labels expected");
 
   QgsVectorLayer noField(QStringLiteral("MultiPolygon?crs=EPSG:5186"),
                          QStringLiteral("nofield"), QStringLiteral("memory"));
   QVERIFY(!RiverMapService::applyRiverStyle(&noField));
+}
+
+void TestWorkflow::thematicMapsScaleRangeTo1in100000() {
+  QgsVectorLayer vl(QStringLiteral("Polygon?crs=EPSG:5186"), QStringLiteral("soil"),
+                    QStringLiteral("memory"));
+  QVERIFY(vl.isValid());
+  LayerOps::applyThematicOverlayScaleRange(&vl);
+  QVERIFY(vl.hasScaleBasedVisibility());
+  QVERIFY2(vl.isInScaleRange(10000.0), "visible at 1:10000");
+  QVERIFY2(vl.isInScaleRange(100000.0), "visible at 1:100000");
+  QVERIFY2(!vl.isInScaleRange(250000.0), "hidden when more zoomed out than 1:100000");
+}
+
+void TestWorkflow::sectionLineKeepsMagentaWithHalo() {
+  QgsVectorLayer vl(QStringLiteral("LineString?crs=EPSG:5186"), QStringLiteral("sec"),
+                    QStringLiteral("memory"));
+  QVERIFY(vl.isValid());
+  LayerOps::markSurveyLayer(&vl, QStringLiteral("section_line"));
+  QVERIFY(LayerOps::applyDomainDrawStyle(&vl, QStringLiteral("section_line")));
+  auto* r = dynamic_cast<QgsSingleSymbolRenderer*>(vl.renderer());
+  QVERIFY(r);
+  auto* line = dynamic_cast<QgsLineSymbol*>(r->symbol());
+  QVERIFY(line);
+  QVERIFY2(line->symbolLayerCount() >= 2, "white casing so cadastral magenta does not swallow A–A′");
+  const QColor halo = line->symbolLayer(0)->color();
+  QCOMPARE(QColor(halo.red(), halo.green(), halo.blue()), QColor(255, 255, 255));
+  QgsSymbolLayer* core = line->symbolLayer(line->symbolLayerCount() - 1);
+  QVERIFY(core);
+  const QColor c = core->color();
+  QCOMPARE(QColor(c.red(), c.green(), c.blue()), QColor(190, 24, 93));
+}
+
+void TestWorkflow::featurePolyStrokeDarkerOnSatellite() {
+  QgsVectorLayer vl(QStringLiteral("Polygon?crs=EPSG:5186"), QStringLiteral("fp"),
+                    QStringLiteral("memory"));
+  QVERIFY(vl.isValid());
+  LayerOps::markSurveyLayer(&vl, QStringLiteral("feature_poly"));
+  QVERIFY(LayerOps::applyDomainDrawStyle(&vl, QStringLiteral("feature_poly")));
+  QColor f, s;
+  double w = 0.0, m = 0.0;
+  bool nf = false, ns = false, dash = false;
+  QVERIFY(LayerOps::readSimpleVectorStyle(&vl, &f, &s, &w, &m, &nf, &ns, &dash));
+  QCOMPARE(QColor(f.red(), f.green(), f.blue()), QColor(22, 163, 74));
+  QCOMPARE(QColor(s.red(), s.green(), s.blue()), QColor(17, 94, 44));
+  QVERIFY2(w >= 1.8, "outline thicker so fill does not vanish on satellite vegetation");
+}
+
+void TestWorkflow::exportPackagePrefersUserSheetPdf() {
+  const QString dir = QDir::temp().filePath(
+      QStringLiteral("ka_user_sheet_pkg_") + QString::number(QDateTime::currentMSecsSinceEpoch()));
+  QDir().mkpath(dir);
+  QgsProject proj;
+  QString err;
+  QVERIFY2(!LayoutService::createBlankSheet(&proj, 297.0, 210.0, QStringLiteral("user_sheet"), &err)
+                .isEmpty(),
+           qPrintable(err));
+  QVERIFY(proj.layoutManager()->layoutByName(QStringLiteral("user_sheet")));
+  const QString pkg = QDir(dir).filePath(QStringLiteral("pkg"));
+  QVERIFY2(!ExportService::exportSubmissionPackage(&proj, pkg, QStringLiteral("UTF-8"),
+                                                   QStringLiteral("OK"), false, false, &err)
+                .isEmpty(),
+           qPrintable(err));
+  QVERIFY2(QFile::exists(QDir(pkg).filePath(QStringLiteral("조사도면.pdf"))),
+           "submission PDF must be the composed drawing-studio sheet");
+  QVERIFY2(!QFile::exists(QDir(pkg).filePath(QStringLiteral("조사구역도.pdf"))),
+           "must not dump auto template PDFs when user_sheet exists");
+}
+
+void TestWorkflow::sheetScaleBarUsesInkFill() {
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  QString err;
+  LayoutService::DrawingOptions opt;
+  const auto r = LayoutService::buildDrawing(&proj, LayoutService::DrawingKind::SurveyAreaMap,
+                                             opt, &err);
+  Q_UNUSED(r);
+  auto* ly = dynamic_cast<QgsPrintLayout*>(
+      proj.layoutManager()->layoutByName(QStringLiteral("survey_area_map")));
+  QVERIFY2(ly, qPrintable(err));
+  auto* sb = qobject_cast<QgsLayoutItemScaleBar*>(ly->itemById(QStringLiteral("scale_bar")));
+  QVERIFY2(sb, "template scale_bar missing");
+  QgsFillSymbol* fill = sb->fillSymbol();
+  QVERIFY(fill);
+  const QColor c = fill->color();
+  QCOMPARE(QColor(c.red(), c.green(), c.blue()), QColor(0x11, 0x18, 0x27));
+}
+
+void TestWorkflow::layoutOpenDoesNotAutoStartCoordPoint() {
+  QFile f(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text),
+           "run from source tree (ctest WORKING_DIRECTORY)");
+  const QString src = QString::fromUtf8(f.readAll());
+  const int fn = src.indexOf(QLatin1String("void MainWindow::openLayoutDesigner"));
+  QVERIFY2(fn >= 0, "openLayoutDesigner must exist");
+  const int next = src.indexOf(QLatin1String("void MainWindow::"), fn + 10);
+  QVERIFY2(next > fn, "openLayoutDesigner body");
+  const QString body = src.mid(fn, next - fn);
+  QVERIFY2(body.contains(QLatin1String("addTab")), "조판 stays a main tab");
+  QVERIFY2(!body.contains(QLatin1String("beginPlaceCoordPoint")),
+           "opening 조판 must not auto-start 좌표점; the bottom icon still does");
 }
 
 void TestWorkflow::reprojectAndMigrateFields() {

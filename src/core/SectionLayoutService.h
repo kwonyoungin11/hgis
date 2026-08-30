@@ -34,6 +34,8 @@ struct SectionLayoutOptions {
     /// 표제에 적는 수평 좌표계(5186/5187). 비어 있으면 EPSG:5187.
     /// 세계 XY로 눕힌 단면은 조판에 이 CRS를 쓰지 않는다(재투영하면 수평이 기운다).
     QString mapCrsAuthId;
+    /// Double Box / Single Box / Line Ticks Up. 샘플은 용지가 아니라 스튜디오 스트립.
+    QString scaleBarStyle = QStringLiteral("Double Box");
 };
 
 /// buildSectionLayout() 반환 결과

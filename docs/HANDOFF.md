@@ -22,8 +22,9 @@ $env:PATH = "C:\CMake\bin;" + $env:PATH
 
 Launch for the field user (do **not** start `ka-hgis.exe` raw):
 
-- `고고학 전용 HGIS.lnk` → `scripts\start-ka-hgis.vbs` → `launch.ps1`
-- or `.\ka-hgis-실행.bat`
+- Desktop **고고학 전용 HGIS.lnk** → `dist\ka-hgis-portable\start.bat`
+- After C++/UI builds: `.\scripts\publish-desktop.ps1` then click that icon
+- or `.\scripts\start-ka-hgis.vbs` → `launch.ps1` (uses `build\Release` first)
 
 Other PC first time: `docs/other-pc-setup.md` · `.\scripts\bootstrap-dev-pc.ps1`  
 VWorld key is **local only** (`VworldSettings` / 도움말 → API 키). Never commit `config/secrets.ini`.
@@ -112,3 +113,4 @@ This machine: OSGeo `A:\OSGeo4W` (dev-env also accepts C: / D:). CMake `C:\CMake
 | Skills | `/ka-experts` `/ka-graph` `/gis-verify` `/ka-hgis-verify` `/ka-drawing-studio` `/ka-submit-package` `/ka-georef-align` |
 | Experts | `ka-scout` `ka-implementer` `ka-reviewer` `ka-debugger` `ka-architect` `ka-tester` `qgis-api` `gis-protocol` `field-check` |
 | Workflows | `/workflow ka-ship` `/workflow ka-council` `/workflow ka-verify` |
+| Orca worktree setup | `orca.yaml` + `scripts/orca-worktree-setup.ps1` |

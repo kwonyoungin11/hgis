@@ -8,8 +8,6 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFont>
-#include <QFontDatabase>
-#include <QFontInfo>
 #include <QPainter>
 #include <QPainterPath>
 #include <QProxyStyle>
@@ -209,24 +207,13 @@ QString loadStyleSheet() {
 void apply(QApplication* app) {
   if (!app)
     return;
-  const QStringList fontCands = {
-      QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("data/fonts/PretendardGOV-Regular.otf")),
-      QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../data/fonts/PretendardGOV-Regular.otf")),
-      QDir::current().filePath(QStringLiteral("data/fonts/PretendardGOV-Regular.otf")),
-  };
-  for (const QString& fp : fontCands) {
-    if (QFile::exists(fp) && QFontDatabase::addApplicationFont(fp) >= 0)
-      break;
-  }
-  QFont ui(QStringLiteral("Pretendard GOV"));
-  if (ui.exactMatch() || QFontInfo(ui).family().contains(QLatin1String("Pretendard"))) {
-    ui.setPixelSize(13);
-    app->setFont(ui);
-  } else {
-    QFont fallback(QStringLiteral("Malgun Gothic"));
-    fallback.setPixelSize(13);
-    app->setFont(fallback);
-  }
+  // Field PCs ship Malgun Gothic. Pretendard is not in data/fonts — do not
+  // put it first in QSS or QFont or Hangul falls back to a Latin substitute.
+  QFont ui(QStringLiteral("Malgun Gothic"));
+  ui.setPixelSize(13);
+  ui.setHintingPreference(QFont::PreferFullHinting);
+  ui.setStyleStrategy(QFont::PreferAntialias);
+  app->setFont(ui);
   app->setStyle(new ChromeStyle);
   app->setPalette(palette());
   app->setStyleSheet(loadStyleSheet());

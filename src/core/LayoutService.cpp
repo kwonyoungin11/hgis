@@ -1,6 +1,7 @@
 #include "LayoutService.h"
 #include "LayerOps.h"
 
+#include <QColor>
 #include <QDate>
 #include <QDir>
 #include <QFile>
@@ -34,6 +35,8 @@
 #include <qgslayoutitempage.h>
 #include <qgslayoutitempicture.h>
 #include <qgslayoutitemscalebar.h>
+#include <qgsfillsymbol.h>
+#include <qgslinesymbol.h>
 #include <qgstextformat.h>
 #include <qgslayoutmanager.h>
 #include <qgslayoutmeasurement.h>
@@ -592,6 +595,7 @@ static void fillLayout(QgsPrintLayout* layout, QgsProject* project,
       sb->setNumberOfSegments(4);
     }
   }
+  LayoutService::applySheetScaleBarInk(sb);
   sb->attemptSetSceneRect(QRectF(mapX, stripY, 88, 11));
 
   auto* scaleLbl = new QgsLayoutItemLabel(layout);
@@ -677,6 +681,50 @@ double LayoutService::scaleBarWidthMm(double segmentMeters, int segments, double
   if (!(segmentMeters > 0.0) || segments < 1 || !(scaleDenominator > 0.0))
     return 80.0;
   return segmentMeters * static_cast<double>(segments) / scaleDenominator * 1000.0;
+}
+
+void LayoutService::applySheetScaleBarInk(QgsLayoutItemScaleBar* sb) {
+  if (!sb)
+    return;
+  const QString ink = QStringLiteral("#111827");
+  const QString paper = QStringLiteral("#FFFFFF");
+  QgsTextFormat fmt = sb->textFormat();
+  fmt.setColor(QColor(ink));
+  QgsTextBufferSettings buf = fmt.buffer();
+  buf.setEnabled(true);
+  buf.setSize(0.6);
+  buf.setColor(QColor(paper));
+  fmt.setBuffer(buf);
+  sb->setTextFormat(fmt);
+  if (auto fill = QgsFillSymbol::createSimple({
+          {QStringLiteral("color"), ink},
+          {QStringLiteral("outline_color"), ink},
+          {QStringLiteral("outline_width"), QStringLiteral("0.30")},
+          {QStringLiteral("outline_width_unit"), QStringLiteral("MM")}}))
+    sb->setFillSymbol(fill.release());
+  if (auto alt = QgsFillSymbol::createSimple({
+          {QStringLiteral("color"), paper},
+          {QStringLiteral("outline_color"), ink},
+          {QStringLiteral("outline_width"), QStringLiteral("0.30")},
+          {QStringLiteral("outline_width_unit"), QStringLiteral("MM")}}))
+    sb->setAlternateFillSymbol(alt.release());
+  if (auto ln = QgsLineSymbol::createSimple({
+          {QStringLiteral("line_color"), ink},
+          {QStringLiteral("line_width"), QStringLiteral("0.30")},
+          {QStringLiteral("line_width_unit"), QStringLiteral("MM")}}))
+    sb->setLineSymbol(ln.release());
+  if (auto div = QgsLineSymbol::createSimple({
+          {QStringLiteral("line_color"), ink},
+          {QStringLiteral("line_width"), QStringLiteral("0.30")},
+          {QStringLiteral("line_width_unit"), QStringLiteral("MM")}}))
+    sb->setDivisionLineSymbol(div.release());
+  if (auto sub = QgsLineSymbol::createSimple({
+          {QStringLiteral("line_color"), ink},
+          {QStringLiteral("line_width"), QStringLiteral("0.30")},
+          {QStringLiteral("line_width_unit"), QStringLiteral("MM")}}))
+    sb->setSubdivisionLineSymbol(sub.release());
+  sb->setBackgroundEnabled(true);
+  sb->setBackgroundColor(QColor(paper));
 }
 
 double LayoutService::niceGridIntervalMeters(double scaleDenominator, double mapWidthMm) {
@@ -1028,8 +1076,11 @@ QString LayoutService::exportLayoutPdf(QgsProject* project, const QString& layou
     if (errorOut) *errorOut = QStringLiteral("프로젝트가 없습니다.");
     return {};
   }
-  ensureDefaultLayouts(project);
   QgsMasterLayoutInterface* master = project->layoutManager()->layoutByName(layoutName);
+  if (!master) {
+    ensureDefaultLayouts(project);
+    master = project->layoutManager()->layoutByName(layoutName);
+  }
   if (!master) {
     if (errorOut) *errorOut = QStringLiteral("도면을 찾을 수 없습니다: %1").arg(koreanTitle(layoutName));
     return {};
@@ -1103,7 +1154,16 @@ int LayoutService::exportDrawingPdfs(QgsProject* project, const QString& outDir,
     if (errorOut) *errorOut = QStringLiteral("폴더를 만들 수 없습니다.");
     return 0;
   }
-  rebuildDefaultLayouts(project);
+  if (project->layoutManager()->layoutByName(QStringLiteral("user_sheet"))) {
+    const QString path = dir.filePath(QStringLiteral("조사도면.pdf"));
+    QString err;
+    if (!exportLayoutPdf(project, QStringLiteral("user_sheet"), path, &err).isEmpty())
+      return 1;
+    if (errorOut) *errorOut = err.isEmpty() ? QStringLiteral("도면만들기 PDF를 만들지 못했습니다.") : err;
+    return 0;
+  }
+
+  ensureDefaultLayouts(project);
   int n = 0;
   QString lastErr;
   for (const DrawingRecipe& rec : allRecipes()) {

@@ -306,6 +306,7 @@ void compactSheetScaleBar(QgsLayoutItemScaleBar* sb) {
   fmt.setSize(7.0);
   fmt.setSizeUnit(Qgis::RenderUnit::Points);
   sb->setTextFormat(fmt);
+  LayoutService::applySheetScaleBarInk(sb);
 }
 
 QFrame* makeDrawerCard(QWidget* parent) {
@@ -2378,6 +2379,7 @@ void KaDrawingStudio::applyNiceScaleBar(QgsLayoutItemScaleBar* sb) {
   const double segM = LayoutService::niceScaleBarSegmentMeters(mapWmm, denom, segs);
   if (segM > 0.0)
     sb->setUnitsPerSegment(segM);
+  LayoutService::applySheetScaleBarInk(sb);
   applyStandardChromePositions();
 }
 

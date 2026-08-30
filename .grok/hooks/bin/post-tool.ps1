@@ -54,7 +54,7 @@ if ($t -eq 'workflow') {
 $evName = [string]$env:GROK_HOOK_EVENT
 if ($evName -match 'failure') { exit 0 }
 
-if ($cmd -match 'cmake|ctest|build-all|build-now|smoke-quit|ka-hgis-verify') {
+if ($cmd -match 'cmake|ctest|build-all|build-now|smoke-quit|ka-hgis-verify|publish-desktop') {
   $code = Get-KaToolExitCode $evt
   if ($null -eq $code -or $code -ne 0) { exit 0 }
   Set-KaVerifyStamp

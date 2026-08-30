@@ -12,7 +12,7 @@ Cursor+Grok 브릿지(`.cursor/rules/grok-ka-hgis.mdc` → `.grok/NOW.md`)는 �
 | `lsp` (clangd) | after C++ edits | guess `Qgs*` signatures |
 | context7 MCP | unfamiliar `Qgs*` after in-repo miss | invent QGIS API |
 | sequential-thinking MCP | FEATURE/ARCHITECTURE / debug | one-line typo |
-| Skills | `/ka-experts` `/ka-graph` `/gis-verify` `/ka-hgis-verify` `/ka-drawing-studio` `/ka-submit-package` `/ka-georef-align` | `/using-superpowers` |
+| Skills | `/ka-experts` `/ka-graph` `/gis-verify` `/ka-hgis-verify` `/ka-drawing-studio` `/ka-submit-package` `/ka-georef-align` `/unlazy` | `/using-superpowers` |
 | Workflows | `ka-ship` `ka-council` `ka-verify` `feature-ship` | 40-agent graphs for one file |
 | Hooks | safety + one verify reminder | treat Stop as full CI |
 
@@ -24,8 +24,10 @@ Cursor+Grok 브릿지(`.cursor/rules/grok-ka-hgis.mdc` → `.grok/NOW.md`)는 �
 - **debug**: `ka-debugger` ∥ scout ∥ `qgis-api`
 - **architecture**: `ka-architect` + `plan`, then user
 - **verify**: `ka-tester`
+- **expert team** (always on develop/fix): `arcgis-expert` ∥ `qgis-expert` then `ka-developer`
+- **design** (always on develop/fix): `ka-color` ∥ `ka-symbol` ∥ `ka-ui` ∥ `ka-ux`
 
-Parent orchestrates. Experts work. FEATURE does not stall waiting for a human between scout and implement.
+Parent orchestrates. Experts work. FEATURE does not stall waiting for a human between scout and implement. TDD: tests first. Predev: `.grok/rules/21-predev.md`.
 
 Worker prompts MUST include: TASK, EXPECTED OUTCOME, MUST DO, MUST NOT DO, CONTEXT.
 

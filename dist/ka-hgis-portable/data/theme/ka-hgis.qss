@@ -8,11 +8,51 @@ QgsMapCanvas, QWidget#mapCanvas, QgsLayoutView, QWidget#layoutView {
 }
 
 /* ---- Window face ---- */
-QMainWindow, QDialog, QMessageBox, QInputDialog, QColorDialog {
+QMainWindow, QDialog, QMessageBox, QInputDialog, QColorDialog, QDialogButtonBox {
   background: #F2F3F5;
   color: #1F2328;
-  font-family: "Pretendard GOV", "Pretendard", "Malgun Gothic", "Segoe UI";
+  font-family: "Malgun Gothic", "Segoe UI";
   font-size: 13px;
+}
+QWidget#startPage {
+  font-family: "Malgun Gothic", "Segoe UI";
+  font-size: 13px;
+  color: #1F2328;
+}
+QLabel#recentEmptyHint {
+  color: #6E757D;
+  font-size: 13px;
+  font-family: "Malgun Gothic", "Segoe UI";
+}
+QWidget#startRail {
+  background: #232830;
+  color: #EFF2F5;
+  font-family: "Malgun Gothic", "Segoe UI";
+}
+QLabel#startRailHome {
+  font-size: 16px;
+  font-weight: 800;
+  color: #EFF2F5;
+  font-family: "Malgun Gothic", "Segoe UI";
+}
+QWidget#startRail QLabel {
+  font-size: 12px;
+  color: #A9B1BA;
+  font-family: "Malgun Gothic", "Segoe UI";
+}
+QPushButton#startNewBtn, QPushButton#startOpenBtn {
+  font-size: 13px;
+  font-family: "Malgun Gothic", "Segoe UI";
+}
+QDialogButtonBox QPushButton {
+  font-size: 13px;
+  min-height: 34px;
+  font-family: "Malgun Gothic", "Segoe UI";
+}
+QMessageBox QLabel, QInputDialog QLabel {
+  font-size: 13px;
+  color: #1F2328;
+  font-family: "Malgun Gothic", "Segoe UI";
 }
 
 /* ---- Push buttons ---- */
@@ -50,7 +90,7 @@ QPushButton:disabled {
 QToolButton {
   color: #575E66;
   font-weight: 600;
-  font-size: 11px;
+  font-size: 12px;
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
@@ -92,6 +132,11 @@ QToolBar::separator {
   width: 1px;
   margin: 8px 4px;
 }
+QToolBar#mainToolbar::separator {
+  background: #C3C8CF;
+  width: 1px;
+  margin: 10px 8px;
+}
 QToolBar#mainToolbar, QToolBar#studioToolbar {
   border-bottom: 1px solid #D5D9DE;
 }
@@ -110,7 +155,7 @@ QToolBar#mainToolbar QToolButton {
   min-width: 48px;
   min-height: 46px;
   padding: 3px 5px;
-  font-size: 11px;
+  font-size: 12px;
 }
 QToolBar#mainToolbar QToolButton::menu-indicator {
   image: none;
@@ -133,7 +178,7 @@ QToolBar#studioToolRail QToolButton {
   min-width: 60px;
   min-height: 40px;
   padding: 1px 2px;
-  font-size: 10px;
+  font-size: 12px;
   color: #575E66;
 }
 QLabel#subToolbarCaption { color: #6E757D; font-weight: 600; padding: 0 8px; background: transparent; }
@@ -175,24 +220,27 @@ QComboBox QAbstractItemView, QColorDialog QAbstractSpinBox {
 }
 
 /* ---- Trees / layer list ---- */
-QTreeView, QgsLayerTreeView, QListWidget {
+QTreeView, QgsLayerTreeView, QListWidget, QTableWidget, QTableView {
   background: #FBFCFD;
   color: #1F2328;
   border: 1px solid #D5D9DE;
   border-radius: 8px;
   outline: none;
   font-size: 13px;
+  font-family: "Malgun Gothic", "Segoe UI";
 }
-QTreeView::item, QgsLayerTreeView::item, QListWidget::item {
+QTreeView::item, QgsLayerTreeView::item, QListWidget::item, QTableWidget::item, QTableView::item {
   color: #1F2328;
   padding: 5px 6px;
   min-height: 24px;
 }
-QTreeView::item:selected, QgsLayerTreeView::item:selected, QListWidget::item:selected {
+QTreeView::item:selected, QgsLayerTreeView::item:selected, QListWidget::item:selected,
+QTableWidget::item:selected, QTableView::item:selected {
   background: #E2E6EA;
   color: #1F2328;
 }
-QTreeView::item:hover, QgsLayerTreeView::item:hover, QListWidget::item:hover {
+QTreeView::item:hover, QgsLayerTreeView::item:hover, QListWidget::item:hover,
+QTableWidget::item:hover, QTableView::item:hover {
   background: #E9EBEE;
 }
 QHeaderView::section {
@@ -232,7 +280,29 @@ QWidget#sampleStrip {
 }
 QToolButton.sampleTile {
   min-width: 56px;
-  padding: 8px 10px;
+  min-height: 44px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1F2328;
+  background: #FFFFFF;
+  border: 1px solid #D5D9DE;
+  border-radius: 8px;
+}
+QToolButton.sampleTile:hover {
+  background: #E9EBEE;
+  border-color: #C3C8CF;
+  color: #1F2328;
+}
+QToolButton.sampleTile:checked {
+  background: #E8F0FA;
+  color: #124B94;
+  border: 1px solid #1E67C6;
+}
+QToolButton.sampleTile:checked:hover {
+  background: #E8F0FA;
+  color: #124B94;
+  border-color: #175AB0;
 }
 QToolButton#scaleChip {
   min-width: 56px;
@@ -252,8 +322,12 @@ QToolButton#scaleChip:checked {
 QLabel#emptyState {
   color: #6E757D;
   font-size: 13px;
+  font-weight: 500;
   padding: 24px 16px;
-  background: transparent;
+  min-height: 88px;
+  background: #FFFFFF;
+  border: 1px dashed #D5D9DE;
+  border-radius: 8px;
 }
 /* ---- View tabs (홈/지도) ---- */
 QTabWidget::pane { border: none; }
@@ -326,6 +400,8 @@ QMenu {
   color: #1F2328;
   border: 1px solid #D5D9DE;
   padding: 6px;
+  font-family: "Malgun Gothic", "Segoe UI";
+  font-size: 13px;
 }
 QMenu::item { color: #1F2328; padding: 8px 16px; min-height: 22px; border-radius: 6px; }
 QMenu::item:selected { background: #E8F0FA; color: #1F2328; }
@@ -406,6 +482,8 @@ QToolTip {
   background: #FFFFFF;
   border: 1px solid #D5D9DE;
   padding: 6px 10px;
+  font-family: "Malgun Gothic", "Segoe UI";
+  font-size: 13px;
 }
 
 QScrollBar:vertical, QScrollBar:horizontal { background: #F2F3F5; border: none; }

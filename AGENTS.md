@@ -5,7 +5,7 @@ linked to OSGeo4W **qgis-dev** (not a QGIS fork). Korean archaeology field drawi
 
 **This file overrides generic “max agent graph” defaults for this repo.**
 QUICK stays solo. FEATURE/ARCHITECTURE **must** summon project experts (`/ka-experts`).
-Do not force a council on a one-symbol typo.
+Every develop/fix also summons the **expert team** (`arcgis-expert` ∥ `qgis-expert` then `ka-developer`) and **designers**, then TDD. Do not force a council on a one-symbol typo.
 
 Identity: orchestrator on FEATURE; implementer only when QUICK is clearly enough.
 Reply in the user’s language (usually Korean). Code/identifiers in files: English OK; UI strings: Korean.
@@ -95,7 +95,7 @@ See `.grok/rules/00-grok-preset.md`.
 3. In-repo QGIS manuals under `docs/vendor/qgis-manual-3.44/` for `Qgs*` behavior
 4. context7 MCP only after in-repo `Qgs*` usage is missing; sequential-thinking only on FEATURE/ARCHITECTURE
 5. Do **not** spawn parallel subagents for single-file known fixes
-6. Project skills: `/ka-experts` (전문가소환), `/ka-graph`, `/gis-verify`, `/ka-hgis-verify`, `/ka-drawing-studio`, `/ka-submit-package`, `/ka-georef-align`
+6. Project skills: `/ka-experts` (전문가소환), `/ka-graph`, `/gis-verify`, `/ka-hgis-verify`, `/ka-drawing-studio`, `/ka-submit-package`, `/ka-georef-align`, `/unlazy`
 
 ---
 
@@ -157,7 +157,7 @@ intent → /ka-experts ship (or /workflow ka-ship)
 | Rules data | `data/rules/` | copied next to exe on build |
 | Samples | `samples/demo_survey`, `samples/bad_survey` | |
 | Tests | `tests/*` | `ka_hgis_tests`, `ka_workflow_tests` |
-| Scripts | `scripts/dev-env.ps1`, `build-all.ps1`, `run-ka-hgis.ps1`, `e2e-smoke.ps1`, `po-smoke-field.ps1` | |
+| Scripts | `scripts/dev-env.ps1`, `build-all.ps1`, `run-ka-hgis.ps1`, `e2e-smoke.ps1`, `po-smoke-field.ps1`, `orca-worktree-setup.ps1` | Orca: `orca.yaml` |
 | Layer schema SSOT | `data/schemas/ka_hgis_layers.yaml` | domain fields |
 
 **Hotspots (high blast radius):** `MainWindow.cpp` (UI hub), `LayerOps.cpp` (CRS/basemap/domain). Prefer extracting new logic into smaller `src/core/*` services instead of growing these two.
@@ -179,10 +179,13 @@ cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DOSGEO4W_ROOT=$env:OSGEO4
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 .\scripts\run-ka-hgis.ps1 --smoke-quit   # if UI/boot/menu path touched
+.\scripts\publish-desktop.ps1            # copy exe to the desktop-icon portable
 # full gate: .\scripts\build-all.ps1
 ```
+Field check = click **고고학 전용 HGIS** (portable). See `.grok/rules/35-desktop-icon.md`.
 
 **Evidence before “done”:**
+After UI/map C++: `.\scripts\publish-desktop.ps1` then the user clicks the desktop **고고학 전용 HGIS** icon (`dist\ka-hgis-portable`). `build\Release` alone is not the field check.
 
 - Compile success for changed targets **this turn** (quote exit codes)
 - ctest pass (or explicitly note pre-existing failures only)

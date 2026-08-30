@@ -1,0 +1,10 @@
+# ka-hgis Orca project defaults.
+# Orca runs scripts.setup in each new git worktree (cwd = that tree).
+# Shared build/ is forbidden: CMake embeds absolute source paths.
+# Local VWorld key is copied via .worktreeinclude, not committed.
+
+scripts:
+  setup: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/orca-worktree-setup.ps1
+
+worktree:
+  sharedDirectories: []

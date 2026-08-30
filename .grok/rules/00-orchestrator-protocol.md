@@ -57,6 +57,8 @@ Operational copy: `.grok/rules/50-graph-loop.md`.
 | debug | `ka-debugger` ∥ scout ∥ `qgis-api` if map |
 | architecture | `ka-architect` + `plan`, then wait for the user |
 | verify | `ka-tester` |
+| expert team (always on develop/fix) | `arcgis-expert` ∥ `qgis-expert` then `ka-developer` |
+| design (always on develop/fix) | `ka-color` ∥ `ka-symbol` ∥ `ka-ui` ∥ `ka-ux` |
 
 Emit `spawn_subagent` or `/workflow ka-ship` **this turn**. Do not narrate a launch without the tool call.
 Worker prompts: TASK / EXPECTED OUTCOME / MUST DO / MUST NOT DO / CONTEXT.

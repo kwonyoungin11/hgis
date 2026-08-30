@@ -9,6 +9,7 @@ This is the user's standing order for **문화재 발굴조사 HGIS**. Hooks inj
 3. Follow the user's last command. Before map/CRS/layout/digitize/graphic edits, learn the topic in **English** from official developer sites (context7 + fetch): QGIS cookbook/user manual/api.qgis.org + in-repo `docs/vendor/qgis-manual-3.44/`; ArcGIS `developers.arcgis.com` + Pro mapping help. Terms: `docs/user/job-cards/arcgis-용어.md`. Do not invent Qgs* APIs. Do not clone ArcMap chrome.
 4. Load matching skills. Each expert loads skills **separately**.
 5. Graph: QUICK solo; FEATURE/gis/debug/architecture summon the full matching expert set this turn (`spawn_subagent` or `/workflow ka-ship`). Editing app+core without a spawn is blocked.
+   Always also: expert team (`arcgis-expert` ∥ `qgis-expert` then `ka-developer`) + designers; TDD tests-first; predev `.grok/rules/21-predev.md`.
 6. Loop: this-turn `src/` writes need build + tests this turn. Evidence before 완료. Docs/hooks-only skip cmake. Leftover dirty `src/` does not block research. See `.grok/rules/50-graph-loop.md`.
 7. Cross-check against existing digitize / legend / layout / export 5179. Ship only if usable.
 8. Persist decisions (memory / this rule). Remember prior asks.

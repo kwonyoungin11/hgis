@@ -13,6 +13,8 @@ This-turn state: `.grok/.state/turn-src-writes.txt`, `turn-graph.txt`, `last-ver
 | debug | crash / build red / wrong GIS result | `ka-debugger` ∥ scout ∥ `qgis-api` if map |
 | architecture | IA / ADR / packaging / QGIS upgrade | `ka-architect` + `plan`, then wait |
 | verify | after C++ when parent must not self-certify | `ka-tester` |
+| expert team | every develop/fix (user standing order) | `arcgis-expert` ∥ `qgis-expert` then `ka-developer` |
+| design | every develop/fix (user standing order) | `ka-color` ∥ `ka-symbol` ∥ `ka-ui` ∥ `ka-ux` |
 
 Rules:
 

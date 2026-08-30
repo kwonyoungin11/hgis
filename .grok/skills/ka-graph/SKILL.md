@@ -22,6 +22,8 @@ QUICK stays solo. FEATURE/ARCHITECTURE **must** summon experts (`/ka-experts`).
 | `debug` | ka-debugger ∥ scout ∥ qgis-api | `/workflow ka-council {"task":"…","kind":"debug"}` |
 | `verify` | ka-tester | `/ka-hgis-verify` or `/workflow ka-verify` |
 | `architecture` | ka-architect + plan | then wait for the user |
+| expert team | `arcgis-expert` ∥ `qgis-expert` → `ka-developer` | always on develop/fix |
+| `design` | `ka-color` ∥ `ka-symbol` ∥ `ka-ui` ∥ `ka-ux` | always on develop/fix |
 
 Also available: `/workflow feature-ship`, `/workflow review-changes`.
 

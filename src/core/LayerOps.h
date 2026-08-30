@@ -20,6 +20,10 @@ public:
   static constexpr const char* kRoleSurvey = "survey";
   static constexpr const char* kRoleReference = "reference";
   static constexpr const char* kPropAlignPending = "ka_hgis/align_pending";
+  /// 토층·수계·지질: 가장 축소된 축척(분모). 더 축소하면 숨김.
+  static constexpr double kThematicMinScaleDenom = 100000.0;
+  static void applyThematicOverlayScaleRange(QgsMapLayer* layer);
+  static bool clampCanvasToThematicScale(QgsMapCanvas* canvas);
 
   static void setAlignPending(QgsMapLayer* layer, bool pending);
   static bool isAlignPending(const QgsMapLayer* layer);

@@ -114,6 +114,10 @@ public:
                                           int segments = 4);
   static double scaleBarWidthMm(double segmentMeters, int segments, double scaleDenominator);
 
+  /// Ink #111827 / paper #FFFFFF / 0.30 mm outline so Double Box reads on satellite and white paper.
+  /// Call after setStyle. Does not change segment mode or linked map.
+  static void applySheetScaleBarInk(class QgsLayoutItemScaleBar* sb);
+
   // 전문 측량도면 도곽: 지브라(흑백 교차) 프레임 + 정수 TM 좌표 주기(상하 수평,
   // 좌우 세로쓰기) + 내부 십자 눈금. 기존 격자는 지우고 하나로 다시 만든다.
   // crosses=false면 내부 눈금 없이 도곽·주기만 그린다(위치도처럼 배경이 촘촘할 때).

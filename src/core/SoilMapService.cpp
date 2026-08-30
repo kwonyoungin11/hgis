@@ -261,6 +261,7 @@ QgsVectorLayer* SoilMapService::downloadAndAdd(QgsProject* project, QgsMapCanvas
     return nullptr;
   }
   LayerOps::placeInLegendGroup(project, layer, QStringLiteral("참조 지도"));
+  LayerOps::applyThematicOverlayScaleRange(layer);
   if (canvas) {
     const QString workAuth = project->crs().isValid() ? project->crs().authid()
                                                       : QStringLiteral("EPSG:5186");

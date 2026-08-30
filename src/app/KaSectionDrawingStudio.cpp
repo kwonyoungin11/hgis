@@ -1,6 +1,7 @@
 ﻿#include "KaSectionDrawingStudio.h"
 
 #include "core/LayerOps.h"
+#include "core/LayoutService.h"
 #include "core/SectionLayoutService.h"
 
 #include <QBrush>
@@ -16,9 +17,13 @@
 #include <QGraphicsView>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QIcon>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QPainter>
+#include <QPen>
+#include <QPixmap>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QShowEvent>
@@ -40,6 +45,7 @@
 #include <qgslayoutrendercontext.h>
 #include <qgslayoutview.h>
 #include <qgslayoutviewtoolpan.h>
+#include <qgslayoutitemscalebar.h>
 #include <qgslayoutviewtoolselect.h>
 #include <qgsmaplayer.h>
 #include <qgsprintlayout.h>
@@ -49,6 +55,57 @@
 namespace {
 static const QString kSectionSheet = QStringLiteral("section_sheet");
 constexpr double kPreviewDpi = 300.0;
+
+QIcon scaleBarPreviewIcon(const char* style) {
+    QPixmap pm(72, 40);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(QPen(QColor(214, 211, 209), 1));
+    p.setBrush(QColor(250, 250, 249));
+    p.drawRoundedRect(QRectF(1, 4, 70, 32), 5, 5);
+    const QString s = QString::fromUtf8(style);
+    if (s == QLatin1String("Line Ticks Up")) {
+        p.setPen(QPen(QColor(68, 64, 60), 1.6));
+        p.drawLine(QPointF(10, 26), QPointF(62, 26));
+        for (int i = 0; i < 5; ++i) {
+            const double x = 10.0 + i * 13.0;
+            p.drawLine(QPointF(x, 26), QPointF(x, 14));
+        }
+    } else if (s == QLatin1String("Single Box")) {
+        p.setPen(QPen(QColor(68, 64, 60), 1));
+        for (int i = 0; i < 4; ++i) {
+            p.setBrush(i % 2 == 0 ? QColor(68, 64, 60) : QColor(250, 250, 249));
+            p.drawRect(QRectF(10 + i * 13, 16, 13, 10));
+        }
+    } else {
+        p.setPen(QPen(QColor(68, 64, 60), 1));
+        for (int row = 0; row < 2; ++row) {
+            for (int i = 0; i < 4; ++i) {
+                const bool dark = ((i + row) % 2) == 0;
+                p.setBrush(dark ? QColor(68, 64, 60) : QColor(250, 250, 249));
+                p.drawRect(QRectF(10 + i * 13, 12 + row * 8, 13, 8));
+            }
+        }
+    }
+    return QIcon(pm);
+}
+
+QToolButton* makeSampleTile(QWidget* parent, const QIcon& icon, const QString& text,
+                            const QString& objectName) {
+    auto* b = new QToolButton(parent);
+    b->setObjectName(objectName);
+    b->setIcon(icon);
+    b->setIconSize(QSize(40, 22));
+    b->setText(text);
+    b->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+    b->setAutoRaise(true);
+    b->setCursor(Qt::PointingHandCursor);
+    b->setToolTip(text);
+    b->setProperty("class", QStringLiteral("sampleTile"));
+    b->setCheckable(true);
+    return b;
+}
 } // namespace
 
 // ============================================================
@@ -155,6 +212,13 @@ QWidget* KaSectionDrawingStudio::buildLeftPanel()
     m_layerTree->setSelectionMode(QAbstractItemView::SingleSelection);
     vl->addWidget(m_layerTree, 1);
 
+    auto* empty = new QLabel(
+        QStringLiteral("단면 사진(GeoTIFF)을 추가하면 이 목록에 나타납니다."), frame);
+    empty->setObjectName(QStringLiteral("emptyState"));
+    empty->setWordWrap(true);
+    empty->setAlignment(Qt::AlignCenter);
+    vl->addWidget(empty);
+
     connect(btnAddGeo,  &QPushButton::clicked, this, &KaSectionDrawingStudio::addGeoTiff);
     connect(btnRefresh, &QToolButton::clicked, this, &KaSectionDrawingStudio::refreshLayers);
     connect(btnUp,      &QToolButton::clicked, this, &KaSectionDrawingStudio::moveLayerUp);
@@ -182,6 +246,32 @@ QWidget* KaSectionDrawingStudio::buildCenterPanel()
     auto* actZoom   = toolbar->addAction(QStringLiteral("\uc804\uccb4\ubcf4\uae30"));
 
     vl->addWidget(toolbar);
+
+    auto* strip = new QWidget(container);
+    strip->setObjectName(QStringLiteral("sampleStrip"));
+    auto* stripLay = new QHBoxLayout(strip);
+    stripLay->setContentsMargins(10, 4, 10, 4);
+    stripLay->setSpacing(8);
+    auto* stripCap = new QLabel(QStringLiteral("축척자 샘플"), strip);
+    stripCap->setObjectName(QStringLiteral("cardCaption"));
+    stripLay->addWidget(stripCap);
+    struct BarSample { const char* style; const char* tip; const char* id; };
+    const BarSample bars[] = {
+        {"Double Box", "쌍칸", "sampleScaleBarDouble"},
+        {"Single Box", "외칸", "sampleScaleBarSingle"},
+        {"Line Ticks Up", "눈금", "sampleScaleBarTicks"},
+    };
+    for (const auto& bs : bars) {
+        auto* b = makeSampleTile(strip, scaleBarPreviewIcon(bs.style),
+                                 QString::fromUtf8(bs.tip), QString::fromUtf8(bs.id));
+        const QString style = QString::fromUtf8(bs.style);
+        connect(b, &QToolButton::clicked, this, [this, style]() { applyScaleBarStyle(style); });
+        stripLay->addWidget(b);
+        if (style == QLatin1String("Double Box"))
+            b->setChecked(true);
+    }
+    stripLay->addStretch(1);
+    vl->addWidget(strip);
 
     m_view = new QgsLayoutView(container);
     m_view->setObjectName(QStringLiteral("sectionLayoutView"));
@@ -373,6 +463,35 @@ QWidget* KaSectionDrawingStudio::buildRightPanel()
     return scroll;
 }
 
+void KaSectionDrawingStudio::applyScaleBarStyle(const QString& style)
+{
+    m_scaleBarStyle = style.isEmpty() ? QStringLiteral("Double Box") : style;
+    auto* ly = currentLayout();
+    if (!ly) {
+        rebuildSheet(false);
+        return;
+    }
+    auto* sb = qobject_cast<QgsLayoutItemScaleBar*>(
+        ly->itemById(QStringLiteral("ka_section_scale_bar")));
+    if (!sb) {
+        rebuildSheet(false);
+        return;
+    }
+    sb->setStyle(m_scaleBarStyle);
+    LayoutService::applySheetScaleBarInk(sb);
+    sb->update();
+    if (auto* dbl = findChild<QToolButton*>(QStringLiteral("sampleScaleBarDouble")))
+        dbl->setChecked(m_scaleBarStyle == QLatin1String("Double Box"));
+    if (auto* sgl = findChild<QToolButton*>(QStringLiteral("sampleScaleBarSingle")))
+        sgl->setChecked(m_scaleBarStyle == QLatin1String("Single Box"));
+    if (auto* tck = findChild<QToolButton*>(QStringLiteral("sampleScaleBarTicks")))
+        tck->setChecked(m_scaleBarStyle == QLatin1String("Line Ticks Up"));
+    setStatus(QStringLiteral("축척자: %1").arg(
+        m_scaleBarStyle == QLatin1String("Single Box") ? QStringLiteral("외칸")
+        : m_scaleBarStyle == QLatin1String("Line Ticks Up") ? QStringLiteral("눈금")
+                                                          : QStringLiteral("쌍칸")));
+}
+
 void KaSectionDrawingStudio::showEvent(QShowEvent* event)
 {
     QWidget::showEvent(event);
@@ -416,6 +535,7 @@ SectionLayoutOptions KaSectionDrawingStudio::collectOptions() const
         opts.referenceLineColor = c.isEmpty() ? QStringLiteral("#D7191C") : c;
     }
     opts.mapCrsAuthId = selectedCrsAuthId();
+    opts.scaleBarStyle = m_scaleBarStyle;
     return opts;
 }
 
@@ -538,6 +658,8 @@ void KaSectionDrawingStudio::refreshLayers()
     }
 
     m_suppressTreeSignal = false;
+    if (auto* hint = findChild<QLabel*>(QStringLiteral("emptyState")))
+        hint->setVisible(m_layerTree->topLevelItemCount() == 0);
 }
 
 // ============================================================

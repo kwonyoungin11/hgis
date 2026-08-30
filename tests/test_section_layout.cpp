@@ -11,7 +11,10 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QList>
 #include <QVector>
+
+#include <qgis.h>
 
 #include "core/SectionLayoutService.h"
 
@@ -29,6 +32,7 @@
 #include <qgsprintlayout.h>
 #include <qgsproject.h>
 #include <qgsrasterlayer.h>
+#include <qgsvectorlayer.h>
 #include <qgsrasterrenderer.h>
 #include <qgsrastertransparency.h>
 
@@ -73,15 +77,18 @@ private slots:
     void buildLayoutA3();              // A3 ?? 420x297, map CRS=EPSG:5186
     void buildLayoutA4();              // A4 ?? 297x210
     void buildEmptyPaperHasGrid();     // empty layers -> paper + ticks
+    void emptyPaperMapKeepsMmFrameAndDummyLayer();
+    void sheetMapUsesZoomToExtentOnly();
     void buildLayoutUserCrsLabel();    // mapCrsAuthId overrides raster CRS label
     void buildLayoutUnrotatesWorldGeoref(); // rotated map GT -> 10x2 section plane
     void buildLayoutWorldPlacementSitsHorizontal(); // ??-like map XY, Y not northing
     void buildLayoutKeepsOrthometricElev(); // shear + ?? 100..102 must stay 2.00m
     void buildLayoutElevAxisExists();  // ka_section_elevation_0 ??? ??
+    void elevationGridUsesInkNotMidGray();
     void buildLayoutDistAxisStartsZero(); // ka_section_distance_0 ?? "0.00m"
     void buildLayoutReferenceLineStyle(); // ??? #D7191C, ??, 0.20mm
     void buildLayoutAppliesCustomLineStyle(); // 옵션 굵기·색이 기준선에 적용
-    void buildLayoutHasScaleBarSamples(); // Double Box + 샘플 3종
+    void buildLayoutHasScaleBarSamples(); // one Double Box under the map; no samples
     void buildLayoutChromeExists();    // ???.??.??? ?? ??
     void exportSectionPdfNotEmpty();   // PDF ?? ?? & ?? > 100 ???
     // ---- Task 3 ???: raster ? ??? ? map item ??? < 0.5mm ----
@@ -398,6 +405,52 @@ void TestSectionLayout::buildEmptyPaperHasGrid()
              qPrintable(QStringLiteral("CRS label: ") + crsLbl->text()));
 }
 
+void TestSectionLayout::emptyPaperMapKeepsMmFrameAndDummyLayer()
+{
+    QgsProject proj;
+    auto* decoy = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                     QStringLiteral("satellite_fake"),
+                                     QStringLiteral("memory"));
+    QVERIFY(decoy->isValid());
+    proj.addMapLayer(decoy);
+
+    SectionLayoutOptions opts;
+    opts.mapCrsAuthId = QStringLiteral("EPSG:5187");
+    const auto res = SectionLayoutService::buildSectionLayout(&proj, {}, opts);
+    QVERIFY2(res.errorKo.isEmpty(), qPrintable(res.errorKo));
+
+    auto* ly = dynamic_cast<QgsPrintLayout*>(
+        proj.layoutManager()->layoutByName(QStringLiteral("section_sheet")));
+    QVERIFY(ly);
+    auto* map = qobject_cast<QgsLayoutItemMap*>(
+        ly->itemById(QStringLiteral("ka_section_map")));
+    QVERIFY2(map, "ka_section_map missing");
+    QVERIFY2(!map->layers().isEmpty(),
+             "empty setLayers would pull project WMS into the section frame");
+    for (QgsMapLayer* ml : map->layers()) {
+        QVERIFY2(ml && ml->name() != QLatin1String("satellite_fake"),
+                 "section map must not render project layers on an empty GeoTIFF sheet");
+    }
+    // Empty paper extent is 10 x 2 m; A3 auto scale fills width → 390 x 78 mm.
+    QVERIFY2(qAbs(map->rect().width() - 390.0) < 1.0,
+             qPrintable(QStringLiteral("frame W %1 mm, expected ~390").arg(map->rect().width())));
+    QVERIFY2(qAbs(map->rect().height() - 78.0) < 1.0,
+             qPrintable(QStringLiteral("frame H %1 mm, expected ~78 (setExtent must not resize)")
+                            .arg(map->rect().height())));
+}
+
+void TestSectionLayout::sheetMapUsesZoomToExtentOnly()
+{
+    QFile f(QStringLiteral("src/core/SectionLayoutService.cpp"));
+    QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text),
+             "run from source tree (ctest WORKING_DIRECTORY)");
+    const QString src = QString::fromUtf8(f.readAll());
+    QVERIFY2(src.contains(QLatin1String("map->zoomToExtent(combinedExtent)")),
+             "sheet map must zoomToExtent");
+    QVERIFY2(!src.contains(QLatin1String("map->setExtent(combinedExtent)")),
+             "setExtent resizes the mm frame; ticks then slip");
+}
+
 void TestSectionLayout::buildLayoutUserCrsLabel()
 {
     if (m_tiffPath.isEmpty()) QSKIP("GeoTIFF missing");
@@ -619,6 +672,26 @@ void TestSectionLayout::buildLayoutElevAxisExists()
              "elevation grid must be a full-width horizontal line");
 }
 
+void TestSectionLayout::elevationGridUsesInkNotMidGray()
+{
+    if (m_tiffPath.isEmpty()) QSKIP("GeoTIFF missing");
+    QgsProject proj;
+    QgsRasterLayer* layer = nullptr;
+    const auto res = buildTestLayout(&proj, m_tiffPath, &layer);
+    QVERIFY2(res.errorKo.isEmpty(), qPrintable(res.errorKo));
+    auto* ly = dynamic_cast<QgsPrintLayout*>(
+        proj.layoutManager()->layoutByName(QStringLiteral("section_sheet")));
+    QVERIFY(ly);
+    auto* grid0 = qobject_cast<QgsLayoutItemPolyline*>(
+        ly->itemById(QStringLiteral("ka_section_elevation_grid_0")));
+    QVERIFY2(grid0, "ka_section_elevation_grid_0 missing");
+    QgsLineSymbol* sym = grid0->symbol();
+    QVERIFY(sym);
+    const QColor c = sym->color();
+    QCOMPARE(QColor(c.red(), c.green(), c.blue()), QColor(0x37, 0x41, 0x51));
+    QVERIFY2(c != QColor(0x88, 0x88, 0x88), "mid-gray #888888 vanishes on soil photos");
+}
+
 // ---- ?? ? ? ??? = "0.00m" ----
 void TestSectionLayout::buildLayoutDistAxisStartsZero()
 {
@@ -707,39 +780,55 @@ void TestSectionLayout::buildLayoutAppliesCustomLineStyle()
 
 void TestSectionLayout::buildLayoutHasScaleBarSamples()
 {
-    if (m_tiffPath.isEmpty()) QSKIP("GeoTIFF missing");
+    // Empty paper matches the field screenshot: no GeoTIFF, A3 ticks only.
+    // One Double Box under the map; sample scale bars are a field defect.
     QgsProject proj;
-    QgsRasterLayer* layer = nullptr;
-    const auto res = buildTestLayout(&proj, m_tiffPath, &layer);
+    SectionLayoutOptions opts;
+    opts.mapCrsAuthId = QStringLiteral("EPSG:5187");
+    const auto res = SectionLayoutService::buildSectionLayout(&proj, {}, opts);
     QVERIFY2(res.errorKo.isEmpty(), qPrintable(res.errorKo));
 
     auto* ly = dynamic_cast<QgsPrintLayout*>(
         proj.layoutManager()->layoutByName(QStringLiteral("section_sheet")));
     QVERIFY(ly);
 
-    QVERIFY2(ly->itemById(QStringLiteral("ka_section_scale_bar")),
-             "ka_section_scale_bar missing");
-    QVERIFY2(ly->itemById(QStringLiteral("ka_section_scale_bar_single")),
-             "ka_section_scale_bar_single missing");
-    QVERIFY2(ly->itemById(QStringLiteral("ka_section_scale_bar_ticks")),
-             "ka_section_scale_bar_ticks missing");
-    QVERIFY2(ly->itemById(QStringLiteral("ka_section_scale_bar_numeric")),
-             "ka_section_scale_bar_numeric missing");
+    QVERIFY2(!ly->itemById(QStringLiteral("ka_section_scale_bar_single")),
+             "sample Single Box scale bar must not appear on the sheet");
+    QVERIFY2(!ly->itemById(QStringLiteral("ka_section_scale_bar_ticks")),
+             "sample Line Ticks scale bar must not appear on the sheet");
+    QVERIFY2(!ly->itemById(QStringLiteral("ka_section_scale_bar_numeric")),
+             "sample Numeric scale bar must not appear on the sheet");
 
-    auto* single = qobject_cast<QgsLayoutItemScaleBar*>(
-        ly->itemById(QStringLiteral("ka_section_scale_bar_single")));
-    QVERIFY(single);
-    QCOMPARE(single->style(), QStringLiteral("Single Box"));
+    QList<QgsLayoutItemScaleBar*> bars;
+    ly->layoutItems(bars);
+    QCOMPARE(bars.size(), 1);
 
-    auto* ticks = qobject_cast<QgsLayoutItemScaleBar*>(
-        ly->itemById(QStringLiteral("ka_section_scale_bar_ticks")));
-    QVERIFY(ticks);
-    QCOMPARE(ticks->style(), QStringLiteral("Line Ticks Up"));
+    auto* map = qobject_cast<QgsLayoutItemMap*>(
+        ly->itemById(QStringLiteral("ka_section_map")));
+    QVERIFY2(map, "ka_section_map missing");
 
-    auto* numeric = qobject_cast<QgsLayoutItemScaleBar*>(
-        ly->itemById(QStringLiteral("ka_section_scale_bar_numeric")));
-    QVERIFY(numeric);
-    QCOMPARE(numeric->style(), QStringLiteral("Numeric"));
+    auto* sb = qobject_cast<QgsLayoutItemScaleBar*>(
+        ly->itemById(QStringLiteral("ka_section_scale_bar")));
+    QVERIFY2(sb, "ka_section_scale_bar missing");
+    QCOMPARE(sb->style(), QStringLiteral("Double Box"));
+    QVERIFY2(sb->linkedMap() == map, "scale bar must link to ka_section_map");
+    QVERIFY2(sb->unitsPerSegment() > 0.0, "scale bar must not stay 0 m");
+    QCOMPARE(sb->segmentSizeMode(), Qgis::ScaleBarSegmentSizeMode::Fixed);
+    QVERIFY2(sb->rect().width() >= 40.0,
+             qPrintable(QStringLiteral("scale bar paper width %1 mm, need >= 40")
+                            .arg(sb->rect().width())));
+    QVERIFY2(sb->rect().height() >= 11.0,
+             "scale bar slot must fit Double Box labels");
+    const QRectF mapScene = map->sceneBoundingRect();
+    const QRectF sbScene = sb->sceneBoundingRect();
+    QVERIFY2(sbScene.top() + 0.5 >= mapScene.bottom(),
+             "scale bar must sit below the map, not on the sheet top");
+    QVERIFY2(mapScene.bottom() <= sbScene.top() + 16.0,
+             "scale bar sits immediately under the distance ticks, not in empty paper");
+    QVERIFY2(qAbs(sbScene.left() - mapScene.left()) < 1.0,
+             "scale bar left-aligned with map (0 m origin), not bottom-right");
+    QVERIFY2(sbScene.top() > 40.0,
+             "scale bar must not sit on the top of the sheet (that is the sample strip)");
 }
 
 // ---- ???.??.??? ?? ?? ----

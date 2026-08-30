@@ -18,6 +18,7 @@ class QLineEdit;
 class QPushButton;
 class QScrollArea;
 class QShowEvent;
+class QToolButton;
 class QTreeWidget;
 class QTreeWidgetItem;
 
@@ -73,6 +74,7 @@ private:
     void       applySelectedCrsToSectionRasters();
     void       syncCrsComboFromProject();
     void       setStatus(const QString& msg);
+    void       applyScaleBarStyle(const QString& style);
     static bool isSectionStudioLayer(const QgsMapLayer* layer);
 
     QPointer<QgsProject>     m_project;
@@ -97,4 +99,5 @@ private:
     QSet<QString>            m_hiddenLayerIds;
     bool                     m_suppressTreeSignal = false;
     bool                     m_rebuilding         = false;
+    QString                  m_scaleBarStyle = QStringLiteral("Double Box");
 };

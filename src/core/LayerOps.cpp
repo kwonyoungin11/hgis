@@ -38,6 +38,7 @@
 #include <qgssymbol.h>
 #include <qgsfillsymbol.h>
 #include <qgslinesymbol.h>
+#include <qgslinesymbollayer.h>
 #include <qgsmarkersymbol.h>
 #include <qgsrenderer.h>
 #include <qgsrectangle.h>
@@ -134,8 +135,8 @@ bool LayerOps::applyDomainDrawStyle(QgsVectorLayer* layer, const QString& layerK
     strokeW = 1.6;
   } else if (key == QLatin1String("feature_poly")) {
     fill = QColor(22, 163, 74, 90);
-    stroke = QColor(21, 128, 61, 255);
-    strokeW = 1.4;
+    stroke = QColor(17, 94, 44, 255);
+    strokeW = 1.8;
   } else if (key == QLatin1String("feature_line") || key == QLatin1String("section_line")) {
     stroke = key == QLatin1String("section_line") ? QColor(190, 24, 93, 255) : QColor(202, 138, 4, 255);
     strokeW = 1.8;
@@ -164,12 +165,25 @@ bool LayerOps::applyDomainDrawStyle(QgsVectorLayer* layer, const QString& layerK
     });
     sym = fs.release();
   } else if (gt == Qgis::GeometryType::Line) {
-    auto ls = QgsLineSymbol::createSimple({
-        {QStringLiteral("line_color"), stroke.name(QColor::HexArgb)},
-        {QStringLiteral("line_width"), QString::number(strokeW)},
-        {QStringLiteral("line_width_unit"), QStringLiteral("MM")},
-    });
-    sym = ls.release();
+    if (key == QLatin1String("section_line")) {
+      auto ls = QgsLineSymbol::createSimple({
+          {QStringLiteral("line_color"), QStringLiteral("#FFFFFF")},
+          {QStringLiteral("line_width"), QStringLiteral("3.0")},
+          {QStringLiteral("line_width_unit"), QStringLiteral("MM")},
+          {QStringLiteral("line_style"), QStringLiteral("solid")},
+      });
+      auto* core = new QgsSimpleLineSymbolLayer(stroke, strokeW, Qt::SolidLine);
+      core->setWidthUnit(Qgis::RenderUnit::Millimeters);
+      ls->appendSymbolLayer(core);
+      sym = ls.release();
+    } else {
+      auto ls = QgsLineSymbol::createSimple({
+          {QStringLiteral("line_color"), stroke.name(QColor::HexArgb)},
+          {QStringLiteral("line_width"), QString::number(strokeW)},
+          {QStringLiteral("line_width_unit"), QStringLiteral("MM")},
+      });
+      sym = ls.release();
+    }
   } else if (gt == Qgis::GeometryType::Point) {
     auto ms = QgsMarkerSymbol::createSimple({
         {QStringLiteral("name"), QStringLiteral("circle")},
@@ -321,8 +335,8 @@ bool LayerOps::readSimpleVectorStyle(const QgsVectorLayer* layer, QColor* fill, 
     w = 1.6;
   } else if (key == QLatin1String("feature_poly")) {
     f = QColor(22, 163, 74, 90);
-    s = QColor(21, 128, 61, 255);
-    w = 1.4;
+    s = QColor(17, 94, 44, 255);
+    w = 1.8;
   } else if (key == QLatin1String("feature_line")) {
     s = QColor(202, 138, 4, 255);
     w = 1.8;
@@ -617,6 +631,23 @@ void LayerOps::knockOutProjectRasterPaper(QgsProject* project) {
 void LayerOps::markReferenceLayer(QgsMapLayer* layer) {
   if (!layer) return;
   layer->setCustomProperty(QString::fromUtf8(kPropLayerRole), QString::fromUtf8(kRoleReference));
+}
+
+void LayerOps::applyThematicOverlayScaleRange(QgsMapLayer* layer) {
+  if (!layer) return;
+  layer->setScaleBasedVisibility(true);
+  // QGIS minimum scale is exclusive; +1 keeps 1:100000 visible.
+  layer->setMinimumScale(kThematicMinScaleDenom + 1.0);
+  layer->setMaximumScale(0.0);
+}
+
+bool LayerOps::clampCanvasToThematicScale(QgsMapCanvas* canvas) {
+  if (!canvas) return false;
+  if (canvas->scale() > kThematicMinScaleDenom) {
+    canvas->zoomScale(kThematicMinScaleDenom, true);
+    return true;
+  }
+  return false;
 }
 
 void LayerOps::setAlignPending(QgsMapLayer* layer, bool pending) {
@@ -1706,6 +1737,7 @@ QgsVectorLayer* LayerOps::addSoilShapefile(QgsProject* project, QgsMapCanvas* ca
     return nullptr;
   }
   LayerOps::placeInLegendGroup(project, layer, QStringLiteral("참조 지도"));
+  LayerOps::applyThematicOverlayScaleRange(layer);
   if (canvas) {
     const QString workAuth = project->crs().isValid() ? project->crs().authid()
                                                       : QStringLiteral("EPSG:5186");

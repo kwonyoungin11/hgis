@@ -18,6 +18,7 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QWidget>
 
@@ -48,6 +49,8 @@ private slots:
     void geoTiffButtonAndCrsChoices();
     void referenceLineColorButtonExists();
     void scaleComboHasMoreSamples();
+    void sampleStripHasScaleBarTiles();
+    void emptyStateHintGuidesGeoTiffAdd();
 
 private:
     QgsProject* m_project = nullptr;
@@ -218,6 +221,43 @@ void TestSectionStudio::scaleComboHasMoreSamples()
     QVERIFY2(scaleCombo->findText(QStringLiteral("1:25")) >= 0, "missing 1:25");
     QVERIFY2(scaleCombo->findText(QStringLiteral("1:40")) >= 0, "missing 1:40");
     QVERIFY2(scaleCombo->findText(QStringLiteral("1:250")) >= 0, "missing 1:250");
+}
+
+void TestSectionStudio::sampleStripHasScaleBarTiles()
+{
+    KaSectionDrawingStudio studio(m_project);
+    auto* strip = studio.findChild<QWidget*>(QStringLiteral("sampleStrip"));
+    QVERIFY2(strip, "sampleStrip missing — 축척자 샘플은 용지가 아니라 샘플 구성에 둔다");
+
+    auto* dbl = studio.findChild<QToolButton*>(QStringLiteral("sampleScaleBarDouble"));
+    auto* sgl = studio.findChild<QToolButton*>(QStringLiteral("sampleScaleBarSingle"));
+    auto* tck = studio.findChild<QToolButton*>(QStringLiteral("sampleScaleBarTicks"));
+    QVERIFY2(dbl && sgl && tck, "쌍칸/외칸/눈금 sampleTile missing");
+    QVERIFY2(dbl->parentWidget() == strip, "Double Box sample must live on sampleStrip");
+    QVERIFY2(sgl->parentWidget() == strip, "Single Box sample must live on sampleStrip");
+    QVERIFY2(tck->parentWidget() == strip, "Line Ticks sample must live on sampleStrip");
+
+    auto* ly = dynamic_cast<QgsPrintLayout*>(
+        m_project->layoutManager()->layoutByName(QStringLiteral("section_sheet")));
+    QVERIFY(ly);
+    QVERIFY2(!ly->itemById(QStringLiteral("ka_section_scale_bar_single")),
+             "sample Single Box must not be a layout item");
+    QVERIFY2(!ly->itemById(QStringLiteral("ka_section_scale_bar_ticks")),
+             "sample Line Ticks must not be a layout item");
+    QVERIFY2(!ly->itemById(QStringLiteral("ka_section_scale_bar_numeric")),
+             "sample Numeric must not be a layout item");
+    QVERIFY2(ly->itemById(QStringLiteral("ka_section_scale_bar")),
+             "one working scale bar stays on the sheet");
+}
+
+void TestSectionStudio::emptyStateHintGuidesGeoTiffAdd()
+{
+    KaSectionDrawingStudio studio(m_project);
+    auto* hint = studio.findChild<QLabel*>(QStringLiteral("emptyState"));
+    QVERIFY2(hint, "empty GeoTIFF list must show QLabel#emptyState");
+    QVERIFY2(!hint->isHidden(), "empty-state hint must not be hidden before any section raster");
+    QVERIFY2(hint->text().contains(QStringLiteral("GeoTIFF")),
+             "hint must tell the field user to add a section GeoTIFF");
 }
 
 #include "test_section_studio.moc"

@@ -67,6 +67,14 @@ FEATURE must spawn the ship graph this turn, then ka-reviewer and ka-tester. QUI
 "@
 }
 
+# TDD: product C++ this turn without a tests/ write, then a done claim.
+if ($claimsDone -and (Test-KaTurnTouchesProductCpp) -and -not (Test-KaTurnHasTestWrite)) {
+  Emit-Block @"
+TDD ENGINEERING: this turn wrote src/app or src/core without a tests/ write first.
+Write a failing Qt Test, watch RED, then the smallest src patch. /ka-tdd
+"@
+}
+
 # LOOP: only this-turn product src, not leftover git dirty from another session.
 # Stamp only — quoting "ctest" in the reply is not evidence.
 if ($writes.Count -eq 0) { exit 0 }

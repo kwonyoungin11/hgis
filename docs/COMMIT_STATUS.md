@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-23 15:08:48 +09:00 |
+| Updated (local) | 2026-08-30 12:41:00 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `cursor/pro-drawing-and-map-services` |
-| HEAD short | `033fffa` |
-| HEAD full | `033fffaa24052dd30e1d02e9da767237d075ad15` |
-| HEAD date | 2026-08-23 08:44:29 +0900 |
-| HEAD author | kwonypungin <kyi25@nate.com> |
-| HEAD subject | Refresh COMMIT_STATUS after section studio ship. |
-| Total commits | 34 |
+| HEAD short | `ff8c099` |
+| HEAD full | `ff8c09934353c2301191d179fe6454a0013ee836` |
+| HEAD date | 2026-08-23 15:08:48 +0900 |
+| HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
+| HEAD subject | Ship 4K-safe VWorld satellite tiles and pending field GIS work for another machine. |
+| Total commits | 35 |
 | Upstream | `origin/cursor/pro-drawing-and-map-services` |
 | Sync | up to date with origin/cursor/pro-drawing-and-map-services |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (49 paths) |
+| Working tree dirty | **yes** (110 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Refresh COMMIT_STATUS after section studio ship. (`033fffa` @ 2026-08-23 08:44:29 +0900)
+- **Recorded tip when this file was written:** Ship 4K-safe VWorld satellite tiles and pending field GIS work for another machine. (`ff8c099` @ 2026-08-23 15:08:48 +0900)
 - **Remote sync at write time:** up to date with origin/cursor/pro-drawing-and-map-services
-- **Uncommitted local changes at write time:** yes (49 paths)
+- **Uncommitted local changes at write time:** yes (110 paths)
 
 ### Read this correctly
 
@@ -55,6 +55,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `ff8c099` | 2026-08-23T15:08:48+09:00 | Ship 4K-safe VWorld satellite tiles and pending field GIS work for another machine. |
 | `033fffa` | 2026-08-23T08:44:29+09:00 | Refresh COMMIT_STATUS after section studio ship. |
 | `bbec31e` | 2026-08-23T08:44:15+09:00 | Ship section drawing studio so Descartes GeoTIFF sheets can continue on another machine. |
 | `4a7f44d` | 2026-08-21T23:37:43+09:00 | Update Grok agent rules and hooks for the excavation GIS loop. |
@@ -84,59 +85,118 @@
 | `fedd10d` | 2026-08-09T18:53:49+09:00 | Add separate print layout editor window using QgsLayoutView. |
 | `15fc5a4` | 2026-08-09T18:53:48+09:00 | Align survey layer lifecycle with QGIS: empty legend until draw. |
 | `3129ef6` | 2026-08-09T18:53:46+09:00 | Harden digitize capture tool finish and keep drawing session. |
-| `ca3a77e` | 2026-08-09T18:53:44+09:00 | Fix domain layer symbology so digitized features render on canvas. |
 
 ## Staged in this commit
 
 ```
-M	.cursor/rules/grok-ka-hgis.mdc
-M	.grok/agents/ka-implementer.md
-M	.grok/agents/ka-tester.md
+M	.gitignore
+M	.grok/NOW.md
+A	.grok/agents/arcgis-expert.md
+A	.grok/agents/ka-color.md
+A	.grok/agents/ka-developer.md
+A	.grok/agents/ka-symbol.md
+A	.grok/agents/ka-ui.md
+A	.grok/agents/ka-ux.md
+A	.grok/agents/qgis-expert.md
+A	.grok/commands/ka-arcgis.md
+A	.grok/commands/ka-design.md
+A	.grok/commands/ka-developer.md
+A	.grok/commands/ka-predev.md
+A	.grok/commands/ka-qgis.md
+A	.grok/commands/ka-tdd.md
+A	.grok/commands/unlazy.md
 M	.grok/hooks/bin/excavation-loop.txt
-A	.grok/hooks/bin/graph-loop-state.ps1
+A	.grok/hooks/bin/experts-inject.ps1
+A	.grok/hooks/bin/experts-team.txt
+M	.grok/hooks/bin/graph-loop-state.ps1
 M	.grok/hooks/bin/post-tool.ps1
-A	.grok/hooks/bin/pre-tool-impl.ps1
-M	.grok/hooks/bin/pre-tool.ps1
-M	.grok/hooks/bin/prompt-inject.ps1
-A	.grok/hooks/bin/self-check-graph-loop.ps1
+M	.grok/hooks/bin/pre-tool-impl.ps1
+M	.grok/hooks/bin/self-check-graph-loop.ps1
+A	.grok/hooks/bin/self-check-hooks.ps1
+A	.grok/hooks/bin/self-check-unlazy.ps1
 M	.grok/hooks/bin/session-start.ps1
 M	.grok/hooks/bin/stop-gate.ps1
+A	.grok/hooks/bin/unlazy-stop.ps1
+A	.grok/hooks/experts-team.json
 M	.grok/hooks/ka-hgis.json
-M	.grok/hooks/orchestrator-protocol.json
-M	.grok/hooks/run.cmd
-M	.grok/hooks/scripts/orchestrator-stop-gate.ps1
+A	.grok/roles/arcgis-expert.toml
+A	.grok/roles/ka-color.toml
+A	.grok/roles/ka-developer.toml
+A	.grok/roles/ka-symbol.toml
+A	.grok/roles/ka-ui.toml
+A	.grok/roles/ka-ux.toml
+A	.grok/roles/qgis-expert.toml
 M	.grok/rules/00-grok-preset.md
 M	.grok/rules/00-orchestrator-protocol.md
+A	.grok/rules/21-predev.md
 M	.grok/rules/30-excavation-gis-loop.md
-A	.grok/rules/41-drawing-studio.md
-A	.grok/rules/50-graph-loop.md
-M	.grok/skills/gis-verify/SKILL.md
-A	.grok/skills/ka-drawing-studio/SKILL.md
+A	.grok/rules/32-tdd.md
+A	.grok/rules/33-gis-design.md
+A	.grok/rules/34-expert-team.md
+A	.grok/rules/35-desktop-icon.md
+M	.grok/rules/40-section-studio.md
+M	.grok/rules/50-graph-loop.md
+A	.grok/skills/ka-arcgis/SKILL.md
+A	.grok/skills/ka-design/SKILL.md
+A	.grok/skills/ka-developer/SKILL.md
 M	.grok/skills/ka-experts/SKILL.md
-A	.grok/skills/ka-georef-align/SKILL.md
 M	.grok/skills/ka-graph/SKILL.md
 M	.grok/skills/ka-hgis-verify/SKILL.md
-M	.grok/skills/ka-hgis/SKILL.md
-A	.grok/skills/ka-submit-package/SKILL.md
-M	.grok/skills/orchestrator-protocol/SKILL.md
-M	.grok/workflows/ka-ship.rhai
-M	.grok/workflows/ka-verify.rhai
+A	.grok/skills/ka-predev/SKILL.md
+A	.grok/skills/ka-qgis/SKILL.md
+A	.grok/skills/ka-tdd/SKILL.md
+A	.grok/skills/unlazy/.gitignore
+A	.grok/skills/unlazy/CHANGELOG.md
+A	.grok/skills/unlazy/CONTRIBUTING.md
+A	.grok/skills/unlazy/LICENSE
+A	.grok/skills/unlazy/README.md
+A	.grok/skills/unlazy/SECURITY.md
+A	.grok/skills/unlazy/SKILL.md
+A	.grok/skills/unlazy/package.json
+A	.grok/skills/unlazy/references/gates.md
+A	.grok/skills/unlazy/references/method.md
+A	.grok/skills/unlazy/references/orchestration.md
+A	.grok/skills/unlazy/references/parallel.md
+A	.grok/skills/unlazy/references/token-economy.md
+A	.grok/skills/unlazy/scripts/gate-check.mjs
+A	.grok/skills/unlazy/scripts/install-hooks.mjs
+A	.grok/skills/unlazy/scripts/lib/gates.mjs
+A	.grok/skills/unlazy/scripts/lib/regex-worker.mjs
+A	.grok/skills/unlazy/scripts/stop-hook.mjs
+A	.grok/skills/unlazy/templates/PLAN.md
+A	.grok/skills/unlazy/templates/gates-leaf.md
+A	.grok/skills/unlazy/templates/gates-node.md
+A	.grok/skills/unlazy/tests/hardening-tests.mjs
+A	.grok/skills/unlazy/tests/run-tests.mjs
+A	.grok/skills/unlazy/tests/self-check.mjs
+A	.grok/skills/unlazy/tests/stress-tests.mjs
 M	AGENTS.md
 M	HANDOFF.md
-M	dist/ka-hgis-portable/README.txt
+M	data/theme/ka-hgis.qss
+M	dist/ka-hgis-portable/data/theme/ka-hgis.qss
 M	dist/ka-hgis-portable/ka-hgis.exe
-A	"dist/ka-hgis-portable/\354\202\254\354\232\251\353\262\225.txt"
+M	docs/COMMIT_STATUS.md
 M	docs/HANDOFF.md
-M	scripts/make-portable.ps1
-M	src/app/KaApplication.cpp
+A	orca.yaml
+A	scripts/orca-worktree-setup.ps1
+A	scripts/publish-desktop.ps1
 M	src/app/KaDrawingStudio.cpp
+M	src/app/KaSectionDrawingStudio.cpp
+M	src/app/KaSectionDrawingStudio.h
+M	src/app/KaTheme.cpp
 M	src/app/MainWindow.cpp
-M	src/core/GeorefService.cpp
+M	src/core/GeologyMapService.cpp
 M	src/core/LayerOps.cpp
 M	src/core/LayerOps.h
+M	src/core/LayoutService.cpp
+M	src/core/LayoutService.h
+M	src/core/RiverMapService.cpp
 M	src/core/SectionLayoutService.cpp
-M	tests/test_georef.cpp
+M	src/core/SectionLayoutService.h
+M	src/core/SoilMapService.cpp
 M	tests/test_section_layout.cpp
+M	tests/test_section_studio.cpp
+M	tests/test_theme.cpp
 M	tests/test_workflow.cpp
 ```
 ## Other PC checklist

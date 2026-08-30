@@ -83,6 +83,7 @@ try {
 
   Reset-KaTurnState
   Add-KaTurnSrcWrite 'src/app/MainWindow.cpp'
+  Add-KaTurnSrcWrite 'tests/test_workflow.cpp'
   Add-KaTurnGraph 'ka-scout'
   # ASCII claim verbs — nested powershell stdin must not depend on console CP949.
   $out = Invoke-StopGate @{
@@ -93,6 +94,7 @@ try {
 
   Reset-KaTurnState
   Add-KaTurnSrcWrite 'src/app/MainWindow.cpp'
+  Add-KaTurnSrcWrite 'tests/test_workflow.cpp'
   Add-KaTurnGraph 'ka-tester'
   Set-KaVerifyStamp
   Start-Sleep -Milliseconds 20
@@ -130,6 +132,7 @@ try {
 
   Reset-KaTurnState
   Add-KaTurnSrcWrite 'src/app/MainWindow.cpp'
+  Add-KaTurnSrcWrite 'tests/test_workflow.cpp'
   $koDone = -join [char[]](0xC644, 0xB8CC, 0xD588, 0xC2B5, 0xB2C8, 0xB2E4)  # wan-ryo-haet-seum-ni-da
   $out = Invoke-StopGate @{
     reason = 'end_turn'

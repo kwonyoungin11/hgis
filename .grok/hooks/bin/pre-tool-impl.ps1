@@ -56,6 +56,12 @@ if ($norm -match '(^|/)src/(app|core)/' -and $blob.Contains($wipeFn + '(')) {
     Deny "Blocked map-layer wipe in src/app or src/core. loadSurveyLayers must drop domain layers only."
 }
 
+if ($tool -match '(?i)search_replace|write|edit' -and $norm -match '(^|/)src/(app|core)/') {
+    if (-not (Test-KaTurnHasTestWrite)) {
+        Deny "TDD ENGINEERING: write a failing test under tests/ this turn before src/app or src/core. /ka-tdd"
+    }
+}
+
 $cmd = ""
 if ($inputObj -and $inputObj.command) { $cmd = [string]$inputObj.command }
 if ($cmd -match 'rm\s+-rf\s+(/|\*)' -or $cmd -match 'Remove-Item\s+-Recurse\s+-Force\s+C:\\') {

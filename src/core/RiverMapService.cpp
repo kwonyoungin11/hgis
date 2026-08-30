@@ -47,9 +47,9 @@ struct LevelDef {
   int r, g, b;
 };
 constexpr LevelDef kLevels[] = {
-    {"국가", "국가하천", 42, 111, 176},
-    {"지방1급", "지방1급하천", 74, 141, 199},
-    {"지방2급", "지방2급하천", 120, 172, 215},
+    {"국가", "국가하천", 0, 126, 212},
+    {"지방1급", "지방1급하천", 16, 146, 222},
+    {"지방2급", "지방2급하천", 40, 166, 232},
 };
 
 int levelRank(const QString& levelText) {
@@ -63,13 +63,13 @@ int levelRank(const QString& levelText) {
 
 QgsSymbol* waterFillSymbol(const QColor& base) {
   QColor fill = base;
-  fill.setAlpha(185);
-  QColor line = base.darker(135);
-  line.setAlpha(220);
+  fill.setAlpha(230);
+  QColor line = base.darker(150);
+  line.setAlpha(255);
   auto fs = QgsFillSymbol::createSimple({
       {QStringLiteral("color"), fill.name(QColor::HexArgb)},
       {QStringLiteral("outline_color"), line.name(QColor::HexArgb)},
-      {QStringLiteral("outline_width"), QStringLiteral("0.18")},
+      {QStringLiteral("outline_width"), QStringLiteral("0.32")},
       {QStringLiteral("outline_width_unit"), QStringLiteral("MM")},
   });
   return fs.release();
@@ -179,11 +179,11 @@ bool RiverMapService::applyRiverStyle(QgsVectorLayer* layer) {
     const int rank = levelRank(lv);
     const QColor col = rank < int(std::size(kLevels))
                            ? QColor(kLevels[rank].r, kLevels[rank].g, kLevels[rank].b)
-                           : QColor(150, 190, 224);
+                           : QColor(120, 196, 236);
     if (QgsSymbol* sym = waterFillSymbol(col))
       cats.append(QgsRendererCategory(QVariant(lv), sym, lv));
   }
-  if (QgsSymbol* rest = waterFillSymbol(QColor(150, 190, 224)))
+  if (QgsSymbol* rest = waterFillSymbol(QColor(120, 196, 236)))
     cats.append(QgsRendererCategory(QVariant(), rest, QStringLiteral("기타 수계")));
   layer->setRenderer(
       new QgsCategorizedSymbolRenderer(QLatin1String(kLevelField), cats));
@@ -208,7 +208,7 @@ bool RiverMapService::applyRiverStyle(QgsVectorLayer* layer) {
     fmt.setFont(font);
     fmt.setSize(8);
     fmt.setSizeUnit(Qgis::RenderUnit::Points);
-    fmt.setColor(QColor(13, 84, 140));
+    fmt.setColor(QColor(0, 72, 186));
     QgsTextBufferSettings buf = fmt.buffer();
     buf.setEnabled(true);
     buf.setSize(0.7);
@@ -358,6 +358,7 @@ QgsVectorLayer* RiverMapService::downloadAndAdd(QgsProject* project, QgsMapCanva
     return nullptr;
   }
   LayerOps::placeInLegendGroup(project, layer, QStringLiteral("참조 지도"));
+  LayerOps::applyThematicOverlayScaleRange(layer);
   if (canvas) {
     const QString workAuth = project->crs().isValid() ? project->crs().authid()
                                                       : QStringLiteral("EPSG:5186");

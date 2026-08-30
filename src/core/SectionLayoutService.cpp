@@ -1,5 +1,7 @@
 #include "SectionLayoutService.h"
+#include "LayoutService.h"
 
+#include <QColor>
 #include <QDate>
 #include <QDir>
 #include <QFile>
@@ -25,6 +27,7 @@
 #include <qgslayoutitemmap.h>
 #include <qgslayoutitempage.h>
 #include <qgslayoutitempolyline.h>
+#include <qgsfillsymbol.h>
 #include <qgslayoutitemscalebar.h>
 #include <qgslayoutmanager.h>
 #include <qgslayoutmeasurement.h>
@@ -35,6 +38,7 @@
 #include <qgsmasterlayoutinterface.h>
 #include <qgsprintlayout.h>
 #include <qgsproject.h>
+#include <qgsvectorlayer.h>
 #include <qgsrasterdataprovider.h>
 #include <qgsrasterlayer.h>
 #include <qgsrasterrenderer.h>
@@ -575,7 +579,7 @@ SectionLayoutResult SectionLayoutService::buildSectionLayout(
     const double topM        = 10.0;  // 상단 여백
     const double rightM      = 8.0;
     const double bottomAxisH = 14.0;  // 거리 축 영역
-    const double infoH       = 12.0;  // 축척자·표제란·좌표계
+    const double infoH       = 20.0;  // 표제 + 교호식 축척자 한 줄 (A4 하단 여유)
 
     const double mapW_avail = W - leftAxisW - rightM;
     const double mapH_avail = H - topM - bottomAxisH - infoH;
@@ -668,6 +672,16 @@ SectionLayoutResult SectionLayoutService::buildSectionLayout(
             mapLayers.append(plane.src);
         }
     }
+    if (mapLayers.isEmpty()) {
+        const QString auth = mapCrs.isValid() ? mapCrs.authid()
+                                              : QStringLiteral("EPSG:5187");
+        auto* blank = new QgsVectorLayer(
+            QStringLiteral("Polygon?crs=%1").arg(auth),
+            QStringLiteral("ka_section_blank"),
+            QStringLiteral("memory"));
+        blank->setParent(layout);
+        mapLayers.append(blank);
+    }
 
     // 7. 지도 항목 (ka_section_map): extent 종횡비와 동일한 프레임 크기
     auto* map = new QgsLayoutItemMap(layout);
@@ -681,7 +695,6 @@ SectionLayoutResult SectionLayoutService::buildSectionLayout(
     map->setLayers(mapLayers);
     map->setKeepLayerSet(true);
     map->zoomToExtent(combinedExtent);
-    map->setExtent(combinedExtent);
 
     result.appliedScaleDenominator = map->scale();
     result.appliedExtent = map->extent();
@@ -689,7 +702,7 @@ SectionLayoutResult SectionLayoutService::buildSectionLayout(
     // 선 심볼 생성 헬퍼 (회색 얇은 선)
     auto makeGraySym = [](double widthMm) -> std::unique_ptr<QgsLineSymbol> {
         return QgsLineSymbol::createSimple({
-            {QStringLiteral("line_color"),      QStringLiteral("#555555")},
+            {QStringLiteral("line_color"),      QStringLiteral("#1F2937")},
             {QStringLiteral("line_width"),      QString::number(widthMm)},
             {QStringLiteral("line_width_unit"), QStringLiteral("MM")}
         });
@@ -729,8 +742,8 @@ SectionLayoutResult SectionLayoutService::buildSectionLayout(
         gridItem->setStartMarker(QgsLayoutItemPolyline::NoMarker);
         gridItem->setEndMarker(QgsLayoutItemPolyline::NoMarker);
         if (auto sym = QgsLineSymbol::createSimple({
-                {QStringLiteral("line_color"),      QStringLiteral("#888888")},
-                {QStringLiteral("line_width"),      QStringLiteral("0.08")},
+                {QStringLiteral("line_color"),      QStringLiteral("#374151")},
+                {QStringLiteral("line_width"),      QStringLiteral("0.12")},
                 {QStringLiteral("line_width_unit"), QStringLiteral("MM")}}))
             gridItem->setSymbol(sym.get());
         layout->addLayoutItem(gridItem);
@@ -804,28 +817,46 @@ SectionLayoutResult SectionLayoutService::buildSectionLayout(
         layout->addLayoutItem(refItem);
     }
 
-    // 11. 크롬: 축척자·표제·좌표계·축척
+    // 11. 크롬: 거리 눈금 바로 아래 왼쪽 축척자 하나. 샘플 스타일은 용지에 두지 않는다.
     const double chromeY = mapY + frameH + bottomAxisH;
 
-    // 표제란 (ka_section_title_block): 도면명 | 수직:표고(m) | 작성일
+    const int segs = 4;
+    const double denom = (map->scale() > 0.0) ? map->scale() : scaleDenom;
+    const double segM = LayoutService::niceScaleBarSegmentMeters(frameW, denom, segs);
+    double barW = LayoutService::scaleBarWidthMm(segM, segs, denom);
+    barW = std::clamp(barW, 40.0, std::min(160.0, std::max(40.0, frameW)));
+    const double barY = chromeY + 0.4;
+    const double barH = 11.5;
+    const QString barStyle = options.scaleBarStyle.isEmpty()
+        ? QStringLiteral("Double Box") : options.scaleBarStyle;
+
     {
-        const QString title = options.titleKo.isEmpty()
-            ? QStringLiteral("단면도") : options.titleKo;
-        const QString date  = QDate::currentDate().toString(QStringLiteral("yyyy-MM-dd"));
-        auto* lbl = new QgsLayoutItemLabel(layout);
-        lbl->setId(QStringLiteral("ka_section_title_block"));
-        lbl->setText(QStringLiteral("%1  |  수직: 표고(m)  |  작성일: %2").arg(title, date));
-        lbl->setHAlign(Qt::AlignLeft);
-        lbl->setVAlign(Qt::AlignVCenter);
-        lbl->attemptSetSceneRect(QRectF(mapX, chromeY + 0.5, frameW * 0.45, 7.0));
-        QFont f(QStringLiteral("Malgun Gothic"));
-        f.setPointSize(7);
-        f.setBold(true);
-        lbl->setFont(f);
-        layout->addLayoutItem(lbl);
+        auto* sb = new QgsLayoutItemScaleBar(layout);
+        sb->setId(QStringLiteral("ka_section_scale_bar"));
+        layout->addLayoutItem(sb);
+        sb->setLinkedMap(map);
+        sb->setStyle(barStyle);
+        sb->setUnits(Qgis::DistanceUnit::Meters);
+        sb->setUnitLabel(QStringLiteral("m"));
+        sb->setNumberOfSegments(segs);
+        sb->setNumberOfSegmentsLeft(0);
+        sb->setHeight(2.4);
+        sb->setLabelBarSpace(1.0);
+        sb->setBoxContentSpace(0.6);
+        sb->setLabelVerticalPlacement(
+            Qgis::ScaleBarDistanceLabelVerticalPlacement::AboveSegment);
+        sb->setSegmentSizeMode(Qgis::ScaleBarSegmentSizeMode::Fixed);
+        if (segM > 0.0)
+            sb->setUnitsPerSegment(segM);
+        QgsTextFormat sbFmt;
+        sbFmt.setFont(QFont(QStringLiteral("Malgun Gothic")));
+        sbFmt.setSize(7.0);
+        sbFmt.setSizeUnit(Qgis::RenderUnit::Points);
+        sb->setTextFormat(sbFmt);
+        LayoutService::applySheetScaleBarInk(sb);
+        sb->attemptSetSceneRect(QRectF(mapX, barY, barW, barH));
     }
 
-    // 축척 레이블 (ka_section_scale)
     {
         const long long sd = result.appliedScaleDenominator > 0.5
             ? static_cast<long long>(std::lround(result.appliedScaleDenominator)) : 0LL;
@@ -836,14 +867,13 @@ SectionLayoutResult SectionLayoutService::buildSectionLayout(
             : QStringLiteral("S = 1:N"));
         lbl->setHAlign(Qt::AlignLeft);
         lbl->setVAlign(Qt::AlignVCenter);
-        lbl->attemptSetSceneRect(QRectF(mapX + frameW * 0.45, chromeY + 0.5, 40.0, 7.0));
+        lbl->attemptSetSceneRect(QRectF(mapX + barW + 4.0, barY + 1.5, 40.0, 9.0));
         QFont f(QStringLiteral("Malgun Gothic"));
         f.setPointSize(7);
         lbl->setFont(f);
         layout->addLayoutItem(lbl);
     }
 
-    // 좌표계 레이블 (ka_section_crs)
     {
         const QString crsId = titleCrsId.isEmpty() ? QStringLiteral("-") : titleCrsId;
         auto* lbl = new QgsLayoutItemLabel(layout);
@@ -851,47 +881,29 @@ SectionLayoutResult SectionLayoutService::buildSectionLayout(
         lbl->setText(crsId);
         lbl->setHAlign(Qt::AlignLeft);
         lbl->setVAlign(Qt::AlignVCenter);
-        lbl->attemptSetSceneRect(QRectF(mapX + frameW * 0.45 + 42.0, chromeY + 0.5, 60.0, 7.0));
+        lbl->attemptSetSceneRect(QRectF(mapX + barW + 46.0, barY + 1.5, 70.0, 9.0));
         QFont f(QStringLiteral("Malgun Gothic"));
         f.setPointSize(7);
         lbl->setFont(f);
         layout->addLayoutItem(lbl);
     }
 
-    auto addScaleBar = [&](const QString& id, const QString& style,
-                           const QRectF& rect) {
-        auto* sb = new QgsLayoutItemScaleBar(layout);
-        sb->setId(id);
-        layout->addLayoutItem(sb);
-        sb->setLinkedMap(map);
-        sb->setStyle(style);
-        sb->setUnits(Qgis::DistanceUnit::Meters);
-        sb->setUnitLabel(QStringLiteral("m"));
-        sb->setNumberOfSegments(4);
-        sb->setNumberOfSegmentsLeft(0);
-        sb->setHeight(2.4);
-        if (!combinedExtent.isEmpty())
-            sb->applyDefaultSize(Qgis::DistanceUnit::Meters);
-        QgsTextFormat sbFmt;
-        sbFmt.setFont(QFont(QStringLiteral("Malgun Gothic")));
-        sbFmt.setSize(6.0);
-        sbFmt.setSizeUnit(Qgis::RenderUnit::Points);
-        sb->setTextFormat(sbFmt);
-        sb->attemptSetSceneRect(rect);
-    };
-
-    addScaleBar(QStringLiteral("ka_section_scale_bar"),
-                QStringLiteral("Double Box"),
-                QRectF(W - rightM - 68.0, chromeY + 1.0, 66.0, 9.0));
-    addScaleBar(QStringLiteral("ka_section_scale_bar_single"),
-                QStringLiteral("Single Box"),
-                QRectF(leftAxisW, 1.5, 66.0, 8.0));
-    addScaleBar(QStringLiteral("ka_section_scale_bar_ticks"),
-                QStringLiteral("Line Ticks Up"),
-                QRectF(leftAxisW + 70.0, 1.5, 66.0, 8.0));
-    addScaleBar(QStringLiteral("ka_section_scale_bar_numeric"),
-                QStringLiteral("Numeric"),
-                QRectF(leftAxisW + 140.0, 1.5, 50.0, 8.0));
+    {
+        const QString title = options.titleKo.isEmpty()
+            ? QStringLiteral("단면도") : options.titleKo;
+        const QString date  = QDate::currentDate().toString(QStringLiteral("yyyy-MM-dd"));
+        auto* lbl = new QgsLayoutItemLabel(layout);
+        lbl->setId(QStringLiteral("ka_section_title_block"));
+        lbl->setText(QStringLiteral("%1  |  수직: 표고(m)  |  작성일: %2").arg(title, date));
+        lbl->setHAlign(Qt::AlignLeft);
+        lbl->setVAlign(Qt::AlignVCenter);
+        lbl->attemptSetSceneRect(QRectF(mapX, chromeY + 13.2, frameW, 6.0));
+        QFont f(QStringLiteral("Malgun Gothic"));
+        f.setPointSize(7);
+        f.setBold(true);
+        lbl->setFont(f);
+        layout->addLayoutItem(lbl);
+    }
 
     result.layoutName = kName;
     return result;

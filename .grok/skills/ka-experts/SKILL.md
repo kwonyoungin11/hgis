@@ -21,6 +21,10 @@ The parent **orchestrates**. Experts **do the work**. Do not sit in one context 
 | `debug` | `ka-debugger` + `ka-scout` + `qgis-api` if map | implement only after cause is named |
 | `architecture` | `ka-architect` + `plan` | wait for user before large edits |
 | `verify` | `ka-tester` | no implement |
+| expert team | `arcgis-expert` + `qgis-expert` then `ka-developer` | TDD then implement |
+| `design` | `ka-color` + `ka-symbol` + `ka-ui` + `ka-ux` | always with develop/fix |
+
+Every develop/fix also spawns the **expert team** and **designers**, then TDD RED, then `ka-developer`.
 
 If the user only says 전문가소환 / 소환 with a task, choose `ship` unless the text is a map bug (`gis`) or a crash/build failure (`debug`).
 

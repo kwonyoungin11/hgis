@@ -11,6 +11,36 @@ Cursor에서 Grok Build로 이 대화를 이을 때 **이 파일을 먼저** 읽
 - 실행: `.\scripts\run-ka-hgis.ps1` (exe를 직접 켜지 말 것)
 - 답변: 한국어. UI 문자열: 한국어. 식별자: 영어
 
+## 지금 (2026-08-24 Orca)
+
+작업 트리 설정: `orca.yaml` `scripts.setup` → `scripts/orca-worktree-setup.ps1` (OSGeo + CMake, build/ 공유 금지).
+Orca 프로젝트 훅: 기본적으로 실행, agent 전에 설정 완료 대기 (`wait-for-setup`).
+커밋 금지.
+
+## 지금 (2026-08-24 최적화)
+
+단면도 맵: `zoomToExtent`만 ( `setExtent` 제거 ). 빈 GeoTIFF는 `ka_section_blank` 메모리 폴리곤 — `setLayers({})` 금지. 축척자 눈금 잉크 `#111827` 0.30 mm. QSS 메인툴바 구분선·emptyState 점선 웰.
+되돌리기: 이전 백업 `refs/backup/pre-uiux-opt-20260824` 또는 `.unlazy\uiux-opt\restore.ps1`
+바탕화면 아이콘으로 빈 단면도(눈금만, 위성 없음) 확인. 커밋 금지.
+
+## 지금 (2026-08-24 UI/UX 패스)
+
+되돌리기: `powershell -File .unlazy\uiux-opt\restore.ps1` 또는 `git restore --source=refs/backup/pre-uiux-opt-20260824 -- data/theme src/app src/core tests`
+기능 유지. 바뀐 것: 축척자 잉크 `#111827/#FFFFFF`, 단면 빈 GeoTIFF 안내, 표고 격자 `#374151`, 조판 열 때 좌표점 자동 시작 제거, QSS sampleTile:checked.
+바탕화면 **고고학 전용 HGIS**로 확인. 커밋 금지.
+
+## 지금 (2026-08-24 감사)
+
+`/unlazy` 완료 여부: **미커밋 조각은 코드상 닫힘, 제품 백로그는 열림.**
+원장 `.unlazy/ka-hgis/GATES.md` — 6 met / 1 abandoned (G6 바탕화면 클릭) / 0 unmet.
+열린 것: `layout_exists` 빈 자동조판, `SectionLayoutService` `setExtent` after `zoomToExtent`, 빈 `setLayers({})`, 커밋은 사용자 지시 후.
+테스트 구멍: 표고 보정·원본 `setCrs`/`setDpi` 금지·PDF 300/벡터·미리보기 Nearest·GeoTIFF 추가 경로. 색: 평면도 축척자 fill 미잠금, 단면 눈금 스타일 위성에서 증발, 표고 격자 `#888888`.
+
+## 지금 (2026-08-23)
+
+- 전문가팀 상시: `arcgis-expert` ∥ `qgis-expert` then `ka-developer` + 디자이너 4. 훅 `.grok/hooks/experts-team.json`. TDD `32-tdd.md`. 사전설정 `21-predev.md`.
+- 단면 축척자: 샘플 4개 제거, 교호식 Double Box 하나 (`ka_section_scale_bar`), Fixed 세그먼트, 지도 아래 좌측.
+
 ## 단면도 — 완료 (다시 만들지 말 것)
 
 Bentley Descartes 단면 GeoTIFF(X=거리, Y=표고) → A3/A4 가로 조판 → 벡터 PDF.

@@ -1463,7 +1463,6 @@ void MainWindow::openLayoutDesigner() {
     hideSubTools();
     m_drawingStudio->refreshMapFromProject();
     m_drawingStudio->centerOnMapCanvas();
-    m_drawingStudio->beginPlaceCoordPoint();
     return;
   }
   double w = 297.0, h = 210.0;
@@ -1483,8 +1482,7 @@ void MainWindow::openLayoutDesigner() {
   hideSubTools();
   m_drawingStudio->refreshMapFromProject();
   m_drawingStudio->centerOnMapCanvas();
-  m_drawingStudio->beginPlaceCoordPoint();
-  statusBar()->showMessage(QStringLiteral("조판에서 꼭짓점을 찍어 좌표를 만드세요."), 6000);
+  statusBar()->showMessage(QStringLiteral("조판입니다. 좌표점은 용지 아래 아이콘으로 찍습니다."), 6000);
 #endif
 }
 
@@ -4742,6 +4740,8 @@ void MainWindow::importSoilShapefile() {
 void MainWindow::downloadSoilTerrain() {
 #if KA_HGIS_HAS_QGIS
   if (!m_canvas) return;
+  if (LayerOps::clampCanvasToThematicScale(m_canvas))
+    statusBar()->showMessage(QStringLiteral("축척을 1:100000으로 맞춘 뒤 토양도를 받습니다."), 4000);
 
   QgsRectangle ext = m_canvas->extent();
   const QgsCoordinateReferenceSystem crs5186(QStringLiteral("EPSG:5186"));
@@ -4805,6 +4805,8 @@ void MainWindow::downloadSoilTerrain() {
 void MainWindow::downloadGeologyMap() {
 #if KA_HGIS_HAS_QGIS
   if (!m_canvas) return;
+  if (LayerOps::clampCanvasToThematicScale(m_canvas))
+    statusBar()->showMessage(QStringLiteral("축척을 1:100000으로 맞춘 뒤 지질도를 받습니다."), 4000);
 
   QgsRectangle ext = m_canvas->extent();
   const QgsCoordinateReferenceSystem crs5186(QStringLiteral("EPSG:5186"));
@@ -4867,6 +4869,8 @@ void MainWindow::downloadGeologyMap() {
 void MainWindow::downloadRiverMap() {
 #if KA_HGIS_HAS_QGIS
   if (!m_canvas) return;
+  if (LayerOps::clampCanvasToThematicScale(m_canvas))
+    statusBar()->showMessage(QStringLiteral("축척을 1:100000으로 맞춘 뒤 수계도를 받습니다."), 4000);
 
   const QString key = VworldSettings::loadApiKey();
   if (key.trimmed().isEmpty()) {

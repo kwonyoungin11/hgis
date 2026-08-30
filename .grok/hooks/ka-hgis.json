@@ -65,6 +65,11 @@
             "type": "command",
             "command": "cmd.exe /d /c .grok\\hooks\\run.cmd stop-gate",
             "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "cmd.exe /d /c .grok\\hooks\\run.cmd unlazy-stop",
+            "timeout": 20
           }
         ]
       }

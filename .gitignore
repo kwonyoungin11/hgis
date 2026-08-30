@@ -39,6 +39,10 @@ Desktop.ini
 .repowise/
 .mcp.json
 .grok/.state/
+.unlazy/
+.unlazy-hook-state.json
+unlazy-status.log
+/GATES.md
 
 # Logs & local DBs
 *.log

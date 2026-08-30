@@ -11,9 +11,11 @@ no fork, no removeAllMapLayers, no empty domain auto-add, no VWorld key, no DXF,
 2) MCP: GIS/API/FEATURE면 sequential-thinking + context7 (GetDynamicTools→Call).
    없으면 한 줄 고백 후 docs/vendor/qgis-manual-3.44/ + docs.qgis.org + api.qgis.org.
    USER COMMAND WINS. Qgs* 창작 금지.
-3) GRAPH 하나: QUICK=부모. gis=qgis-api||gis-protocol||field-check.
-   ship=scout app||core → implementer → reviewer → tester.
+3) GRAPH 하나 + 전문가팀 항상: QUICK=부모(타이포만).
+   전문가팀: arcgis-expert||qgis-expert → ka-developer. 디자이너: ka-color||ka-symbol||ka-ui||ka-ux.
+   gis=qgis-api||gis-protocol||field-check. ship=scout → implementer → reviewer → tester.
    debug=debugger||scout||qgis-api. architecture=architect+plan 후 대기.
+   TDD: tests/ RED 먼저, 그 다음 src/. 개발사전설정 21-predev.
    Cursor=Task 실호출(접두 [ka-…], 스카우트 explore / 구현 generalPurpose / 검증 shell).
    또는 spawn_subagent|/workflow ka-ship. 서술 소환 금지.
    워커: TASK/EXPECTED OUTCOME/MUST DO/MUST NOT DO/CONTEXT(불변식).
@@ -23,5 +25,6 @@ no fork, no removeAllMapLayers, no empty domain auto-add, no VWorld key, no DXF,
    예전 더티 src·docs/hooks only = 빌드 하지 말 것. C++ FEATURE 후 ka-tester. 부모 자체인증 금지.
 5) CROSS-CHECK: digitize / legend / layout / export 5179. 현장 불가면 완료 금지.
 6) MEMORY: 좌표점은 조판만. 맵↔조판은 축척 유지, 중심만 이동.
+7) 바탕화면 아이콘 확인: C++/UI 빌드 후 scripts/publish-desktop.ps1. 아이콘=dist/ka-hgis-portable. build/Release만으로 완료 금지.
 
 보내기 전: skill Read / graph 이름 / 소환 툴 / API 추측 없음 / 루프 증거. NO면 툴부터.

@@ -37,6 +37,7 @@ Prefer `.\scripts\build-now.ps1` only when the tree is already configured for Ni
 6. Do not claim success from a previous turn's log.
 7. After a green cmake/ctest, write `.grok/.state/last-verify` (ISO timestamp). Post-tool also stamps when those commands run.
 8. Leftover dirty `src/` from another session is **not** a reason to cmake on a research turn.
+9. After a product C++/UI/QSS build: `.\scripts\publish-desktop.ps1` so the desktop icon (`dist\ka-hgis-portable`) has the same exe. Ask the user to click **고고학 전용 HGIS**. See `.grok/rules/35-desktop-icon.md`.
 
 ## Fail closed
 

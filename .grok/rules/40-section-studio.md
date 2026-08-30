@@ -35,5 +35,6 @@ Preview 300 DPI, Nearest (사진실측 1:1), no tiled raster.
   (no legend, no canvas zoom).
 - Opening the tab shows paper + ticks. Adding a GeoTIFF rebuilds to that extent.
 - Default: A3 landscape, CRS 5187, scale auto (0), elev interval 0.10 m, ref line `#D7191C` dash 0.20 mm.
+- Scale bar: **one** `QgsLayoutItemScaleBar` id `ka_section_scale_bar` on the sheet, left-aligned under the distance ticks (0 m). Styles (쌍칸/외칸/눈금) live on `#sampleStrip` sample tiles, not as extra layout items. No `_single` / `_ticks` / `_numeric` on paper.
 - PDF: `SectionLayoutService::exportSectionPdf` (300 DPI, forceVector, AlwaysText).
 - Do not migrate `section_line`. Do not overwrite uncommitted `KaDrawingStudio` / `LayoutService` / `test_workflow`.

@@ -1,0 +1,3 @@
+description = "ka-hgis symbol designer — read-only"
+default_capability_mode = "read-only"
+reasoning_effort = "xhigh"

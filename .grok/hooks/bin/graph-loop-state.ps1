@@ -103,6 +103,22 @@ function Test-KaVerifyStampNewerThanWrites {
   return $true
 }
 
+function Test-KaTurnHasTestWrite {
+  foreach ($w in @(Get-KaTurnSrcWrites)) {
+    $n = $w -replace '\\', '/'
+    if ($n -match '(^|/)tests/') { return $true }
+  }
+  return $false
+}
+
+function Test-KaTurnTouchesProductCpp {
+  foreach ($w in @(Get-KaTurnSrcWrites)) {
+    $n = $w -replace '\\', '/'
+    if ($n -match '(^|/)src/(app|core)/') { return $true }
+  }
+  return $false
+}
+
 function Test-KaTurnTouchesAppAndCore {
   $writes = Get-KaTurnSrcWrites
   $app = $false
@@ -128,7 +144,7 @@ function Test-KaKnownGraphSpawn {
   $graph = @(Get-KaTurnGraph)
   foreach ($g in $graph) {
     $n = [string]$g
-    if ($n -match '^(ka-scout|ka-implementer|ka-reviewer|ka-tester|ka-debugger|ka-architect|qgis-api|gis-protocol|field-check|workflow|ka-ship|ka-council|ka-verify)$') {
+    if ($n -match '^(ka-scout|ka-implementer|ka-reviewer|ka-tester|ka-debugger|ka-architect|qgis-api|qgis-expert|gis-protocol|field-check|arcgis-expert|ka-developer|ka-color|ka-symbol|ka-ui|ka-ux|designer|document-specialist|workflow|ka-ship|ka-council|ka-verify)$') {
       return $true
     }
   }

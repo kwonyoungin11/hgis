@@ -1,0 +1,8 @@
+[EXPERT TEAM — every develop/fix. Hooks ON.]
+Team this turn (spawn, do not narrate):
+  arcgis-expert ∥ qgis-expert   then ka-developer
+  + designers: ka-color ∥ ka-symbol ∥ ka-ui ∥ ka-ux
+Predev: sequential-thinking + context7; English official QGIS+ArcGIS sites; small plan.
+TDD: failing tests/ FIRST, then src/. /ka-tdd /ka-predev /ka-design /ka-arcgis /ka-qgis
+Rules: .grok/rules/21-predev.md 32-tdd.md 33-gis-design.md 34-expert-team.md
+No ArcMap chrome. No invented Qgs*. Export 5179. No fork.

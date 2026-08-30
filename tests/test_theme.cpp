@@ -16,6 +16,7 @@ private slots:
   void requiredSelectorsPresent();
   void noCheapSpinArrowBlock();
   void noCatchAllWidgetRules();
+  void chromeFontIsFieldKorean();
 };
 
 void TestTheme::tokensMatchSpec() {
@@ -70,6 +71,12 @@ void TestTheme::requiredSelectorsPresent() {
       "QPushButton:checked",
       "QPushButton#btnAdjustDone",
       "QToolButton.sampleTile",
+      "QToolButton.sampleTile:checked",
+      "QLabel#emptyState",
+      "QToolBar#mainToolbar::separator",
+      "QTableWidget",
+      "QDialogButtonBox",
+      "QWidget#startPage",
   };
   for (const char* sel : need) {
     QVERIFY2(qss.contains(QLatin1String(sel)), sel);
@@ -88,6 +95,22 @@ void TestTheme::noCatchAllWidgetRules() {
       QStringLiteral(R"((^|[\n{;])\s*(QWidget|QGraphicsView|QFrame)\s*\{)"));
   QVERIFY2(!banned.match(qss).hasMatch(),
            "no ID-less QWidget / QGraphicsView / QFrame rules");
+}
+
+void TestTheme::chromeFontIsFieldKorean() {
+  const QString qss = KaTheme::embeddedStyleSheet();
+  const QRegularExpression face(
+      QStringLiteral(R"(QMainWindow,[\s\S]*?font-family:\s*"Malgun Gothic")"));
+  QVERIFY2(face.match(qss).hasMatch(),
+           "window face must lead with Malgun Gothic (field Korean UI)");
+  QVERIFY2(!qss.contains(QLatin1String("font-family: \"Pretendard GOV\"")),
+           "do not lead chrome with an unshipped Pretendard family");
+  QVERIFY2(!qss.contains(QLatin1String("QToolBar#studioToolRail QToolButton")) ||
+               !QRegularExpression(QStringLiteral(
+                    R"(QToolBar#studioToolRail QToolButton[\s\S]*?font-size:\s*10px)"))
+                    .match(qss)
+                    .hasMatch(),
+           "studio tool rail must not use 10px type");
 }
 
 QTEST_GUILESS_MAIN(TestTheme)
