@@ -4759,8 +4759,9 @@ void MainWindow::downloadSoilTerrain() {
   if (ext.width() > SoilMapService::maxSpanMeters() ||
       ext.height() > SoilMapService::maxSpanMeters()) {
     notify(Notice::Warning, QStringLiteral("토양도"),
-           QStringLiteral("범위가 너무 넓습니다. 지도를 조사지역(한 변 20km 이하)으로 "
-                          "확대한 뒤 다시 내려받으세요."));
+           QStringLiteral("범위가 너무 넓습니다. 지도를 조사지역(한 변 %1km 이하)으로 "
+                          "확대한 뒤 다시 내려받으세요.")
+               .arg(SoilMapService::maxSpanMeters() / 1000.0, 0, 'f', 0));
     return;
   }
 
@@ -4824,8 +4825,9 @@ void MainWindow::downloadGeologyMap() {
   if (ext.width() > GeologyMapService::maxSpanMeters() ||
       ext.height() > GeologyMapService::maxSpanMeters()) {
     notify(Notice::Warning, QStringLiteral("지질도"),
-           QStringLiteral("범위가 너무 넓습니다. 지도를 조사지역(한 변 20km 이하)으로 "
-                          "확대한 뒤 다시 내려받으세요."));
+           QStringLiteral("범위가 너무 넓습니다. 지도를 조사지역(한 변 %1km 이하)으로 "
+                          "확대한 뒤 다시 내려받으세요.")
+               .arg(GeologyMapService::maxSpanMeters() / 1000.0, 0, 'f', 0));
     return;
   }
 
@@ -4896,8 +4898,9 @@ void MainWindow::downloadRiverMap() {
   if (ext.width() > RiverMapService::maxSpanMeters() ||
       ext.height() > RiverMapService::maxSpanMeters()) {
     notify(Notice::Warning, QStringLiteral("수계도"),
-           QStringLiteral("범위가 너무 넓습니다. 지도를 조사지역(한 변 40km 이하)으로 "
-                          "확대한 뒤 다시 내려받으세요."));
+           QStringLiteral("범위가 너무 넓습니다. 지도를 조사지역(한 변 %1km 이하)으로 "
+                          "확대한 뒤 다시 내려받으세요.")
+               .arg(RiverMapService::maxSpanMeters() / 1000.0, 0, 'f', 0));
     return;
   }
 

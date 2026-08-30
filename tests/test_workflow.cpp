@@ -65,6 +65,8 @@ private slots:
   void geologyEraLegend_icsColorsAndStyle();
   void riverLevelLegend_waterStyleAndNameLabels();
   void thematicMapsScaleRangeTo1in100000();
+  void thematicDownloadMaxSpanFourTimesPrior();
+  void thematicDownloadCovers1in10000Drawing();
   void sectionLineKeepsMagentaWithHalo();
   void featurePolyStrokeDarkerOnSatellite();
   void exportPackagePrefersUserSheetPdf();
@@ -464,6 +466,38 @@ void TestWorkflow::riverLevelLegend_waterStyleAndNameLabels() {
   QgsVectorLayer noField(QStringLiteral("MultiPolygon?crs=EPSG:5186"),
                          QStringLiteral("nofield"), QStringLiteral("memory"));
   QVERIFY(!RiverMapService::applyRiverStyle(&noField));
+}
+
+void TestWorkflow::thematicDownloadMaxSpanFourTimesPrior() {
+  // Prior caps: soil/geology 20 km, river 40 km. Field request: 4x linear span.
+  QCOMPARE(SoilMapService::maxSpanMeters(), 80000.0);
+  QCOMPARE(GeologyMapService::maxSpanMeters(), 80000.0);
+  QCOMPARE(RiverMapService::maxSpanMeters(), 160000.0);
+}
+
+void TestWorkflow::thematicDownloadCovers1in10000Drawing() {
+  // 1:10000 A3 landscape is 4.2 km x 2.97 km. Fetch must grow to maxSpan
+  // around the view so a 만분일 도면 still has geology/soil/river coverage.
+  const QgsRectangle view(200000.0, 450000.0, 204200.0, 452970.0);
+  QCOMPARE(view.width(), 4200.0);
+  const QgsRectangle soil =
+      LayerOps::expandExtentToMaxSpan(view, SoilMapService::maxSpanMeters());
+  QVERIFY2(qAbs(qMax(soil.width(), soil.height()) - 80000.0) < 1.0,
+           "soil/geology envelope grows to 80 km");
+  QVERIFY(qAbs(soil.center().x() - view.center().x()) < 1.0);
+  QVERIFY(qAbs(soil.center().y() - view.center().y()) < 1.0);
+  QVERIFY2(soil.contains(view), "1:10000 view stays inside the download envelope");
+
+  const QgsRectangle river =
+      LayerOps::expandExtentToMaxSpan(view, RiverMapService::maxSpanMeters());
+  QVERIFY2(qAbs(qMax(river.width(), river.height()) - 160000.0) < 1.0,
+           "river envelope grows to 160 km");
+
+  const QgsRectangle tooWide(0.0, 0.0, 90000.0, 10000.0);
+  const QgsRectangle kept =
+      LayerOps::expandExtentToMaxSpan(tooWide, SoilMapService::maxSpanMeters());
+  QCOMPARE(kept.width(), tooWide.width());
+  QCOMPARE(kept.height(), tooWide.height());
 }
 
 void TestWorkflow::thematicMapsScaleRangeTo1in100000() {

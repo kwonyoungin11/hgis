@@ -238,8 +238,10 @@ QgsVectorLayer* RiverMapService::downloadAndAdd(QgsProject* project, QgsMapCanva
           "VWorld 인증키가 없습니다. 지도 탭의 배경지도 설정에서 키를 먼저 등록하세요.");
     return nullptr;
   }
-  if (extent5186.isEmpty() || extent5186.width() > maxSpanMeters() ||
-      extent5186.height() > maxSpanMeters()) {
+  const QgsRectangle fetch5186 =
+      LayerOps::expandExtentToMaxSpan(extent5186, maxSpanMeters());
+  if (fetch5186.isEmpty() || fetch5186.width() > maxSpanMeters() ||
+      fetch5186.height() > maxSpanMeters()) {
     if (errorOut)
       *errorOut = QStringLiteral(
           "범위가 너무 넓습니다. 지도를 조사지역(한 변 %1km 이하)으로 확대한 뒤 다시 "
@@ -253,7 +255,7 @@ QgsVectorLayer* RiverMapService::downloadAndAdd(QgsProject* project, QgsMapCanva
     const QgsCoordinateTransform tr(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")),
                                     QgsCoordinateReferenceSystem(QStringLiteral("EPSG:4326")),
                                     QgsCoordinateTransformContext());
-    ext4326 = tr.transformBoundingBox(extent5186);
+    ext4326 = tr.transformBoundingBox(fetch5186);
   } catch (const QgsException&) {
     if (errorOut) *errorOut = QStringLiteral("좌표 변환에 실패했습니다.");
     return nullptr;

@@ -27,6 +27,6 @@ public:
   // 하천 등급(국가하천/지방1급/지방2급)별 물색 범례 + 하천명 라벨을 입힌다.
   static bool applyRiverStyle(QgsVectorLayer* layer);
 
-  // 수계도는 유역 맥락이 필요해 지질도보다 넓게 허용한다.
-  static double maxSpanMeters() { return 40000.0; }
+  // 수계도는 유역 맥락이 필요해 지질도보다 넓게 허용한다(기존 40 km의 4배).
+  static double maxSpanMeters() { return 160000.0; }
 };

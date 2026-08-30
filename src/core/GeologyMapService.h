@@ -38,5 +38,5 @@ public:
   static bool applyGeologyStyle(QgsVectorLayer* layer,
                                 const QHash<QString, QColor>& officialColors = {});
 
-  static double maxSpanMeters() { return 20000.0; }
+  static double maxSpanMeters() { return 80000.0; }
 };

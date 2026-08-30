@@ -24,6 +24,9 @@ public:
   static constexpr double kThematicMinScaleDenom = 100000.0;
   static void applyThematicOverlayScaleRange(QgsMapLayer* layer);
   static bool clampCanvasToThematicScale(QgsMapCanvas* canvas);
+  /// Grow a 5186 envelope around its center until the longer side equals
+  /// maxSpanMeters. Too-large envelopes are returned unchanged (caller rejects).
+  static QgsRectangle expandExtentToMaxSpan(const QgsRectangle& extent, double maxSpanMeters);
 
   static void setAlignPending(QgsMapLayer* layer, bool pending);
   static bool isAlignPending(const QgsMapLayer* layer);

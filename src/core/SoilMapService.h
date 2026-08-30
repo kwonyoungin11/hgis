@@ -20,6 +20,7 @@ public:
   // extent(EPSG:5186) 범위의 토양 폴리곤을 내려받아 outGpkgPath에 저장하고
   // 프로젝트 「참조 지도」 그룹에 추가한다. 성공 시 추가된 레이어를 반환.
   // 넓은 범위(한 변 maxSpanMeters 초과)는 서버 부담을 피하려 거부한다.
+  // 한 변은 기존 20 km의 4배(80 km). 1:100000 화면(~50 km)도 받게 한다.
   static QgsVectorLayer* downloadAndAdd(QgsProject* project, QgsMapCanvas* canvas,
                                         const QgsRectangle& extent5186,
                                         const QString& outGpkgPath,
@@ -32,5 +33,5 @@ public:
   // soil_type_geo 필드 기준으로 공식 분포지형 색을 입힌다(폴리곤 레이어).
   static bool applyTerrainStyle(QgsVectorLayer* layer);
 
-  static double maxSpanMeters() { return 20000.0; }
+  static double maxSpanMeters() { return 80000.0; }
 };

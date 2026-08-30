@@ -650,6 +650,20 @@ bool LayerOps::clampCanvasToThematicScale(QgsMapCanvas* canvas) {
   return false;
 }
 
+QgsRectangle LayerOps::expandExtentToMaxSpan(const QgsRectangle& extent, double maxSpanMeters) {
+  if (extent.isEmpty() || maxSpanMeters <= 0.0) return extent;
+  const double w = extent.width();
+  const double h = extent.height();
+  if (w <= 0.0 || h <= 0.0) return extent;
+  if (w > maxSpanMeters || h > maxSpanMeters) return extent;
+  const double longer = std::max(w, h);
+  const double factor = maxSpanMeters / longer;
+  if (factor <= 1.0) return extent;
+  QgsRectangle grown = extent;
+  grown.scale(factor);
+  return grown;
+}
+
 void LayerOps::setAlignPending(QgsMapLayer* layer, bool pending) {
   if (!layer) return;
   if (pending)
