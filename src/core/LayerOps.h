@@ -75,6 +75,8 @@ public:
   static bool addVworldSatelliteMap(QgsProject* project, QgsMapCanvas* canvas, const QString& apiKey, QString* errorOut = nullptr);
   static void applyCanvasScreenDpi(QgsMapCanvas* canvas);
   static void refreshXyzBasemapTiles(QgsMapCanvas* canvas);
+  // Show / DevicePixelRatioChange: 4K·혼합 DPI에서 XYZ 타일을 다시 받는다.
+  static bool canvasDisplayEventNeedsTileRefresh(int eventType);
 
   static bool addVworldCadastralMap(QgsProject* project, QgsMapCanvas* canvas, const QString& apiKey, QString* errorOut = nullptr);
   // VWorld GetCapabilities only publish 4326 (and 900913/3857). 5186/5187/5179
@@ -107,6 +109,8 @@ public:
   static bool ensureOtfEnabled(QgsProject* project, QgsMapCanvas* canvas, const QString& workCrsAuthId);
 
   static QgsRectangle koreaExtentForCrs(const QString& epsgAuthId);
+  // 3857 위성 커버를 작업 CRS로 옮긴 뒤, 타일이 화면을 메우는 안쪽 상자.
+  static QgsRectangle satelliteFillExtentForCrs(const QString& epsgAuthId);
 
   static void zoomToKorea(QgsMapCanvas* canvas, const QString& epsgAuthId, bool refresh = true);
   static void syncMapCanvas(QgsProject* project, QgsMapCanvas* canvas, bool zoomKorea = true);

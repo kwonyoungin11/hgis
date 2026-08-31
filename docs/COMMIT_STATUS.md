@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-08-30 18:33:15 +09:00 |
+| Updated (local) | 2026-08-31 10:20:41 +09:00 |
 | VERSION file | 0.3.0 |
-| Branch | `main` |
-| HEAD short | `d6db386` |
-| HEAD full | `d6db3863a712171bb9f4531b1f5cafc2df74d3d2` |
-| HEAD date | 2026-08-30 12:41:15 +0900 |
+| Branch | `cursor/pro-drawing-and-map-services` |
+| HEAD short | `9592951` |
+| HEAD full | `9592951016613c049b90ceef7d081575c5896666` |
+| HEAD date | 2026-08-30 18:33:14 +0900 |
 | HEAD author | kwonypungin <kyi25@nate.com> |
-| HEAD subject | Refresh COMMIT_STATUS after Malgun Gothic and unlazy ship. |
-| Total commits | 37 |
-| Upstream | `origin/main` |
-| Sync | up to date with origin/main |
+| HEAD subject | Widen geology, soil, and river downloads to 4x span so 1:10000 drawings stay covered. |
+| Total commits | 38 |
+| Upstream | `origin/cursor/pro-drawing-and-map-services` |
+| Sync | ahead 1 of origin/cursor/pro-drawing-and-map-services (push pending) |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (13 paths) |
+| Working tree dirty | **yes** (10 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Refresh COMMIT_STATUS after Malgun Gothic and unlazy ship. (`d6db386` @ 2026-08-30 12:41:15 +0900)
-- **Remote sync at write time:** up to date with origin/main
-- **Uncommitted local changes at write time:** yes (13 paths)
+- **Recorded tip when this file was written:** Widen geology, soil, and river downloads to 4x span so 1:10000 drawings stay covered. (`9592951` @ 2026-08-30 18:33:14 +0900)
+- **Remote sync at write time:** ahead 1 of origin/cursor/pro-drawing-and-map-services (push pending)
+- **Uncommitted local changes at write time:** yes (10 paths)
 
 ### Read this correctly
 
@@ -56,6 +56,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `9592951` | 2026-08-30T18:33:14+09:00 | Widen geology, soil, and river downloads to 4x span so 1:10000 drawings stay covered. |
 | `d6db386` | 2026-08-30T12:41:15+09:00 | Refresh COMMIT_STATUS after Malgun Gothic and unlazy ship. |
 | `1eb3c3e` | 2026-08-30T12:41:00+09:00 | Ship Malgun Gothic field chrome, section/layout GIS work, and Grok unlazy expert harness. |
 | `ff8c099` | 2026-08-23T15:08:48+09:00 | Ship 4K-safe VWorld satellite tiles and pending field GIS work for another machine. |
@@ -85,22 +86,19 @@
 | `31e51be` | 2026-08-09T18:54:02+09:00 | Sync COMMIT_STATUS to HEAD after push ledger update. |
 | `c1a3c12` | 2026-08-09T18:53:52+09:00 | Refresh COMMIT_STATUS ledger after feature commits. |
 | `e69ab63` | 2026-08-09T18:53:51+09:00 | Skip live VWorld tests when API key missing or rejected. |
-| `fedd10d` | 2026-08-09T18:53:49+09:00 | Add separate print layout editor window using QgsLayoutView. |
 
 ## Staged in this commit
 
 ```
-M	dist/ka-hgis-portable/ka-hgis.exe
-M	docs/COMMIT_STATUS.md
 M	src/app/MainWindow.cpp
-M	src/core/GeologyMapService.cpp
-M	src/core/GeologyMapService.h
+M	src/app/MainWindow.h
+M	src/core/ExportService.cpp
 M	src/core/LayerOps.cpp
 M	src/core/LayerOps.h
-M	src/core/RiverMapService.cpp
-M	src/core/RiverMapService.h
-M	src/core/SoilMapService.cpp
-M	src/core/SoilMapService.h
+M	src/core/LayoutService.cpp
+M	src/core/LayoutService.h
+M	src/core/ProjectStateBuilder.cpp
+M	tests/test_checklist.cpp
 M	tests/test_workflow.cpp
 ```
 ## Other PC checklist

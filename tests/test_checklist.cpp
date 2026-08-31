@@ -13,6 +13,12 @@
 #include <qgsapplication.h>
 #include <qgsproject.h>
 #include <qgscoordinatereferencesystem.h>
+#include <qgsvectorlayer.h>
+#include <qgsrectangle.h>
+#include <qgsprintlayout.h>
+#include <qgslayoutitemmap.h>
+#include <qgslayoutmanager.h>
+#include <qgsmaplayer.h>
 
 class TestKaHgis : public QObject {
   Q_OBJECT
@@ -27,6 +33,8 @@ private slots:
   void pdfViaLayout();
   void surveyCreatesGpkg();
   void liveStateFromEmptyProject();
+  void fromProject_emptySeededSiteLocation_layoutExistsFalse();
+  void fromProject_composedUserSheet_layoutExistsTrue();
 private:
   QgsApplication* m_app = nullptr;
 };
@@ -150,6 +158,51 @@ void TestKaHgis::liveStateFromEmptyProject() {
   const QJsonObject st = ProjectStateBuilder::fromProject(&proj);
   QCOMPARE(st.value(QStringLiteral("survey_area_count")).toInt(), 0);
   QVERIFY(st.contains(QStringLiteral("project_crs_set")));
+}
+
+void TestKaHgis::fromProject_emptySeededSiteLocation_layoutExistsFalse() {
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  LayoutService::ensureDefaultLayouts(&proj);
+  QVERIFY(proj.layoutManager()->layoutByName(QStringLiteral("site_location")));
+  QVERIFY(proj.layoutManager()->layoutByName(QStringLiteral("feature_plan")));
+  const QJsonObject st = ProjectStateBuilder::fromProject(&proj);
+  QVERIFY(!st.value(QStringLiteral("layout_exists:site_location")).toBool());
+  QVERIFY(!st.value(QStringLiteral("layout_exists:feature_plan")).toBool());
+  QVERIFY(!st.value(QStringLiteral("layout_exists:survey_area_map")).toBool());
+  QVERIFY(!st.value(QStringLiteral("layout_exists:feature_detail")).toBool());
+  QVERIFY(!st.value(QStringLiteral("layout_exists:section")).toBool());
+}
+
+void TestKaHgis::fromProject_composedUserSheet_layoutExistsTrue() {
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  auto* blank = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                   QStringLiteral("layout_blank"), QStringLiteral("memory"));
+  QVERIFY(blank->isValid());
+  proj.addMapLayer(blank);
+  QString err;
+  QVERIFY(!LayoutService::createBlankSheet(&proj, 297.0, 210.0, QStringLiteral("user_sheet"), &err)
+               .isEmpty());
+  auto* ly = dynamic_cast<QgsPrintLayout*>(
+      proj.layoutManager()->layoutByName(QStringLiteral("user_sheet")));
+  QVERIFY2(ly, qPrintable(err));
+  auto* map = new QgsLayoutItemMap(ly);
+  map->setId(QStringLiteral("ka_map"));
+  map->attemptSetSceneRect(QRectF(20.0, 20.0, 120.0, 80.0));
+  map->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  map->setKeepLayerSet(true);
+  map->setLayers(QList<QgsMapLayer*>{blank});
+  map->zoomToExtent(QgsRectangle(200000.0, 450000.0, 200200.0, 450160.0));
+  if (map->scene() != ly)
+    ly->addLayoutItem(map);
+  QVERIFY(LayoutService::isComposedStudioSheet(&proj));
+  const QJsonObject st = ProjectStateBuilder::fromProject(&proj);
+  QVERIFY(st.value(QStringLiteral("layout_exists:site_location")).toBool());
+  QVERIFY(st.value(QStringLiteral("layout_exists:feature_plan")).toBool());
+  QVERIFY(st.value(QStringLiteral("layout_exists:survey_area_map")).toBool());
+  QVERIFY(!st.value(QStringLiteral("layout_exists:section")).toBool());
+  QVERIFY(!st.value(QStringLiteral("layout_exists:feature_detail")).toBool());
 }
 
 #include "test_checklist.moc"

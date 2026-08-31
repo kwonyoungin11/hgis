@@ -1,5 +1,6 @@
 ﻿#include "ProjectStateBuilder.h"
 #include "LayerOps.h"
+#include "LayoutService.h"
 #include <QJsonObject>
 #include <qgsproject.h>
 #include <qgsvectorlayer.h>
@@ -8,6 +9,9 @@
 #include <qgsfeature.h>
 #include <qgswkbtypes.h>
 #include <qgslayoutmanager.h>
+#include <qgslayout.h>
+#include <qgsprintlayout.h>
+#include <qgslayoutitemmap.h>
 
 QJsonObject ProjectStateBuilder::empty() {
   QJsonObject st;
@@ -115,16 +119,33 @@ QJsonObject ProjectStateBuilder::fromProject(QgsProject* project) {
   st.insert(QStringLiteral("has_origin"), o || cpCount == 0);
   st.insert(QStringLiteral("has_accuracy"), a || cpCount == 0);
 
-  // layouts
-  auto markLayout = [&](const QString& key, const QString& name) {
-    const bool found = project->layoutManager() && project->layoutManager()->layoutByName(name) != nullptr;
-    st.insert(key, found);
+  // 위치도·배치도 오류 규칙은 도면만들기 user_sheet가 채워졌을 때만 통과.
+  const bool composedSheet = LayoutService::isComposedStudioSheet(project);
+  st.insert(QStringLiteral("layout_exists:site_location"), composedSheet);
+  st.insert(QStringLiteral("layout_exists:feature_plan"), composedSheet);
+  st.insert(QStringLiteral("layout_exists:survey_area_map"), composedSheet);
+
+  auto namedLayoutComposed = [&](const QString& name) {
+    if (!project->layoutManager())
+      return false;
+    auto* ly = dynamic_cast<QgsPrintLayout*>(project->layoutManager()->layoutByName(name));
+    if (!ly)
+      return false;
+    if (ly->itemById(QStringLiteral("empty_hint")))
+      return false;
+    QList<QgsLayoutItemMap*> maps;
+    ly->layoutItems(maps);
+    for (QgsLayoutItemMap* map : maps) {
+      if (map && map->scale() > 0.0 && !map->layers().isEmpty())
+        return true;
+    }
+    return false;
   };
-  markLayout(QStringLiteral("layout_exists:site_location"), QStringLiteral("site_location"));
-  markLayout(QStringLiteral("layout_exists:feature_plan"), QStringLiteral("feature_plan"));
-  markLayout(QStringLiteral("layout_exists:feature_detail"), QStringLiteral("feature_detail"));
-  markLayout(QStringLiteral("layout_exists:section"), QStringLiteral("section"));
-  markLayout(QStringLiteral("layout_exists:survey_area_map"), QStringLiteral("survey_area_map"));
+  // 개별실측·층위(경고): 해당 이름 조판이 지도·축척·레이어를 가질 때만. user_sheet는 단면이 아님.
+  st.insert(QStringLiteral("layout_exists:feature_detail"),
+            namedLayoutComposed(QStringLiteral("feature_detail")));
+  st.insert(QStringLiteral("layout_exists:section"),
+            namedLayoutComposed(QStringLiteral("section")));
 
   return st;
 }

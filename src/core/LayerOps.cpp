@@ -2,6 +2,7 @@
 #include "GeorefService.h"
 #include "VworldSettings.h"
 #include <QDateTime>
+#include <QEvent>
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
@@ -11,7 +12,9 @@
 #include <cmath>
 #include <algorithm>
 #include <QPainter>
+#include <QScreen>
 #include <QUrl>
+#include <QWindow>
 #include <QColor>
 #include <QFont>
 #include <QDir>
@@ -974,9 +977,28 @@ QList<QgsMapLayer*> LayerOps::visibleLayersPaintOrder(QgsProject* project) {
 
 void LayerOps::applyCanvasScreenDpi(QgsMapCanvas* canvas) {
   if (!canvas) return;
+  // FHD 100% → 4K 150–200% (DPR 1.0–2.0). PassThrough 배율 그대로 쓴다.
   const qreal dpr = canvas->devicePixelRatioF();
   if (dpr > 0.05)
     canvas->mapSettings().setDevicePixelRatio(static_cast<float>(dpr));
+  QWindow* wh = canvas->windowHandle();
+  if (!wh && canvas->window())
+    wh = canvas->window()->windowHandle();
+  if (wh && wh->screen()) {
+    const double dpi = wh->screen()->logicalDotsPerInch();
+    if (dpi > 10.0)
+      canvas->mapSettings().setOutputDpi(dpi);
+  }
+}
+
+bool LayerOps::canvasDisplayEventNeedsTileRefresh(int eventType) {
+  const auto t = static_cast<QEvent::Type>(eventType);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 6, 0)
+  if (t == QEvent::DevicePixelRatioChange)
+    return true;
+#endif
+  Q_UNUSED(t);
+  return false;
 }
 
 void LayerOps::syncMapCanvas(QgsProject* project, QgsMapCanvas* canvas, bool zoomKorea) {
@@ -1001,7 +1023,8 @@ void LayerOps::syncMapCanvas(QgsProject* project, QgsMapCanvas* canvas, bool zoo
   if (!wasFrozen)
     canvas->freeze(false);
   canvas->setPreviewJobsEnabled(false);
-  canvas->setParallelRenderingEnabled(true);
+  // XYZ + OTF(QgsRasterProjector) + parallel job: provider_wms deleteLater AV on Windows.
+  canvas->setParallelRenderingEnabled(false);
 
   if (zoomKorea) {
     const QString auth = canvas->mapSettings().destinationCrs().isValid()
@@ -1353,6 +1376,7 @@ bool LayerOps::addVworldBaseMap(QgsProject* project, QgsMapCanvas* canvas, const
 
 void LayerOps::refreshXyzBasemapTiles(QgsMapCanvas* canvas) {
   if (!canvas) return;
+  canvas->stopRendering();
   applyCanvasScreenDpi(canvas);
   canvas->clearCache();
   canvas->refreshAllLayers();
@@ -1877,7 +1901,7 @@ bool LayerOps::setWorkCrs(QgsProject* project, QgsMapCanvas* canvas, const QStri
     } else if (!prev.isEmpty()) {
       canvas->setExtent(prev);
     }
-    canvas->refresh();
+    refreshXyzBasemapTiles(canvas);
   }
   return true;
 }
@@ -1895,6 +1919,38 @@ QgsRectangle LayerOps::koreaExtentForCrs(const QString& epsgAuthId) {
   }
 }
 
+QgsRectangle LayerOps::satelliteFillExtentForCrs(const QString& epsgAuthId) {
+  const QgsCoordinateReferenceSystem wgs(QStringLiteral("EPSG:4326"));
+  const QgsCoordinateReferenceSystem merc(QStringLiteral("EPSG:3857"));
+  const QgsCoordinateReferenceSystem dest(epsgAuthId);
+  const QgsRectangle krWgs(124.5, 33.0, 132.0, 39.5);
+  const QgsCoordinateTransformContext ctx;
+  try {
+    const QgsCoordinateTransform toMerc(wgs, merc, ctx);
+    const QgsRectangle mercRect = toMerc.transformBoundingBox(krWgs);
+    if (!dest.isValid() || dest.authid() == QLatin1String("EPSG:3857"))
+      return mercRect;
+    const QgsCoordinateTransform toDest(merc, dest, ctx);
+    QgsPointXY sw(mercRect.xMinimum(), mercRect.yMinimum());
+    QgsPointXY se(mercRect.xMaximum(), mercRect.yMinimum());
+    QgsPointXY ne(mercRect.xMaximum(), mercRect.yMaximum());
+    QgsPointXY nw(mercRect.xMinimum(), mercRect.yMaximum());
+    sw = toDest.transform(sw);
+    se = toDest.transform(se);
+    ne = toDest.transform(ne);
+    nw = toDest.transform(nw);
+    const double xMin = std::max(sw.x(), nw.x());
+    const double xMax = std::min(se.x(), ne.x());
+    const double yMin = std::max(sw.y(), se.y());
+    const double yMax = std::min(nw.y(), ne.y());
+    if (!(xMax > xMin) || !(yMax > yMin))
+      return toDest.transformBoundingBox(mercRect);
+    return QgsRectangle(xMin, yMin, xMax, yMax);
+  } catch (...) {
+    return koreaExtentForCrs(epsgAuthId);
+  }
+}
+
 void LayerOps::applyKoreaMapLimits(QgsProject* project, QgsMapCanvas* canvas) {
   const QString auth = (project && project->crs().isValid())
                            ? project->crs().authid()
@@ -1909,12 +1965,32 @@ void LayerOps::applyKoreaMapLimits(QgsProject* project, QgsMapCanvas* canvas) {
     project->viewSettings()->setPresetFullExtent(ref);
     project->viewSettings()->setDefaultViewExtent(ref);
   }
-  if (canvas) {
-    if (crs.isValid())
-      canvas->setDestinationCrs(crs);
-    canvas->setExtent(kr);
-    canvas->refresh();
+  if (canvas && crs.isValid())
+    canvas->setDestinationCrs(crs);
+}
+
+static QgsRectangle extentFittedInside(const QgsRectangle& kr, double viewAspect) {
+  if (kr.isEmpty() || !kr.isFinite() || viewAspect <= 0.05)
+    return kr;
+  const double krAspect = kr.width() / kr.height();
+  if (viewAspect > krAspect) {
+    const double h = kr.width() / viewAspect;
+    const double cy = kr.center().y();
+    return QgsRectangle(kr.xMinimum(), cy - h * 0.5, kr.xMaximum(), cy + h * 0.5);
   }
+  const double w = kr.height() * viewAspect;
+  const double cx = kr.center().x();
+  return QgsRectangle(cx - w * 0.5, kr.yMinimum(), cx + w * 0.5, kr.yMaximum());
+}
+
+static double canvasViewAspect(const QgsMapCanvas* canvas) {
+  if (!canvas) return 1.0;
+  const QSize out = canvas->mapSettings().outputSize();
+  if (out.width() >= 2 && out.height() >= 2)
+    return double(out.width()) / double(out.height());
+  const int w = qMax(1, canvas->width());
+  const int h = qMax(1, canvas->height());
+  return double(w) / double(h);
 }
 
 bool LayerOps::clampCanvasToKorea(QgsMapCanvas* canvas) {
@@ -1922,18 +1998,30 @@ bool LayerOps::clampCanvasToKorea(QgsMapCanvas* canvas) {
   const QString auth = canvas->mapSettings().destinationCrs().isValid()
                            ? canvas->mapSettings().destinationCrs().authid()
                            : QStringLiteral("EPSG:5186");
-  QgsRectangle kr = koreaExtentForCrs(auth);
+  const QgsRectangle kr = satelliteFillExtentForCrs(auth);
   if (kr.isEmpty() || !kr.isFinite()) return false;
-  kr.scale(1.02);
 
+  const QgsRectangle fitted = extentFittedInside(kr, canvasViewAspect(canvas));
   const QgsRectangle cur = canvas->extent();
   if (cur.isEmpty() || !cur.isFinite()) {
-    canvas->setExtent(kr);
+    canvas->stopRendering();
+    canvas->setExtent(fitted);
     return true;
   }
 
-  if (cur.width() > kr.width() * 1.12 || cur.height() > kr.height() * 1.12) {
-    canvas->setExtent(kr);
+  const double tol = qMax(kr.width(), kr.height()) * 0.03;
+  const bool alreadySnapped =
+      qAbs(cur.center().x() - fitted.center().x()) < tol &&
+      qAbs(cur.center().y() - fitted.center().y()) < tol &&
+      cur.width() <= fitted.width() * 1.05 + 1.0 &&
+      cur.height() <= fitted.height() * 1.05 + 1.0;
+
+  // VWorld 위성은 한반도만. 한국보다 넓게 줌아웃하면 타일이 잘린 사각형으로 보인다.
+  if (cur.width() > kr.width() || cur.height() > kr.height()) {
+    if (alreadySnapped)
+      return false;
+    canvas->stopRendering();
+    canvas->setExtent(fitted);
     return true;
   }
 
@@ -1961,23 +2049,13 @@ bool LayerOps::clampCanvasToKorea(QgsMapCanvas* canvas) {
     minY = maxY - h;
   }
 
-  if (w >= kr.width()) {
-    const double cx = kr.center().x();
-    minX = cx - w * 0.5;
-    maxX = cx + w * 0.5;
-  }
-  if (h >= kr.height()) {
-    const double cy = kr.center().y();
-    minY = cy - h * 0.5;
-    maxY = cy + h * 0.5;
-  }
-
   const QgsRectangle clamped(minX, minY, maxX, maxY);
   const double eps = qMax(kr.width(), kr.height()) * 1e-9;
   if (qAbs(clamped.xMinimum() - cur.xMinimum()) > eps ||
       qAbs(clamped.yMinimum() - cur.yMinimum()) > eps ||
       qAbs(clamped.xMaximum() - cur.xMaximum()) > eps ||
       qAbs(clamped.yMaximum() - cur.yMaximum()) > eps) {
+    canvas->stopRendering();
     canvas->setExtent(clamped);
     return true;
   }
@@ -1986,7 +2064,10 @@ bool LayerOps::clampCanvasToKorea(QgsMapCanvas* canvas) {
 
 void LayerOps::zoomToKorea(QgsMapCanvas* canvas, const QString& epsgAuthId, bool refresh) {
   if (!canvas) return;
-  QgsRectangle ext = koreaExtentForCrs(epsgAuthId);
+  QgsRectangle ext = satelliteFillExtentForCrs(epsgAuthId);
+  if (ext.isEmpty() || !ext.isFinite()) {
+    ext = koreaExtentForCrs(epsgAuthId);
+  }
   if (ext.isEmpty() || !ext.isFinite()) {
     ext = koreaExtentForCrs(QStringLiteral("EPSG:3857"));
     const QgsCoordinateReferenceSystem destCrs = canvas->mapSettings().destinationCrs();
@@ -2002,7 +2083,7 @@ void LayerOps::zoomToKorea(QgsMapCanvas* canvas, const QString& epsgAuthId, bool
   if (ext.isEmpty() || !ext.isFinite()) {
     ext = QgsRectangle(124.5, 33.0, 132.0, 39.5);
   }
-  canvas->setExtent(ext);
+  canvas->setExtent(extentFittedInside(ext, canvasViewAspect(canvas)));
   canvas->setRenderFlag(true);
   if (!refresh) return;
   canvas->freeze(false);

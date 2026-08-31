@@ -38,6 +38,9 @@
 #include <cmath>
 #include <functional>
 #include <QApplication>
+#include <QScreen>
+#include <QShowEvent>
+#include <QWindow>
 #include <QTimer>
 #include <QPointer>
 #include <QCursor>
@@ -845,7 +848,7 @@ void MainWindow::buildUi() {
   m_canvas->setCanvasColor(KaTheme::tokens().canvasNeutral);
   m_canvas->enableAntiAliasing(true);
   m_canvas->setCachingEnabled(true);
-  m_canvas->setParallelRenderingEnabled(true);
+  m_canvas->setParallelRenderingEnabled(false);
   m_canvas->setMapUpdateInterval(60);
   m_canvas->setPreviewJobsEnabled(false);
   m_canvas->setAcceptDrops(true);
@@ -972,8 +975,7 @@ void MainWindow::buildUi() {
   connect(m_canvas, &QgsMapCanvas::extentsChanged, this, [this]() {
     if (m_extentClampGuard || !m_canvas) return;
     m_extentClampGuard = true;
-    if (LayerOps::clampCanvasToKorea(m_canvas))
-      m_canvas->refresh();
+    LayerOps::clampCanvasToKorea(m_canvas);
     m_extentClampGuard = false;
     if (m_subToolsMode == QLatin1String("align")) {
       m_alignDstScreen.clear();
@@ -1781,6 +1783,44 @@ void MainWindow::ensureStartupViewReady() {
 #endif
 }
 
+void MainWindow::scheduleMapDisplayRefresh() {
+#if KA_HGIS_HAS_QGIS
+  if (!m_canvas) return;
+  if (!m_displayRefresh) {
+    m_displayRefresh = new QTimer(this);
+    m_displayRefresh->setSingleShot(true);
+    connect(m_displayRefresh, &QTimer::timeout, this, [this]() {
+      if (!m_canvas) return;
+      LayerOps::refreshXyzBasemapTiles(m_canvas);
+    });
+  }
+  m_displayRefresh->start(150);
+#endif
+}
+
+void MainWindow::bindMapDisplayScreen() {
+#if KA_HGIS_HAS_QGIS
+  QWindow* wh = windowHandle();
+  if (!wh || m_mapScreenBound) return;
+  m_mapScreenBound = true;
+  connect(wh, &QWindow::screenChanged, this, [this](QScreen*) {
+    if (m_canvas) LayerOps::applyCanvasScreenDpi(m_canvas);
+    scheduleMapDisplayRefresh();
+  });
+#endif
+}
+
+void MainWindow::showEvent(QShowEvent* event) {
+  QMainWindow::showEvent(event);
+#if KA_HGIS_HAS_QGIS
+  bindMapDisplayScreen();
+  if (m_canvas) {
+    LayerOps::applyCanvasScreenDpi(m_canvas);
+    scheduleMapDisplayRefresh();
+  }
+#endif
+}
+
 
 
 void MainWindow::setWorkCrs(const QString& authId) {
@@ -1789,13 +1829,14 @@ void MainWindow::setWorkCrs(const QString& authId) {
 #if KA_HGIS_HAS_QGIS
   QString err;
   LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, authId);
-  if (!LayerOps::setWorkCrs(QgsProject::instance(), m_canvas, authId, &err, true)) {
+  if (!LayerOps::setWorkCrs(QgsProject::instance(), m_canvas, authId, &err, false)) {
     QMessageBox::warning(this, QStringLiteral("CRS"), err);
     return;
   }
   LayerOps::applyKoreaMapLimits(QgsProject::instance(), m_canvas);
-  LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, true);
+  LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
   LayerOps::clampCanvasToKorea(m_canvas);
+  LayerOps::refreshXyzBasemapTiles(m_canvas);
   if (authId.contains(QLatin1String("5187")))
     statusBar()->showMessage(QStringLiteral("동부원점으로 맞춰 두었습니다. 이제 구역을 그리면 됩니다."), 8000);
   else
@@ -2483,6 +2524,8 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
 #endif
     ) {
       LayerOps::applyCanvasScreenDpi(m_canvas);
+      if (LayerOps::canvasDisplayEventNeedsTileRefresh(int(t)))
+        scheduleMapDisplayRefresh();
     }
     if (t == QEvent::Resize && !m_startupViewApplied)
       QTimer::singleShot(0, this, [this]() { ensureStartupViewReady(); });

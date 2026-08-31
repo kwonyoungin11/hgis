@@ -12,6 +12,7 @@
 #include <qgsvectorlayer.h>
 #include <qgsvectorfilewriter.h>
 #include <qgscoordinatetransformcontext.h>
+#include <qgslayoutmanager.h>
 
 static QgsVectorLayer* layerByName(QgsProject* p, const QString& name) {
   return LayerOps::findByLayerKey(p, name);
@@ -112,6 +113,11 @@ QString ExportService::exportSubmissionPackage(QgsProject* project,
   ts << "intranet: upload each domain SHP (feature_poly.shp = one file; merge polygons in-app first if required)\n\n";
   ts << "checklist:\n" << checklistSummary << "\n";
   ts << "\nSee MANIFEST.sha256 for file hashes.\n";
+  ts << QStringLiteral("도면 PDF는 도면만들기 용지(user_sheet)만 넣습니다.\n");
+  const bool hasUserSheet = project && project->layoutManager()
+      && project->layoutManager()->layoutByName(QStringLiteral("user_sheet"));
+  if (!hasUserSheet)
+    ts << QStringLiteral("조사도면.pdf 없음: 도면만들기에서 용지를 만든 뒤 다시 보내기 하세요.\n");
   f.close();
 
   QFile encf(dir.filePath(QStringLiteral("encoding.txt")));
@@ -120,9 +126,10 @@ QString ExportService::exportSubmissionPackage(QgsProject* project,
     encf.write("\n");
   }
 
-  if (project) {
+  if (hasUserSheet) {
     QString pdfErr;
-    LayoutService::exportDrawingPdfs(project, outDir, &pdfErr);
+    LayoutService::exportLayoutPdf(project, QStringLiteral("user_sheet"),
+                                   dir.filePath(QStringLiteral("조사도면.pdf")), &pdfErr);
     Q_UNUSED(pdfErr);
   }
 

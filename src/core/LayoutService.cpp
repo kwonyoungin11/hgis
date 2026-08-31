@@ -1048,6 +1048,17 @@ int LayoutService::rebuildDefaultLayouts(QgsProject* project) {
   return n;
 }
 
+bool LayoutService::isComposedStudioSheet(QgsProject* project) {
+  if (!project || !project->layoutManager())
+    return false;
+  auto* ly = dynamic_cast<QgsPrintLayout*>(
+      project->layoutManager()->layoutByName(QStringLiteral("user_sheet")));
+  if (!ly)
+    return false;
+  auto* map = dynamic_cast<QgsLayoutItemMap*>(ly->itemById(QStringLiteral("ka_map")));
+  return map && map->scale() > 0.0 && !map->layers().isEmpty();
+}
+
 QString LayoutService::createReportLayout(QgsProject* project, const QString& titleKo,
                                           Paper paper, Orientation orientation,
                                           QString* errorOut) {
@@ -1076,8 +1087,9 @@ QString LayoutService::exportLayoutPdf(QgsProject* project, const QString& layou
     if (errorOut) *errorOut = QStringLiteral("프로젝트가 없습니다.");
     return {};
   }
+  // user_sheet는 도면만들기 용지. 없으면 5종 템플릿을 심지 않는다.
   QgsMasterLayoutInterface* master = project->layoutManager()->layoutByName(layoutName);
-  if (!master) {
+  if (!master && layoutName != QLatin1String("user_sheet")) {
     ensureDefaultLayouts(project);
     master = project->layoutManager()->layoutByName(layoutName);
   }

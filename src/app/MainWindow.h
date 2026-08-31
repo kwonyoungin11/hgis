@@ -19,6 +19,7 @@ class QComboBox;
 class QCheckBox;
 class QDoubleSpinBox;
 class QEvent;
+class QShowEvent;
 class QCloseEvent;
 class QTabWidget;
 class ChecklistEngine;
@@ -61,6 +62,7 @@ public:
   explicit MainWindow(QWidget* parent = nullptr);
   ~MainWindow() override;
   bool eventFilter(QObject* watched, QEvent* event) override;
+  void showEvent(QShowEvent* event) override;
   void closeEvent(QCloseEvent* event) override;
   bool openSurveyGpkg(const QString& gpkgPath);
   int domainLayerCount() const;
@@ -183,6 +185,8 @@ private:
   void ensureDefaultBasemaps();
   void applyStartupMap();
   void ensureStartupViewReady();
+  void scheduleMapDisplayRefresh();
+  void bindMapDisplayScreen();
   void setWorkCrs(const QString& authId);
   void onLocationResults(const QVector<LocationHit>& hits);
   void onLocationFailed(const QString& message);
@@ -293,6 +297,8 @@ private:
   bool m_scaleUiGuard = false;
   bool m_extentClampGuard = false;
   bool m_startupViewApplied = false;
+  bool m_mapScreenBound = false;
+  QTimer* m_displayRefresh = nullptr;
   QToolBar* m_subToolbar = nullptr;
   QString m_subToolsMode;
   bool m_snapEnabled = true;

@@ -9,6 +9,7 @@
 #include <QTextStream>
 #include <QDateTime>
 #include <QCoreApplication>
+#include <QEvent>
 #include <QSettings>
 
 #include "core/SurveyProjectFactory.h"
@@ -59,6 +60,8 @@ class TestWorkflow : public QObject {
   Q_OBJECT
 private slots:
   void fullWorkflowSurveyToPackage();
+  void exportSubmissionPackage_pdfIsUserSheetOnly();
+  void exportLayoutPdf_userSheetMissing_doesNotSeedFiveTemplates();
   void shpKoreanRoundTripUtf8();
   void soilShpImport_crsOverrideAndCategorizedStyle();
   void soilTerrainLegend_officialCodesAndStyle();
@@ -97,11 +100,21 @@ private slots:
   void zoomToLayerMax_movesCanvasToFeature();
   void zoomToLayerMax_movesCanvasToPointFeature();
   void zoomToKorea_refreshFalseSetsExtentWithoutUnfreeze();
+  void clampCanvasToKorea_zoomOutDoesNotExceedKorea();
+  void zoomToKorea_5186StaysInsideMercatorSatelliteQuad();
+  void clampCanvasToKorea_secondCallIsNoOp();
+  void syncMapCanvas_disablesParallelRenderingForXyzOtf();
   void isolateAndZoom_hidesOtherSurveyKeepsReference();
   void addVworldSatellite_allowsEmptyKeyViaPublicTiles();
   void addVworldSatellite_usesOfficialWmtsWhenKeyPresent();
   void addVworldSatellite_syncPutsLayerOnCanvasWithExtent();
+  void canvasDisplayEvent_devicePixelRatioChangeNeedsTileRefresh();
+  void refreshXyzBasemapTiles_restoresStaleDevicePixelRatio();
+  void addVworldSatellite_fourKCanvasKeeps256pxTiles();
   void otf_keepsWorkCrsWhenBasemapIs3857();
+  void koreaExtent_5186IsTmMetersNotDegrees();
+  void setWorkCrs_5187to5186_keepsSatelliteAndLocalExtent();
+  void applyKoreaMapLimits_doesNotReplaceLocalExtentWithFullKorea();
   void cadastralWmsCrs_neverStartsWithWorkCrs5179();
   void syncMapCanvas_cadastralAboveSatellite();
   void layoutBlankSheetMapItemKeepsFrameAndNonEmptyLayers();
@@ -145,6 +158,26 @@ static QString rulesFile() {
 static QgsVectorLayer* layer(QgsProject* p, const QString& n) {
   const auto ls = p->mapLayersByName(n);
   return ls.isEmpty() ? nullptr : qobject_cast<QgsVectorLayer*>(ls.first());
+}
+
+static QgsPrintLayout* addComposedUserSheet(QgsProject* proj, QgsMapLayer* mapLayer) {
+  QString err;
+  LayoutService::createBlankSheet(proj, 297.0, 210.0, QStringLiteral("user_sheet"), &err);
+  auto* ly = dynamic_cast<QgsPrintLayout*>(
+      proj->layoutManager()->layoutByName(QStringLiteral("user_sheet")));
+  if (!ly || !mapLayer)
+    return ly;
+  auto* map = new QgsLayoutItemMap(ly);
+  map->setId(QStringLiteral("ka_map"));
+  map->attemptSetSceneRect(QRectF(20.0, 20.0, 120.0, 80.0));
+  map->setCrs(proj->crs().isValid() ? proj->crs()
+                                   : QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  map->setKeepLayerSet(true);
+  map->setLayers(QList<QgsMapLayer*>{mapLayer});
+  map->zoomToExtent(QgsRectangle(200000.0, 450000.0, 200200.0, 450160.0));
+  if (map->scene() != ly)
+    ly->addLayoutItem(map);
+  return ly;
 }
 
 void TestWorkflow::fullWorkflowSurveyToPackage() {
@@ -208,6 +241,8 @@ void TestWorkflow::fullWorkflowSurveyToPackage() {
   }
   QVERIFY(cp->commitChanges());
 
+  QVERIFY2(addComposedUserSheet(&proj, sa), "composed user_sheet");
+  QVERIFY(LayoutService::isComposedStudioSheet(&proj));
   LayoutService::ensureDefaultLayouts(&proj);
   const QJsonObject st = ProjectStateBuilder::fromProject(&proj);
   QCOMPARE(st.value(QStringLiteral("survey_area_count")).toInt(), 1);
@@ -215,6 +250,8 @@ void TestWorkflow::fullWorkflowSurveyToPackage() {
   QCOMPARE(st.value(QStringLiteral("feature_poly_count")).toInt(), 1);
   QVERIFY(st.value(QStringLiteral("has_kind_period")).toBool());
   QVERIFY(st.value(QStringLiteral("survey_is_polygon")).toBool());
+  QVERIFY(st.value(QStringLiteral("layout_exists:site_location")).toBool());
+  QVERIFY(st.value(QStringLiteral("layout_exists:feature_plan")).toBool());
 
   ChecklistEngine eng;
   QVERIFY(eng.loadRules(rulesFile()));
@@ -227,7 +264,6 @@ void TestWorkflow::fullWorkflowSurveyToPackage() {
       msg += r.id + QLatin1Char(' ');
     }
   }
-  // layouts should exist after ensureDefaultLayouts
   QVERIFY2(errors == 0, qPrintable(msg));
 
   const QString pdf = QDir(dir).filePath(QStringLiteral("feature_plan.pdf"));
@@ -243,6 +279,53 @@ void TestWorkflow::fullWorkflowSurveyToPackage() {
   QVERIFY(QFile::exists(QDir(pkg).filePath(QStringLiteral("survey_area.shp"))));
   QVERIFY(QFile::exists(QDir(pkg).filePath(QStringLiteral("feature_poly.shp"))));
   QVERIFY(QFile::exists(QDir(pkg).filePath(QStringLiteral("MANIFEST.sha256"))));
+  const QString sheetPdf = QDir(pkg).filePath(QStringLiteral("조사도면.pdf"));
+  QVERIFY2(QFile::exists(sheetPdf), "package PDF is user_sheet 조사도면.pdf");
+  QVERIFY(QFileInfo(sheetPdf).size() > 500);
+  QVERIFY2(!QFile::exists(QDir(pkg).filePath(QStringLiteral("유적위치도.pdf"))),
+           "submit must not emit five auto templates");
+}
+
+void TestWorkflow::exportSubmissionPackage_pdfIsUserSheetOnly() {
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  auto* blank = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                   QStringLiteral("layout_blank"), QStringLiteral("memory"));
+  QVERIFY(blank->isValid());
+  proj.addMapLayer(blank);
+  QVERIFY2(addComposedUserSheet(&proj, blank), "composed user_sheet");
+  QVERIFY(LayoutService::isComposedStudioSheet(&proj));
+  LayoutService::ensureDefaultLayouts(&proj);
+
+  const QString pkg = QDir::temp().filePath(
+      QStringLiteral("ka_pkg_sheet_") + QString::number(QDateTime::currentMSecsSinceEpoch()));
+  QDir(pkg).removeRecursively();
+  QString err;
+  QVERIFY2(!ExportService::exportSubmissionPackage(&proj, pkg, QStringLiteral("UTF-8"),
+                                                   QStringLiteral("OK"), true, false, &err)
+                .isEmpty(),
+           qPrintable(err));
+  const QString sheetPdf = QDir(pkg).filePath(QStringLiteral("조사도면.pdf"));
+  QVERIFY(QFile::exists(sheetPdf));
+  QVERIFY(QFileInfo(sheetPdf).size() > 500);
+  QVERIFY(!QFile::exists(QDir(pkg).filePath(QStringLiteral("유적위치도.pdf"))));
+  QVERIFY(!QFile::exists(QDir(pkg).filePath(QStringLiteral("유구배치도.pdf"))));
+}
+
+void TestWorkflow::exportLayoutPdf_userSheetMissing_doesNotSeedFiveTemplates() {
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  QVERIFY(!proj.layoutManager()->layoutByName(QStringLiteral("user_sheet")));
+  const QString pdf = QDir::temp().filePath(
+      QStringLiteral("ka_missing_user_sheet_") + QString::number(QDateTime::currentMSecsSinceEpoch()) +
+      QStringLiteral(".pdf"));
+  QFile::remove(pdf);
+  QString err;
+  QVERIFY(LayoutService::exportLayoutPdf(&proj, QStringLiteral("user_sheet"), pdf, &err).isEmpty());
+  QVERIFY2(!proj.layoutManager()->layoutByName(QStringLiteral("site_location")),
+           "missing user_sheet must not seed site_location");
+  QVERIFY2(!proj.layoutManager()->layoutByName(QStringLiteral("feature_plan")),
+           "missing user_sheet must not seed feature_plan");
 }
 
 void TestWorkflow::shpKoreanRoundTripUtf8() {
@@ -1301,6 +1384,63 @@ void TestWorkflow::zoomToKorea_refreshFalseSetsExtentWithoutUnfreeze() {
   QVERIFY2(ext.isFinite() && ext.width() > 0.0 && ext.height() > 0.0, "setExtent still runs");
 }
 
+void TestWorkflow::clampCanvasToKorea_zoomOutDoesNotExceedKorea() {
+  QgsMapCanvas canvas;
+  canvas.resize(800, 600);
+  canvas.setDestinationCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  LayerOps::zoomToKorea(&canvas, QStringLiteral("EPSG:5186"), false);
+  const QgsRectangle kr = LayerOps::koreaExtentForCrs(QStringLiteral("EPSG:5186"));
+  QVERIFY2(!kr.isEmpty() && kr.isFinite(), "korea extent");
+  QgsRectangle tooWide = canvas.extent();
+  tooWide.scale(1.10);
+  canvas.setExtent(tooWide);
+  QVERIFY(LayerOps::clampCanvasToKorea(&canvas));
+  QVERIFY2(canvas.extent().width() <= kr.width() * 1.03 + 1.0,
+           "zoom-out past Korea must snap back so satellite still fills");
+  QVERIFY2(canvas.extent().height() <= kr.height() * 1.03 + 1.0,
+           "zoom-out must not leave empty margins around VWorld");
+}
+
+void TestWorkflow::zoomToKorea_5186StaysInsideMercatorSatelliteQuad() {
+  QgsMapCanvas canvas;
+  canvas.resize(800, 600);
+  canvas.setDestinationCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  LayerOps::zoomToKorea(&canvas, QStringLiteral("EPSG:5186"), false);
+  const QgsRectangle fill = LayerOps::satelliteFillExtentForCrs(QStringLiteral("EPSG:5186"));
+  QVERIFY2(!fill.isEmpty() && fill.isFinite(), "3857 satellite inner box in 5186");
+  const QgsRectangle vis = canvas.extent();
+  QVERIFY2(vis.xMinimum() + 50.0 >= fill.xMinimum(), "west empty = mercator quad clip");
+  QVERIFY2(vis.xMaximum() - 50.0 <= fill.xMaximum(), "east empty = mercator quad clip");
+  QVERIFY2(vis.yMinimum() + 50.0 >= fill.yMinimum(), "south empty = mercator quad clip");
+  QVERIFY2(vis.yMaximum() - 50.0 <= fill.yMaximum(), "north empty = mercator quad clip");
+}
+
+void TestWorkflow::clampCanvasToKorea_secondCallIsNoOp() {
+  QgsMapCanvas canvas;
+  canvas.resize(800, 600);
+  canvas.setDestinationCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  LayerOps::zoomToKorea(&canvas, QStringLiteral("EPSG:5186"), false);
+  LayerOps::clampCanvasToKorea(&canvas);
+  const QgsRectangle afterFirst = canvas.extent();
+  QVERIFY2(!LayerOps::clampCanvasToKorea(&canvas),
+           "second clamp must not setExtent again (extentsChanged loop crashes)");
+  QCOMPARE(canvas.extent().xMinimum(), afterFirst.xMinimum());
+  QCOMPARE(canvas.extent().yMinimum(), afterFirst.yMinimum());
+}
+
+void TestWorkflow::syncMapCanvas_disablesParallelRenderingForXyzOtf() {
+  QgsProject proj;
+  QgsMapCanvas canvas;
+  canvas.resize(640, 480);
+  canvas.setParallelRenderingEnabled(true);
+  QVERIFY(LayerOps::ensureOtfEnabled(&proj, &canvas, QStringLiteral("EPSG:5186")));
+  QString err;
+  QVERIFY2(LayerOps::addVworldSatelliteMap(&proj, &canvas, QString(), &err), qPrintable(err));
+  LayerOps::syncMapCanvas(&proj, &canvas, false);
+  QVERIFY2(!canvas.isParallelRenderingEnabled(),
+           "XYZ + OTF + parallel job crashes provider_wms on Windows");
+}
+
 void TestWorkflow::isolateAndZoom_hidesOtherSurveyKeepsReference() {
   QgsProject proj;
   QgsMapCanvas canvas;
@@ -1388,6 +1528,50 @@ void TestWorkflow::addVworldSatellite_syncPutsLayerOnCanvasWithExtent() {
            "satellite layer must have a drawable extent");
 }
 
+void TestWorkflow::canvasDisplayEvent_devicePixelRatioChangeNeedsTileRefresh() {
+  QVERIFY(!LayerOps::canvasDisplayEventNeedsTileRefresh(int(QEvent::Show)));
+  QVERIFY(!LayerOps::canvasDisplayEventNeedsTileRefresh(int(QEvent::Resize)));
+#if QT_VERSION >= QT_VERSION_CHECK(6, 6, 0)
+  QVERIFY2(LayerOps::canvasDisplayEventNeedsTileRefresh(int(QEvent::DevicePixelRatioChange)),
+           "4K / mixed-DPI monitor change must refetch XYZ tiles");
+#endif
+  QVERIFY(!LayerOps::canvasDisplayEventNeedsTileRefresh(int(QEvent::MouseMove)));
+  QVERIFY(!LayerOps::canvasDisplayEventNeedsTileRefresh(int(QEvent::KeyPress)));
+}
+
+void TestWorkflow::refreshXyzBasemapTiles_restoresStaleDevicePixelRatio() {
+  QgsMapCanvas canvas;
+  canvas.resize(1920, 1080);
+  canvas.mapSettings().setDevicePixelRatio(0.25f);
+  LayerOps::refreshXyzBasemapTiles(&canvas);
+  const float want = static_cast<float>(canvas.devicePixelRatioF());
+  QCOMPARE(canvas.mapSettings().devicePixelRatio(), want);
+  QVERIFY(want > 0.05f);
+}
+
+void TestWorkflow::addVworldSatellite_fourKCanvasKeeps256pxTiles() {
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  QgsMapCanvas canvas;
+  canvas.resize(3840, 2160);
+  QVERIFY(LayerOps::ensureOtfEnabled(&proj, &canvas, QStringLiteral("EPSG:5186")));
+  QString err;
+  QVERIFY2(LayerOps::addVworldSatelliteMap(&proj, &canvas, QString(), &err), qPrintable(err));
+  LayerOps::syncMapCanvas(&proj, &canvas, false);
+  LayerOps::refreshXyzBasemapTiles(&canvas);
+  QgsMapLayer* sat = nullptr;
+  for (QgsMapLayer* l : proj.mapLayers()) {
+    if (l && l->name().contains(QStringLiteral("위성")))
+      sat = l;
+  }
+  QVERIFY2(sat, "4K canvas must still have satellite");
+  QVERIFY2(canvas.layers().contains(sat), "4K canvas must paint satellite");
+  const QString src = sat->source();
+  QVERIFY2(src.contains(QStringLiteral("tilePixelRatio=1")), qPrintable(src.left(180)));
+  QVERIFY2(!src.contains(QStringLiteral("tilePixelRatio=2")),
+           "VWorld satellite is 256px; @2x / 512 blanks 4K");
+}
+
 void TestWorkflow::otf_keepsWorkCrsWhenBasemapIs3857() {
   QgsProject proj;
   QgsMapCanvas canvas;
@@ -1403,6 +1587,54 @@ void TestWorkflow::otf_keepsWorkCrsWhenBasemapIs3857() {
   QCOMPARE(canvas.mapSettings().destinationCrs().authid(), QStringLiteral("EPSG:5187"));
   QCOMPARE(sat->crs().authid(), QStringLiteral("EPSG:3857"));
   QVERIFY(canvas.layers().contains(sat));
+}
+
+void TestWorkflow::koreaExtent_5186IsTmMetersNotDegrees() {
+  const QgsRectangle kr = LayerOps::koreaExtentForCrs(QStringLiteral("EPSG:5186"));
+  QVERIFY2(!kr.isEmpty() && kr.isFinite(), "korea extent for 5186");
+  QVERIFY2(kr.width() > 100000.0 && kr.height() > 100000.0,
+           "5186 Korea box must be TM metres, not WGS degrees");
+  QVERIFY2(kr.xMinimum() > -500000.0 && kr.xMaximum() < 1000000.0, qPrintable(QString::number(kr.xMinimum())));
+}
+
+void TestWorkflow::setWorkCrs_5187to5186_keepsSatelliteAndLocalExtent() {
+  QgsProject proj;
+  QgsMapCanvas canvas;
+  canvas.resize(800, 600);
+  QVERIFY(LayerOps::ensureOtfEnabled(&proj, &canvas, QStringLiteral("EPSG:5187")));
+  QString err;
+  QVERIFY2(LayerOps::addVworldSatelliteMap(&proj, &canvas, QString(), &err), qPrintable(err));
+  LayerOps::syncMapCanvas(&proj, &canvas, false);
+  canvas.setExtent(QgsRectangle(180000.0, 430000.0, 220000.0, 460000.0));
+  canvas.zoomScale(25000.0, true);
+  QVERIFY(LayerOps::setWorkCrs(&proj, &canvas, QStringLiteral("EPSG:5186"), &err, false));
+  QCOMPARE(proj.crs().authid(), QStringLiteral("EPSG:5186"));
+  QCOMPARE(canvas.mapSettings().destinationCrs().authid(), QStringLiteral("EPSG:5186"));
+  QgsMapLayer* sat = nullptr;
+  for (QgsMapLayer* l : proj.mapLayers()) {
+    if (l && l->name().contains(QStringLiteral("위성")))
+      sat = l;
+  }
+  QVERIFY2(sat, "satellite must survive 5186 switch");
+  QCOMPARE(sat->crs().authid(), QStringLiteral("EPSG:3857"));
+  QVERIFY2(canvas.layers().contains(sat), "OTF 5186 canvas must still paint 3857 satellite");
+  const QgsRectangle kr = LayerOps::koreaExtentForCrs(QStringLiteral("EPSG:5186"));
+  QVERIFY2(canvas.extent().width() < kr.width() * 0.5,
+           "switching to 5186 must not jump to all-Korea (satellite looks empty)");
+  QVERIFY2(canvas.scale() < 200000.0, "keep field scale, not Korea-wide");
+}
+
+void TestWorkflow::applyKoreaMapLimits_doesNotReplaceLocalExtentWithFullKorea() {
+  QgsProject proj;
+  QgsMapCanvas canvas;
+  canvas.resize(800, 600);
+  QVERIFY(LayerOps::ensureOtfEnabled(&proj, &canvas, QStringLiteral("EPSG:5186")));
+  const QgsRectangle local(150000.0, 400000.0, 190000.0, 430000.0);
+  canvas.setExtent(local);
+  LayerOps::applyKoreaMapLimits(&proj, &canvas);
+  const QgsRectangle kr = LayerOps::koreaExtentForCrs(QStringLiteral("EPSG:5186"));
+  QVERIFY2(canvas.extent().width() < kr.width() * 0.5,
+           "applyKoreaMapLimits must not setExtent(full Korea)");
 }
 
 void TestWorkflow::cadastralWmsCrs_neverStartsWithWorkCrs5179() {
