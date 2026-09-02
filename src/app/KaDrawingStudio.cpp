@@ -1369,6 +1369,7 @@ void KaDrawingStudio::focusGridSettings() {
   root->setSpacing(8);
   auto* on = new QCheckBox(QStringLiteral("좌표 격자"), &dlg);
   on->setChecked(m_gridEnabled);
+  on->setToolTip(QStringLiteral("끄면 도면 안 +와 바깥 테두리 좌표 자가 사라집니다."));
   auto* nums = new QCheckBox(QStringLiteral("칸 밖에 좌표 숫자"), &dlg);
   nums->setChecked(m_gridShowNums);
   auto* step = new QDoubleSpinBox(&dlg);
@@ -2022,7 +2023,10 @@ void KaDrawingStudio::createOrResizeMap(const QRectF& layoutRect) {
     if (!held) return;
     applyLayersToMap(held, true, false);
     applyCrsGrid(held);
-    snapMapScaleToNice();
+    if (m_mapCanvas)
+      centerOnMapCanvas();
+    else
+      snapMapScaleToNice();
     connect(held, &QgsLayoutItemMap::extentChanged, this, &KaDrawingStudio::syncScaleDecorations,
             Qt::UniqueConnection);
     ensureStandardDecorations();
@@ -2087,7 +2091,7 @@ void KaDrawingStudio::applyLegendSettings() {
   legend->setStyleFont(Qgis::LegendComponent::SymbolLabel, QFont(QStringLiteral("Malgun Gothic"), qMax(7, pt - 1)));
   if (auto* map = mapItem())
     legend->setLinkedMap(map);
-  legend->updateLegend();
+  LayoutService::tuneSheetLegend(legend);
   legend->update();
 }
 
@@ -2242,8 +2246,14 @@ void KaDrawingStudio::placeScaleLabel(const QRectF& layoutRect, bool selectAfter
 void KaDrawingStudio::syncMapFromLayers() {
   if (auto* map = mapItem()) {
     applyLayersToMap(map, true, false);
-    if (auto* ly = layout())
+    if (auto* ly = layout()) {
+      if (auto* legend = dynamic_cast<QgsLayoutItemLegend*>(findItemById(ly, kIdLegend))) {
+        legend->setLinkedMap(map);
+        LayoutService::tuneSheetLegend(legend);
+        legend->update();
+      }
       ly->refresh();
+    }
   }
 }
 
@@ -2254,7 +2264,7 @@ void KaDrawingStudio::relinkDecorations() {
   if (auto* legend = dynamic_cast<QgsLayoutItemLegend*>(findItemById(ly, kIdLegend))) {
     legend->setLinkedMap(map);
     legend->setResizeToContents(false);
-    legend->updateLegend();
+    LayoutService::tuneSheetLegend(legend);
   }
   if (auto* sb = dynamic_cast<QgsLayoutItemScaleBar*>(findItemById(ly, kIdScaleBar)))
     applyNiceScaleBar(sb);
@@ -2278,6 +2288,8 @@ void KaDrawingStudio::ensureStandardDecorations() {
   if (!findItemById(ly, kIdScale))
     placeScaleLabel(defaultItemRect(kIdScale), false);
   applyCrsLabelNow();
+  if (auto* map = mapItem())
+    applyCrsGrid(map);
   relinkDecorations();
   applyStandardChromePositions();
 }
@@ -2783,7 +2795,7 @@ void KaDrawingStudio::panLayoutMapTo(const QgsPointXY& center) {
 void KaDrawingStudio::centerOnMapCanvas() {
   auto* map = mapItem();
   if (!map || !m_mapCanvas) return;
-  QgsPointXY c = m_mapCanvas->extent().center();
+  QgsRectangle ext = m_mapCanvas->extent();
   const QgsCoordinateReferenceSystem src = m_mapCanvas->mapSettings().destinationCrs();
   const QgsCoordinateReferenceSystem dst = map->crs().isValid()
                                                ? map->crs()
@@ -2791,11 +2803,19 @@ void KaDrawingStudio::centerOnMapCanvas() {
   if (m_project && src.isValid() && dst.isValid() && src != dst) {
     try {
       const QgsCoordinateTransform xf(src, dst, m_project->transformContext());
-      c = xf.transform(c);
+      ext = xf.transformBoundingBox(ext);
     } catch (...) {
     }
   }
-  panLayoutMapTo(c);
+  if (!LayoutService::applyCanvasViewToLayoutMap(map, ext, m_mapCanvas->scale()))
+    return;
+  map->invalidateCache();
+  map->refresh();
+  refreshScaleWidgets(true);
+  if (auto* sb = dynamic_cast<QgsLayoutItemScaleBar*>(findItemById(layout(), kIdScaleBar)))
+    applyNiceScaleBar(sb);
+  if (m_status)
+    m_status->setText(QStringLiteral("지도 화면과 같은 범위·축척으로 맞췄습니다."));
 }
 
 void KaDrawingStudio::centerSurveyInMap() {
@@ -2855,6 +2875,8 @@ void KaDrawingStudio::savePdf() {
   const QString path = QFileDialog::getSaveFileName(
       this, QStringLiteral("도면 PDF 저장"), QStringLiteral("도면.pdf"), QStringLiteral("PDF (*.pdf)"));
   if (path.isEmpty()) return;
+  if (auto* map = mapItem())
+    applyCrsGrid(map);
   if (m_pageOutline) m_pageOutline->hide();
   QgsLayoutExporter exporter(ly);
   QgsLayoutExporter::PdfExportSettings settings;

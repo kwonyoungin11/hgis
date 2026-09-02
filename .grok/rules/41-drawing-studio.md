@@ -32,7 +32,8 @@ ka-hgis: `attemptSetSceneRect` → `setCrs` → dummy/no live WMS → `zoomToExt
 ## Product contract
 
 - Sheet name `user_sheet`. Ids: `ka_map`, `ka_legend`, `ka_north`, `ka_scalebar`.
-- 맵↔조판: keep scale. On layout enter, pan map-center to layout center only.
+- 맵↔조판: 조판 진입 시 지도 화면 범위·축척을 맵 칸에 그대로 옮긴다
+  (`applyCanvasViewToLayoutMap`). nice scale로 분모를 올리지 않는다.
 - 좌표점 is layout-only (no map-canvas coord tool; not `control_points`).
 - Scale bar: paper mm length stays; retick `unitsPerSegment` only.
 - Preview 96 DPI; PDF 300. Rasters: `applySingleRasterPassRendering` (no tiles).

@@ -1,5 +1,6 @@
 #include "LayerOps.h"
 #include "GeorefService.h"
+#include "SoilMapService.h"
 #include "VworldSettings.h"
 #include <QDateTime>
 #include <QEvent>
@@ -10,6 +11,7 @@
 #include <QStringConverter>
 #include <QRegularExpression>
 #include <cmath>
+#include <limits>
 #include <algorithm>
 #include <QPainter>
 #include <QScreen>
@@ -52,6 +54,12 @@
 #include <qgsrasterdataprovider.h>
 #include <qgsrasterrenderer.h>
 #include <qgsrastertransparency.h>
+#include <qgssinglebandpseudocolorrenderer.h>
+#include <qgsrastershader.h>
+#include <qgscolorrampshader.h>
+#include <qgscolorramplegendnodesettings.h>
+#include <qgsrasterbandstats.h>
+#include <cpl_conv.h>
 #include <qgsnetworkaccessmanager.h>
 #include <qgslayertreegroup.h>
 #include <qgsprojectviewsettings.h>
@@ -248,6 +256,32 @@ bool LayerOps::applyAreaM2Labels(QgsVectorLayer* layer) {
   layer->setLabeling(new QgsVectorLayerSimpleLabeling(s));
   layer->setLabelsEnabled(true);
   layer->triggerRepaint();
+  return true;
+}
+
+bool LayerOps::hasToggleableLabels(const QgsMapLayer* layer) {
+  const auto* vl = qobject_cast<const QgsVectorLayer*>(layer);
+  if (!vl || !vl->isValid())
+    return false;
+  return vl->labeling() != nullptr || vl->labelsEnabled() ||
+         vl->geometryType() == Qgis::GeometryType::Polygon;
+}
+
+bool LayerOps::labelsVisible(const QgsMapLayer* layer) {
+  const auto* vl = qobject_cast<const QgsVectorLayer*>(layer);
+  return vl && vl->isValid() && vl->labelsEnabled();
+}
+
+bool LayerOps::setLabelsVisible(QgsMapLayer* layer, bool on) {
+  auto* vl = qobject_cast<QgsVectorLayer*>(layer);
+  if (!vl || !vl->isValid())
+    return false;
+  if (on && !vl->labeling()) {
+    if (vl->geometryType() == Qgis::GeometryType::Polygon && applyAreaM2Labels(vl))
+      return true;
+  }
+  vl->setLabelsEnabled(on);
+  vl->triggerRepaint();
   return true;
 }
 
@@ -517,6 +551,9 @@ static void applyKaNetworkHeaders(QNetworkRequest* req) {
   const QString host = req->url().host();
   if (host.contains(QLatin1String("vworld.kr"), Qt::CaseInsensitive))
     req->setRawHeader("Referer", "https://localhost");
+  const QUrl fixed = SoilMapService::rewriteArcGisCacheUrl(req->url());
+  if (fixed != req->url())
+    req->setUrl(fixed);
 }
 
 static void ensureTileNetworkIdentity() {
@@ -709,6 +746,9 @@ static bool legendTitlesMatch(const QString& a, const QString& b) {
   if (a == b) return true;
   if (a.startsWith(b + QLatin1String(" [")) || b.startsWith(a + QLatin1String(" [")))
     return true;
+  const QString soil = QStringLiteral("토양도(흙토람)");
+  if (a.startsWith(soil) && b.startsWith(soil))
+    return true;
   return friendlyLegendName(a) == friendlyLegendName(b);
 }
 
@@ -732,7 +772,10 @@ bool LayerOps::isReferenceLayer(const QgsMapLayer* layer) {
   const QString n = layer->name();
   return n.contains(QStringLiteral("OSM")) || n.contains(QStringLiteral("VWorld")) ||
          n.contains(QStringLiteral("Carto")) || n.contains(QStringLiteral("Google")) ||
-         n == QLatin1String("위성") || n.startsWith(QLatin1String("지적"));
+         n.contains(QStringLiteral("고도맵")) || n.contains(QStringLiteral("지형맵")) ||
+         n == QLatin1String("DEM") || n.contains(QStringLiteral("OpenTopoMap")) ||
+         n.contains(QStringLiteral("고지형")) || n == QLatin1String("위성") ||
+         n.startsWith(QLatin1String("지적"));
 }
 
 bool LayerOps::isBasemapLayer(const QgsMapLayer* layer) {
@@ -1042,7 +1085,7 @@ void LayerOps::syncMapCanvas(QgsProject* project, QgsMapCanvas* canvas, bool zoo
     }
     LayerOps::clampCanvasToKorea(canvas);
   }
-  if (layersChanged || zoomKorea)
+  if ((layersChanged || zoomKorea) && !canvas->isDrawing())
     canvas->refresh();
 }
 
@@ -1100,8 +1143,7 @@ bool LayerOps::zoomToLayerMax(QgsMapCanvas* canvas, QgsMapLayer* layer) {
     } catch (...) {
       if (qobject_cast<QgsRasterLayer*>(layer)) {
         zoomCanvasToWorkingScale(canvas, mapAuth, 50000.0);
-        canvas->refreshAllLayers();
-        canvas->refresh();
+        refreshCanvasIfIdle(canvas);
         return true;
       }
       return false;
@@ -1113,8 +1155,7 @@ bool LayerOps::zoomToLayerMax(QgsMapCanvas* canvas, QgsMapLayer* layer) {
                           (ext.width() > kr.width() * 1.2 || ext.height() > kr.height() * 1.2));
   if (qobject_cast<QgsRasterLayer*>(layer) && worldLike) {
     zoomCanvasToWorkingScale(canvas, mapAuth, 50000.0);
-    canvas->refreshAllLayers();
-    canvas->refresh();
+    refreshCanvasIfIdle(canvas);
     return true;
   }
 
@@ -1123,8 +1164,7 @@ bool LayerOps::zoomToLayerMax(QgsMapCanvas* canvas, QgsMapLayer* layer) {
 
   if (!kr.isEmpty() && kr.isFinite() && (ext.width() > kr.width() * 1.2 || ext.height() > kr.height() * 1.2)) {
     zoomCanvasToWorkingScale(canvas, mapAuth, 50000.0);
-    canvas->refreshAllLayers();
-    canvas->refresh();
+    refreshCanvasIfIdle(canvas);
     return true;
   }
 
@@ -1141,8 +1181,7 @@ bool LayerOps::zoomToLayerMax(QgsMapCanvas* canvas, QgsMapLayer* layer) {
   if (!kr.isEmpty() && kr.isFinite() &&
       (after.width() > kr.width() * 1.12 || after.height() > kr.height() * 1.12))
     clampCanvasToKorea(canvas);
-  canvas->refreshAllLayers();
-  canvas->refresh();
+  refreshCanvasIfIdle(canvas);
   return true;
 }
 
@@ -1175,8 +1214,7 @@ bool LayerOps::isolateAndZoomToLayer(QgsProject* project, QgsMapCanvas* canvas, 
       }
     }
     canvas->setLayers(vis);
-    canvas->refreshAllLayers();
-    canvas->refresh();
+    refreshCanvasIfIdle(canvas);
   }
   return true;
 }
@@ -1288,8 +1326,7 @@ static bool addXyzBasemap(QgsProject* project, QgsMapCanvas* canvas, const QStri
     } else if (needScaleOnly) {
       zoomCanvasToWorkingScale(canvas, workAuth, 50000.0);
     }
-    canvas->refreshAllLayers();
-    canvas->refresh();
+    LayerOps::refreshXyzBasemapTiles(canvas);
   }
   return project->mapLayer(added->id()) != nullptr;
 }
@@ -1376,10 +1413,13 @@ bool LayerOps::addVworldBaseMap(QgsProject* project, QgsMapCanvas* canvas, const
 
 void LayerOps::refreshXyzBasemapTiles(QgsMapCanvas* canvas) {
   if (!canvas) return;
-  canvas->stopRendering();
   applyCanvasScreenDpi(canvas);
-  canvas->clearCache();
-  canvas->refreshAllLayers();
+  canvas->setParallelRenderingEnabled(false);
+  canvas->setPreviewJobsEnabled(false);
+  // Aborting an in-flight WMS job drops TileDownloadManager objects that
+  // still finish and call deleteLater — ACCESS_VIOLATION on Windows.
+  if (canvas->isDrawing())
+    return;
   canvas->refresh();
 }
 
@@ -1513,9 +1553,7 @@ static bool addGdalVworldCadastral(QgsProject* project, QgsMapCanvas* canvas, co
     syncCanvasToProject(project, canvas);
     if (canvas->scale() > 80000.0 || canvas->scale() < 200.0)
       zoomCanvasToWorkingScale(canvas, workAuth, 25000.0);
-    canvas->clearCache();
-    canvas->refreshAllLayers();
-    canvas->refresh();
+    LayerOps::refreshXyzBasemapTiles(canvas);
   }
   return true;
 }
@@ -1574,9 +1612,7 @@ bool LayerOps::addVworldCadastralMap(QgsProject* project, QgsMapCanvas* canvas, 
     const double s = canvas->scale();
     if (s > 80000.0 || s < 200.0)
       canvas->zoomScale(25000.0, true);
-    canvas->clearCache();
-    canvas->refreshAllLayers();
-    canvas->refresh();
+    LayerOps::refreshXyzBasemapTiles(canvas);
   }
   return true;
 }
@@ -1637,8 +1673,7 @@ LayerOps::FieldBasemapPackResult LayerOps::prepareFieldBasemapPack(
         canvas->zoomScale(next, true);
     }
     clampCanvasToKorea(canvas);
-    canvas->refreshAllLayers();
-    canvas->refresh();
+    refreshCanvasIfIdle(canvas);
   }
   if (errorOut && (!r.satelliteOk || !r.cadastralOk)) {
     QStringList parts;
@@ -1672,6 +1707,339 @@ bool LayerOps::addVworldContourMap(QgsProject* project, QgsMapCanvas* canvas, co
       makeVworldWmsUri(apiKey, QStringLiteral("lt_c_upisuq"), QString(), QStringLiteral("EPSG:3857")),
   };
   return addBasemapWithFallbacks(project, canvas, uris, QStringLiteral("VWorld 등고선"), errorOut);
+}
+
+bool LayerOps::addElevationHillshadeMap(QgsProject* project, QgsMapCanvas* canvas,
+                                        const QString& apiKey, QString* errorOut) {
+  Q_UNUSED(apiKey);
+  const QString name = QStringLiteral("지형맵");
+  // XYZ only. VWorld WMS GetMap + OTF 5186 + pan was crash-20260901-102801
+  // (provider_wms deleteLater / QgsRasterProjector).
+  const QStringList uris = {
+      QStringLiteral(
+          "type=xyz&url=https://tile.opentopomap.org/%7Bz%7D/%7Bx%7D/%7By%7D.png"
+          "&zmax=17&zmin=5&crs=EPSG:3857&tilePixelRatio=1"),
+      QStringLiteral(
+          "type=xyz&url=https://a.tile.opentopomap.org/%7Bz%7D/%7Bx%7D/%7By%7D.png"
+          "&zmax=17&zmin=5&crs=EPSG:3857&tilePixelRatio=1"),
+  };
+  if (!addBasemapWithFallbacks(project, canvas, uris, name, errorOut))
+    return false;
+  for (QgsMapLayer* l : project->mapLayers()) {
+    if (l && legendTitlesMatch(l->name(), name))
+      LayerOps::placeInLegendGroup(project, l, QStringLiteral("참조 지도"));
+  }
+  return true;
+}
+
+static void removeLayersNamed(QgsProject* project, const QString& name) {
+  if (!project) return;
+  QStringList ids;
+  for (QgsMapLayer* old : project->mapLayers()) {
+    if (old && legendTitlesMatch(old->name(), name))
+      ids.append(old->id());
+  }
+  for (const QString& id : ids)
+    project->removeMapLayer(id);
+}
+
+static QString copernicusCogVsicurl(int latFloor, int lonFloor) {
+  const QString ns = latFloor >= 0
+                         ? QStringLiteral("N%1").arg(latFloor, 2, 10, QChar('0'))
+                         : QStringLiteral("S%1").arg(-latFloor, 2, 10, QChar('0'));
+  const QString ew = lonFloor >= 0
+                         ? QStringLiteral("E%1").arg(lonFloor, 3, 10, QChar('0'))
+                         : QStringLiteral("W%1").arg(-lonFloor, 3, 10, QChar('0'));
+  const QString tile = QStringLiteral("Copernicus_DSM_COG_10_%1_00_%2_00_DEM").arg(ns, ew);
+  return QStringLiteral("/vsicurl/https://copernicus-dem-30m.s3.amazonaws.com/%1/%1.tif").arg(tile);
+}
+
+static bool tryAddCopernicusViewDem(QgsProject* project, QgsMapCanvas* canvas, QString* errorOut) {
+  if (!project || !canvas) return false;
+  QgsRectangle ext = canvas->extent();
+  if (ext.isEmpty() || !ext.isFinite()) return false;
+  QgsCoordinateReferenceSystem wgs(QStringLiteral("EPSG:4326"));
+  const QgsCoordinateReferenceSystem canvasCrs = canvas->mapSettings().destinationCrs();
+  QgsRectangle wgsExt = ext;
+  if (canvasCrs.isValid() && canvasCrs != wgs) {
+    try {
+      const QgsCoordinateTransform tr(canvasCrs, wgs, QgsCoordinateTransformContext());
+      wgsExt = tr.transformBoundingBox(ext);
+    } catch (...) {
+      return false;
+    }
+  }
+  const QgsPointXY c = wgsExt.center();
+  int latFloor = static_cast<int>(std::floor(c.y()));
+  int lonFloor = static_cast<int>(std::floor(c.x()));
+  if (latFloor < -90 || latFloor > 89 || lonFloor < -180 || lonFloor > 179)
+    return false;
+  CPLSetConfigOption("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR");
+  const QString uri = copernicusCogVsicurl(latFloor, lonFloor);
+  auto* rl = new QgsRasterLayer(uri, QStringLiteral("DEM"), QStringLiteral("gdal"));
+  if (!rl->isValid() || rl->bandCount() < 1) {
+    if (errorOut) *errorOut = rl->error().message();
+    delete rl;
+    return false;
+  }
+  QgsRectangle statsExt;
+  if (rl->crs().isValid() && canvasCrs.isValid() && rl->crs() != canvasCrs) {
+    try {
+      const QgsCoordinateTransform tr(canvasCrs, rl->crs(), QgsCoordinateTransformContext());
+      statsExt = tr.transformBoundingBox(ext);
+    } catch (...) {
+    }
+  } else if (rl->crs() == canvasCrs) {
+    statsExt = ext;
+  }
+  LayerOps::applyDemElevationStyle(rl, statsExt);
+  LayerOps::markReferenceLayer(rl);
+  removeLayersNamed(project, QStringLiteral("DEM"));
+  if (!project->addMapLayer(rl, true)) {
+    delete rl;
+    return false;
+  }
+  LayerOps::placeInLegendGroup(project, rl, QStringLiteral("참조 지도"));
+  return true;
+}
+
+double LayerOps::demElevationClassStep(double zMin, double zMax) {
+  if (!std::isfinite(zMin) || !std::isfinite(zMax) || zMax <= zMin) return 20.0;
+  // About 8 legend rows. 5 m steps on a 120 m site made a 24-line tree.
+  const double raw = (zMax - zMin) / 8.0;
+  const double nice[] = {1.0, 2.0, 5.0, 10.0, 15.0, 20.0, 25.0, 50.0, 100.0, 200.0, 250.0, 500.0};
+  for (double s : nice) {
+    if (s + 1e-9 >= raw) return s;
+  }
+  return 500.0;
+}
+
+namespace {
+
+QColor demRampColor(double t) {
+  const QColor cols[] = {QColor(48, 18, 59),  QColor(33, 102, 172), QColor(67, 170, 139),
+                         QColor(201, 219, 87), QColor(253, 174, 97), QColor(165, 0, 38)};
+  t = std::clamp(t, 0.0, 1.0);
+  const double x = t * 5.0;
+  const int i = std::min(4, static_cast<int>(std::floor(x)));
+  const double u = x - double(i);
+  const QColor& a = cols[i];
+  const QColor& b = cols[i + 1];
+  return QColor(int(a.red() + (b.red() - a.red()) * u),
+                int(a.green() + (b.green() - a.green()) * u),
+                int(a.blue() + (b.blue() - a.blue()) * u));
+}
+
+}  // namespace
+
+QList<LayerOps::DemElevationClass> LayerOps::buildDemElevationClasses(double zMin, double zMax,
+                                                                      int classCount,
+                                                                      double stepMeters) {
+  if (!std::isfinite(zMin) || !std::isfinite(zMax) || zMax <= zMin) {
+    zMin = 0.0;
+    zMax = 200.0;
+  }
+  if (zMax - zMin < 2.0) {
+    zMin -= 1.0;
+    zMax += 1.0;
+  }
+  double step = stepMeters;
+  if (!(step > 0.0)) step = demElevationClassStep(zMin, zMax);
+  const double z0 = std::floor(zMin / step) * step;
+  double z1 = std::ceil(zMax / step) * step;
+  if (z1 <= z0) z1 = z0 + step;
+  int n = classCount;
+  if (n < 2) n = static_cast<int>(std::lround((z1 - z0) / step));
+  if (n < 2) n = 2;
+  if (classCount < 2 && n > 8) n = 8;
+  if (n > 12) n = 12;
+  QList<DemElevationClass> out;
+  out.reserve(n);
+  for (int i = 1; i <= n; ++i) {
+    DemElevationClass c;
+    c.lo = z0 + step * double(i - 1);
+    const double hi = z0 + step * double(i);
+    const bool last = (i == n);
+    c.hi = last ? std::numeric_limits<double>::infinity() : hi;
+    const double t = n <= 1 ? 0.0 : double(i - 1) / double(n - 1);
+    c.color = demRampColor(t);
+    c.label = last ? QStringLiteral("%1 m 이상").arg(c.lo, 0, 'f', 0)
+                   : QStringLiteral("%1–%2 m").arg(c.lo, 0, 'f', 0).arg(hi, 0, 'f', 0);
+    out.append(c);
+  }
+  return out;
+}
+
+QList<LayerOps::DemElevationClass> LayerOps::readDemElevationClasses(const QgsRasterLayer* layer) {
+  QList<DemElevationClass> out;
+  if (!layer) return out;
+  auto* rend = dynamic_cast<const QgsSingleBandPseudoColorRenderer*>(layer->renderer());
+  if (!rend || !rend->shader()) return out;
+  auto* fn = dynamic_cast<const QgsColorRampShader*>(rend->shader()->rasterShaderFunction());
+  if (!fn) return out;
+  const QList<QgsColorRampShader::ColorRampItem> items = fn->colorRampItemList();
+  double prev = rend->classificationMin();
+  if (!std::isfinite(prev)) prev = 0.0;
+  for (int i = 0; i < items.size(); ++i) {
+    DemElevationClass c;
+    c.lo = prev;
+    c.hi = items[i].value;
+    c.color = items[i].color;
+    c.label = items[i].label;
+    out.append(c);
+    if (std::isfinite(items[i].value)) prev = items[i].value;
+  }
+  return out;
+}
+
+bool LayerOps::applyDemElevationStyle(QgsRasterLayer* layer) {
+  return applyDemElevationStyle(layer, QgsRectangle(), DemElevationStyle());
+}
+
+bool LayerOps::applyDemElevationStyle(QgsRasterLayer* layer, const QgsRectangle& statsExtent) {
+  return applyDemElevationStyle(layer, statsExtent, DemElevationStyle());
+}
+
+bool LayerOps::applyDemElevationStyle(QgsRasterLayer* layer, const QgsRectangle& statsExtent,
+                                      const DemElevationStyle& style) {
+  if (!layer || !layer->isValid() || layer->bandCount() < 1) return false;
+  QgsRasterDataProvider* dp = layer->dataProvider();
+  if (!dp) return false;
+  QList<DemElevationClass> classes = style.classes;
+  double zMin = 0.0;
+  double zMax = 200.0;
+  if (classes.isEmpty()) {
+    // Sampled min/max only (200). Last Discrete class is +inf so peaks above
+    // the sample stay colored. sampleSize=0 would scan a whole /vsicurl COG.
+    QgsRasterBandStats st =
+        dp->bandStatistics(1, Qgis::RasterBandStatistic::Min | Qgis::RasterBandStatistic::Max,
+                           statsExtent, 200);
+    zMin = st.minimumValue;
+    zMax = st.maximumValue;
+    if (!std::isfinite(zMin) || !std::isfinite(zMax) || zMax <= zMin) {
+      zMin = 0.0;
+      zMax = 200.0;
+    }
+    classes = buildDemElevationClasses(zMin, zMax, style.classCount, style.stepMeters);
+  } else {
+    zMin = classes.first().lo;
+    zMax = zMin;
+    for (const DemElevationClass& c : classes) {
+      if (std::isfinite(c.lo) && c.lo < zMin) zMin = c.lo;
+      if (std::isfinite(c.hi) && c.hi > zMax) zMax = c.hi;
+      if (std::isfinite(c.lo) && c.lo > zMax) zMax = c.lo;
+    }
+    if (!(zMax > zMin)) zMax = zMin + 1.0;
+    classes.last().hi = std::numeric_limits<double>::infinity();
+  }
+  if (classes.size() < 2) return false;
+  QList<QgsColorRampShader::ColorRampItem> items;
+  for (int i = 0; i < classes.size(); ++i) {
+    const DemElevationClass& c = classes[i];
+    const bool last = (i == classes.size() - 1);
+    const double cut = last ? std::numeric_limits<double>::infinity() : c.hi;
+    QString label = c.label.trimmed();
+    if (label.isEmpty()) {
+      label = last ? QStringLiteral("%1 m 이상").arg(c.lo, 0, 'f', 0)
+                   : QStringLiteral("%1–%2 m").arg(c.lo, 0, 'f', 0).arg(c.hi, 0, 'f', 0);
+    }
+    items.append(QgsColorRampShader::ColorRampItem(cut, c.color, label));
+  }
+  auto* ramp = new QgsColorRampShader(zMin, zMax);
+  ramp->setColorRampType(Qgis::ShaderInterpolationMethod::Discrete);
+  ramp->setClassificationMode(Qgis::ShaderClassificationMethod::EqualInterval);
+  ramp->setClip(false);
+  ramp->setColorRampItemList(items);
+  auto* legend = new QgsColorRampLegendNodeSettings();
+  legend->setUseContinuousLegend(false);
+  legend->setSuffix(QString());
+  ramp->setLegendSettings(legend);
+  auto* shader = new QgsRasterShader();
+  shader->setRasterShaderFunction(ramp);
+  auto* rend = new QgsSingleBandPseudoColorRenderer(dp, 1, shader);
+  rend->setClassificationMin(zMin);
+  rend->setClassificationMax(zMax);
+  QgsRasterMinMaxOrigin origin;
+  origin.setLimits(Qgis::RasterRangeLimit::NotSet);
+  origin.setExtent(Qgis::RasterRangeExtent::WholeRaster);
+  rend->setMinMaxOrigin(origin);
+  layer->setRenderer(rend);
+  if (QgsRasterResampleFilter* rf = layer->resampleFilter()) {
+    rf->setZoomedInResampler(new QgsBilinearRasterResampler());
+    rf->setZoomedOutResampler(new QgsBilinearRasterResampler());
+  }
+  layer->setOpacity(0.88);
+  layer->triggerRepaint();
+  return true;
+}
+
+bool LayerOps::addDemElevationRaster(QgsProject* project, QgsMapCanvas* canvas, const QString& path,
+                                     QString* errorOut) {
+  if (!project) {
+    if (errorOut) *errorOut = QStringLiteral("프로젝트가 없습니다.");
+    return false;
+  }
+  const QFileInfo fi(path);
+  if (!fi.exists()) {
+    if (errorOut) *errorOut = QStringLiteral("DEM 파일이 없습니다.");
+    return false;
+  }
+  auto* rl = new QgsRasterLayer(path, QStringLiteral("DEM"), QStringLiteral("gdal"));
+  if (!rl->isValid() || rl->bandCount() < 1) {
+    if (errorOut)
+      *errorOut = QStringLiteral("국토지리원 DEM(.img)을 열 수 없습니다: %1")
+                      .arg(rl->error().message());
+    delete rl;
+    return false;
+  }
+  LayerOps::applyDemElevationStyle(rl);
+  LayerOps::markReferenceLayer(rl);
+  LayerOps::applyLegendCrsLabel(rl);
+  removeLayersNamed(project, QStringLiteral("DEM"));
+  if (!project->addMapLayer(rl, true)) {
+    delete rl;
+    if (errorOut) *errorOut = QStringLiteral("DEM 레이어를 넣지 못했습니다.");
+    return false;
+  }
+  LayerOps::placeInLegendGroup(project, rl, QStringLiteral("참조 지도"));
+  if (canvas && !canvas->isDrawing()) {
+    const QgsRectangle e = rl->extent();
+    if (!rl->crs().isGeographic() && e.isFinite() && e.width() > 0 && e.width() < 20000.0 &&
+        e.height() < 20000.0)
+      LayerOps::zoomToLayerMax(canvas, rl);
+    else
+      LayerOps::syncMapCanvas(project, canvas, false);
+  }
+  return true;
+}
+
+bool LayerOps::addDemColorReliefMap(QgsProject* project, QgsMapCanvas* canvas, QString* errorOut) {
+  const QString name = QStringLiteral("DEM");
+  // One-click: Copernicus GLO-30 /vsicurl/copernicus-dem + applyDemElevationStyle
+  // (meter legend). GIBS RGB stays fallback when the COG cannot open.
+  if (tryAddCopernicusViewDem(project, canvas, errorOut))
+    return true;
+  // NASA GIBS ASTER GDEM color + hillshade. XYZ/WMTS REST uses z/y/x.
+  // Never VWorld WMS GetMap (crash-20260901-102801).
+  const QStringList uris = {
+      QStringLiteral(
+          "type=xyz&url=https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/"
+          "ASTER_GDEM_Color_Shaded_Relief/default/GoogleMapsCompatible_Level12/"
+          "%7Bz%7D/%7By%7D/%7Bx%7D.jpeg"
+          "&zmax=12&zmin=2&crs=EPSG:3857&tilePixelRatio=1"),
+      QStringLiteral(
+          "type=xyz&url=https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/"
+          "ASTER_GDEM_Color_Shaded_Relief/default/2000-01-01/GoogleMapsCompatible_Level12/"
+          "%7Bz%7D/%7By%7D/%7Bx%7D.jpeg"
+          "&zmax=12&zmin=2&crs=EPSG:3857&tilePixelRatio=1"),
+  };
+  if (!addBasemapWithFallbacks(project, canvas, uris, name, errorOut))
+    return false;
+  for (QgsMapLayer* l : project->mapLayers()) {
+    if (l && legendTitlesMatch(l->name(), name))
+      LayerOps::placeInLegendGroup(project, l, QStringLiteral("참조 지도"));
+  }
+  return true;
 }
 
 // 토양도 참조 스타일. categoryField 값별 반투명 채움 + 옅은 외곽선.
@@ -1782,7 +2150,6 @@ QgsVectorLayer* LayerOps::addSoilShapefile(QgsProject* project, QgsMapCanvas* ca
     LayerOps::ensureOtfEnabled(project, canvas, workAuth);
     LayerOps::syncMapCanvas(project, canvas, false);
     LayerOps::zoomToLayerMax(canvas, layer);
-    canvas->refreshAllLayers();
   }
   return layer;
 }
@@ -1809,7 +2176,7 @@ bool LayerOps::setLayerOpacity(QgsProject* project, QgsMapCanvas* canvas, const 
       rl->setOpacity(op);
     }
   }
-  if (canvas) canvas->refreshAllLayers();
+  refreshCanvasIfIdle(canvas);
   return true;
 }
 
@@ -1824,8 +2191,29 @@ bool LayerOps::toggleLayerVisibility(QgsProject* project, QgsMapCanvas* canvas, 
       node->setItemVisibilityChecked(visible);
     }
   }
-  if (canvas) canvas->refreshAllLayers();
+  refreshCanvasIfIdle(canvas);
   return true;
+}
+
+bool LayerOps::isLayerVisible(QgsProject* project, const QString& name) {
+  if (!project) return false;
+  const auto layers = layersMatchingBaseName(project, name);
+  if (layers.isEmpty()) return false;
+  QgsLayerTree* root = project->layerTreeRoot();
+  for (QgsMapLayer* l : layers) {
+    if (!l) continue;
+    if (QgsLayerTreeLayer* node = root->findLayer(l->id())) {
+      if (node->itemVisibilityChecked()) return true;
+    }
+  }
+  return false;
+}
+
+void LayerOps::refreshCanvasIfIdle(QgsMapCanvas* canvas) {
+  if (!canvas || canvas->isDrawing()) return;
+  canvas->setParallelRenderingEnabled(false);
+  canvas->setPreviewJobsEnabled(false);
+  canvas->refresh();
 }
 
 bool LayerOps::addKoreaBasemap(QgsProject* project, QgsMapCanvas* canvas, KoreaBasemap kind,
@@ -1995,6 +2383,7 @@ static double canvasViewAspect(const QgsMapCanvas* canvas) {
 
 bool LayerOps::clampCanvasToKorea(QgsMapCanvas* canvas) {
   if (!canvas) return false;
+  if (canvas->isDrawing()) return false;
   const QString auth = canvas->mapSettings().destinationCrs().isValid()
                            ? canvas->mapSettings().destinationCrs().authid()
                            : QStringLiteral("EPSG:5186");
@@ -2004,7 +2393,6 @@ bool LayerOps::clampCanvasToKorea(QgsMapCanvas* canvas) {
   const QgsRectangle fitted = extentFittedInside(kr, canvasViewAspect(canvas));
   const QgsRectangle cur = canvas->extent();
   if (cur.isEmpty() || !cur.isFinite()) {
-    canvas->stopRendering();
     canvas->setExtent(fitted);
     return true;
   }
@@ -2020,7 +2408,6 @@ bool LayerOps::clampCanvasToKorea(QgsMapCanvas* canvas) {
   if (cur.width() > kr.width() || cur.height() > kr.height()) {
     if (alreadySnapped)
       return false;
-    canvas->stopRendering();
     canvas->setExtent(fitted);
     return true;
   }
@@ -2055,7 +2442,6 @@ bool LayerOps::clampCanvasToKorea(QgsMapCanvas* canvas) {
       qAbs(clamped.yMinimum() - cur.yMinimum()) > eps ||
       qAbs(clamped.xMaximum() - cur.xMaximum()) > eps ||
       qAbs(clamped.yMaximum() - cur.yMaximum()) > eps) {
-    canvas->stopRendering();
     canvas->setExtent(clamped);
     return true;
   }
@@ -2087,8 +2473,7 @@ void LayerOps::zoomToKorea(QgsMapCanvas* canvas, const QString& epsgAuthId, bool
   canvas->setRenderFlag(true);
   if (!refresh) return;
   canvas->freeze(false);
-  canvas->refreshAllLayers();
-  canvas->refresh();
+  refreshCanvasIfIdle(canvas);
 }
 
 QString LayerOps::convertToShp5179(QgsVectorLayer* layer, const QString& outShpPath,
@@ -2313,6 +2698,46 @@ bool LayerOps::undoCommittedFeature(QgsVectorLayer* layer, qint64 featureId, QSt
   return true;
 }
 
+bool LayerOps::moveFeatureVertex(QgsVectorLayer* layer, qint64 featureId, int vertex,
+                                 double x, double y, QString* errorOut) {
+  if (!layer || !layer->isValid()) {
+    if (errorOut) *errorOut = QStringLiteral("레이어가 없습니다.");
+    return false;
+  }
+  if (isReferenceLayer(layer)) {
+    if (errorOut) *errorOut = QStringLiteral("참조 지도는 고칠 수 없습니다.");
+    return false;
+  }
+  if (vertex < 0) {
+    if (errorOut) *errorOut = QStringLiteral("꼭짓점이 없습니다.");
+    return false;
+  }
+  const QgsFeatureId fid = static_cast<QgsFeatureId>(featureId);
+  QgsFeature existing = layer->getFeature(fid);
+  if (!existing.isValid() || !existing.hasGeometry()) {
+    if (errorOut) *errorOut = QStringLiteral("고칠 도형을 찾지 못했습니다.");
+    return false;
+  }
+  QgsGeometry g = existing.geometry();
+  if (!g.moveVertex(x, y, vertex)) {
+    if (errorOut) *errorOut = QStringLiteral("꼭짓점을 옮기지 못했습니다.");
+    return false;
+  }
+  const bool startedHere = !layer->isEditable();
+  if (startedHere && !layer->startEditing()) {
+    if (errorOut) *errorOut = QStringLiteral("편집을 열 수 없습니다.");
+    return false;
+  }
+  if (!layer->changeGeometry(fid, g)) {
+    if (errorOut) *errorOut = QStringLiteral("도형을 고치지 못했습니다.");
+    if (startedHere) layer->rollBack();
+    return false;
+  }
+  layer->updateExtents();
+  layer->triggerRepaint();
+  return true;
+}
+
 bool LayerOps::hasVisibleReferenceLayer(QgsProject* project) {
   if (!project) return false;
   QgsLayerTree* root = project->layerTreeRoot();
@@ -2331,9 +2756,8 @@ bool LayerOps::removeConfirmedLayers(QgsProject* project, QgsMapCanvas* canvas, 
   for (const QString& id : layerIds) {
     project->removeMapLayer(id);
   }
-  if (canvas) {
-    canvas->refreshAllLayers();
-  }
+  if (canvas)
+    refreshCanvasIfIdle(canvas);
   return true;
 }
 

@@ -20,6 +20,16 @@ private slots:
   void trench1x1Is40m2();
   void trenchTwoColsSpacedByBalk();
   void buildInAreaKeepsCellsInsideAndRatio();
+  void buildInArea_shortAreaPlacesByCentroid();
+  void startTrenchGrid_placesOnMapWithoutApplyClick();
+  void pickAutoFillArea_usesNewestNotAllUnion();
+  void pickAutoFillArea_usesSelectedOnly();
+  void startTrenchGrid_doesNotUnionAllSurveyAreas();
+  void buildForTargetRatio_hitsTenPercent();
+  void buildForTargetRatio_hitsTwoPercent();
+  void layerTreeMenu_hasLabelToggleAndTrenchRatio();
+  void applySnapConfig_vertexAndSegmentNotWmsPromise();
+  void trenchWholeMove_commitsOnMouseRelease();
   void clearLayerReplacesPreviousGrid();
   void hillshadeWritesByteTif();
   void niceMeterStepAround120px();
@@ -100,6 +110,175 @@ void TestDemTrench::buildInAreaKeepsCellsInsideAndRatio() {
   QVERIFY2(std::abs(total - 27 * 40.0) < 0.01, qPrintable(QString::number(total)));
   const double pct = total / (100.0 * 100.0) * 100.0;
   QVERIFY2(pct > 10.0 && pct < 11.0, qPrintable(QString::number(pct)));  // 10.8%
+}
+
+// 2×20 m 트렌치가 구역 한 변보다 길면 Contains는 0개. 중심이 구역 안이면 깔아야 한다.
+void TestDemTrench::buildInArea_shortAreaPlacesByCentroid() {
+  TrenchGridGenerator::Spec s;
+  s.trenchWidth = 2.0;
+  s.trenchLength = 20.0;
+  s.balkWidth = 1.0;
+  s.azimuthDeg = 0.0;
+  const QByteArray area = squareWkb(0.0, 0.0, 12.0, 18.0);
+  const auto cells = TrenchGridGenerator::buildInArea(s, area);
+  QVERIFY2(!cells.empty(), "짧은 조사구역에도 시굴격자가 생겨야 한다");
+  for (const auto& c : cells) {
+    const double cx = (c.ring[0].first + c.ring[2].first) * 0.5;
+    const double cy = (c.ring[0].second + c.ring[2].second) * 0.5;
+    QVERIFY2(cx >= -1e-6 && cx <= 12.0 + 1e-6 && cy >= -1e-6 && cy <= 18.0 + 1e-6,
+             "centroid must stay in the survey area");
+  }
+}
+
+// 예전 조사구역이 남아 있어도 자동 배치는 마지막(또는 선택한) 구역만 쓴다.
+void TestDemTrench::pickAutoFillArea_usesNewestNotAllUnion() {
+  const auto oldBig = squareWkb(0.0, 0.0, 1000.0, 1000.0);
+  const auto newSmall = squareWkb(0.0, 0.0, 20.0, 20.0);
+  const std::vector<TrenchGridGenerator::SurveyPoly> feats{{oldBig, 1}, {newSmall, 2}};
+  const auto pick = TrenchGridGenerator::pickAutoFillArea(feats, {});
+  QVERIFY2(!pick.usedSelection, "선택이 없으면 마지막 구역만");
+  QCOMPARE(pick.usedCount, 1);
+  QCOMPARE(pick.totalCount, 2);
+  QVERIFY2(std::abs(pick.areaM2 - 400.0) < 1.0, qPrintable(QString::number(pick.areaM2)));
+  TrenchGridGenerator::Spec s;
+  s.trenchWidth = 2.0;
+  s.trenchLength = 20.0;
+  s.balkWidth = 10.0;
+  s.azimuthDeg = 0.0;
+  const auto cells = TrenchGridGenerator::buildInArea(s, pick.wkb);
+  QVERIFY2(!cells.empty(), "새 조사구역 안에도 격자가 생겨야 한다");
+  QVERIFY2(static_cast<int>(cells.size()) < 20, "옛 구역 유니온이면 수백 칸이 된다");
+  for (const auto& c : cells) {
+    for (const auto& pt : c.ring) {
+      QVERIFY2(pt.first <= 20.0 + 1e-6 && pt.second <= 20.0 + 1e-6, "cell outside newest area");
+    }
+  }
+}
+
+void TestDemTrench::pickAutoFillArea_usesSelectedOnly() {
+  const auto oldBig = squareWkb(0.0, 0.0, 100.0, 100.0);
+  const auto newSmall = squareWkb(200.0, 200.0, 220.0, 220.0);
+  const std::vector<TrenchGridGenerator::SurveyPoly> feats{{oldBig, 1}, {newSmall, 2}};
+  const auto pick = TrenchGridGenerator::pickAutoFillArea(feats, {1});
+  QVERIFY(pick.usedSelection);
+  QCOMPARE(pick.usedCount, 1);
+  QVERIFY2(std::abs(pick.areaM2 - 10000.0) < 1.0, qPrintable(QString::number(pick.areaM2)));
+  TrenchGridGenerator::Spec s;
+  s.trenchWidth = 2.0;
+  s.trenchLength = 20.0;
+  s.balkWidth = 10.0;
+  const auto cells = TrenchGridGenerator::buildInArea(s, pick.wkb);
+  QVERIFY(!cells.empty());
+  for (const auto& c : cells) {
+    const double cx = (c.ring[0].first + c.ring[2].first) * 0.5;
+    const double cy = (c.ring[0].second + c.ring[2].second) * 0.5;
+    QVERIFY2(cx >= -1e-6 && cx <= 100.0 + 1e-6 && cy >= -1e-6 && cy <= 100.0 + 1e-6,
+             "selected old area only");
+  }
+}
+
+void TestDemTrench::startTrenchGrid_doesNotUnionAllSurveyAreas() {
+  QFile f(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
+  const QString src = QString::fromUtf8(f.readAll());
+  const int start = src.indexOf(QLatin1String("void MainWindow::startTrenchGrid()"));
+  const int next = src.indexOf(QLatin1String("bool MainWindow::applyTrenchFromDialog()"));
+  QVERIFY2(start >= 0 && next > start, "startTrenchGrid");
+  const QString fn = src.mid(start, next - start);
+  QVERIFY2(src.contains(QLatin1String("pickAutoFillArea")),
+           "시굴격자는 survey_area 전체를 combine 하지 말고 pickAutoFillArea를 쓴다");
+  QVERIFY2(fn.contains(QLatin1String("trenchFillFromSurveyLayer")) ||
+               fn.contains(QLatin1String("pickAutoFillArea")),
+           "startTrenchGrid는 leftover union 대신 고른 구역만 써야 한다");
+  QVERIFY2(!fn.contains(QLatin1String("uni.combine")),
+           "남은 조사구역을 union 하면 옛 구역에 격자가 깔린다");
+}
+
+void TestDemTrench::buildForTargetRatio_hitsTenPercent() {
+  const QByteArray area = squareWkb(0.0, 0.0, 100.0, 100.0);
+  const auto plan = TrenchGridGenerator::buildForTargetRatio(area, 10.0, 2.0);
+  QVERIFY2(!plan.cells.empty(), "시굴 10% 격자가 비면 안 된다");
+  for (const auto& c : plan.cells) {
+    QVERIFY2(std::abs(c.width - 2.0) < 1e-9, "폭은 2 m 고정");
+    QVERIFY2(c.length > 0.0, "길이를 배분해야 한다");
+    for (const auto& pt : c.ring) {
+      QVERIFY2(pt.first >= -1e-6 && pt.first <= 100.0 + 1e-6, "x out of area");
+      QVERIFY2(pt.second >= -1e-6 && pt.second <= 100.0 + 1e-6, "y out of area");
+    }
+  }
+  const double pct = TrenchGridGenerator::totalArea(plan.cells) / 10000.0 * 100.0;
+  QVERIFY2(pct >= 8.5 && pct <= 11.5, qPrintable(QStringLiteral("시굴 %1%").arg(pct)));
+}
+
+void TestDemTrench::buildForTargetRatio_hitsTwoPercent() {
+  const QByteArray area = squareWkb(0.0, 0.0, 100.0, 100.0);
+  const auto plan = TrenchGridGenerator::buildForTargetRatio(area, 2.0, 2.0);
+  QVERIFY2(!plan.cells.empty(), "표본 2% 격자가 비면 안 된다");
+  for (const auto& c : plan.cells)
+    QVERIFY2(std::abs(c.width - 2.0) < 1e-9, "폭은 2 m 고정");
+  const double pct = TrenchGridGenerator::totalArea(plan.cells) / 10000.0 * 100.0;
+  QVERIFY2(pct >= 1.2 && pct <= 2.8, qPrintable(QStringLiteral("표본 %1%").arg(pct)));
+  QVERIFY2(pct < 8.0, "표본은 시굴(10%)보다 훨씬 적어야 한다");
+}
+
+void TestDemTrench::layerTreeMenu_hasLabelToggleAndTrenchRatio() {
+  QFile f(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
+  const QString src = QString::fromUtf8(f.readAll());
+  const int start = src.indexOf(QLatin1String("void MainWindow::onLayerTreeContextMenu"));
+  const int next = src.indexOf(QLatin1String("void MainWindow::renameSelectedLayer"));
+  QVERIFY2(start >= 0 && next > start, "onLayerTreeContextMenu");
+  const QString fn = src.mid(start, next - start);
+  QVERIFY2(fn.contains(QStringLiteral("글자")), "레이어 우클릭에 글자 켜기/끄기가 있어야 한다");
+  QVERIFY2(fn.contains(QStringLiteral("시굴격자")), "조사구역 우클릭에 시굴격자 메뉴가 있어야 한다");
+  QVERIFY2(fn.contains(QStringLiteral("시굴")) && fn.contains(QStringLiteral("표본")),
+           "시굴·표본 두 항목");
+  QVERIFY2(src.contains(QLatin1String("applyTrenchByRatio")) ||
+               src.contains(QLatin1String("buildForTargetRatio")),
+           "10%/2%는 길이 배분으로 자동 배치해야 한다");
+  QVERIFY2(src.contains(QLatin1String("setLabelsVisible")),
+           "글자 토글은 LayerOps::setLabelsVisible");
+}
+
+void TestDemTrench::applySnapConfig_vertexAndSegmentNotWmsPromise() {
+  QFile f(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
+  const QString src = QString::fromUtf8(f.readAll());
+  const int snap = src.indexOf(QLatin1String("void MainWindow::applySnapConfig()"));
+  QVERIFY2(snap >= 0, "applySnapConfig");
+  const QString fn = src.mid(snap, 700);
+  QVERIFY2(fn.contains(QLatin1String("SnappingType::Vertex")), "꼭짓점 자석");
+  QVERIFY2(fn.contains(QLatin1String("SnappingType::Segment")),
+           "선에도 붙어야 조사구역·SHP 그리기가 편하다");
+  QVERIFY2(src.contains(QStringLiteral("위성·지적 그림")),
+           "지적 WMS는 그림이라 자석이 안 붙는다고 안내해야 한다");
+}
+
+void TestDemTrench::startTrenchGrid_placesOnMapWithoutApplyClick() {
+  QFile f(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
+  const QString src = QString::fromUtf8(f.readAll());
+  const int start = src.indexOf(QLatin1String("void MainWindow::startTrenchGrid()"));
+  const int next = src.indexOf(QLatin1String("bool MainWindow::applyTrenchFromDialog()"));
+  QVERIFY2(start >= 0 && next > start, "startTrenchGrid");
+  const QString fn = src.mid(start, next - start);
+  const int shown = fn.indexOf(QLatin1String("m_trenchDlg->show()"));
+  QVERIFY2(shown >= 0, "startTrenchGrid shows the adjust panel");
+  const QString afterShow = fn.mid(shown);
+  QVERIFY2(afterShow.contains(QLatin1String("applyTrenchFromDialog()")) ||
+               afterShow.contains(QLatin1String("beginTrenchOriginPick()")),
+           "시굴격자는 속성 창만 띄우지 말고 바로 맵에 깔거나 원점을 찍게 해야 한다");
+}
+
+void TestDemTrench::trenchWholeMove_commitsOnMouseRelease() {
+  QFile f(QStringLiteral("src/app/KaTrenchMoveTool.cpp"));
+  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "KaTrenchMoveTool.cpp");
+  const QString src = QString::fromUtf8(f.readAll());
+  const int rel = src.indexOf(QLatin1String("void KaTrenchMoveTool::canvasReleaseEvent"));
+  QVERIFY2(rel >= 0, "canvasReleaseEvent");
+  const QString fn = src.mid(rel, 900);
+  QVERIFY2(fn.contains(QLatin1String("applyTranslate(")),
+           "전체 이동은 끌어다 놓으면 격자 전체가 옮겨져야 한다");
 }
 
 // "새로 만들기"는 이전 격자를 대체해야 한다(겹침 금지).

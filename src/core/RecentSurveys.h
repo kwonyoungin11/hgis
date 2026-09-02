@@ -16,6 +16,7 @@ public:
 
   static QSettings userSettings();
   static QVector<Item> load(QSettings& settings);
+  static QString lastPath(QSettings& settings);
   static void remember(QSettings& settings, const QString& path, const QString& name);
   static void forget(QSettings& settings, const QString& path);
 };

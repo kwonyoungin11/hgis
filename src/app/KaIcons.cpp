@@ -398,6 +398,16 @@ void dTrenchGrid(QPainter& p) {
 }
 
 // 토양 단면: 지표 풀 + 층위 2단 + 아래층 자갈.
+void dPaleo(QPainter& p) {
+  // 옛 하도(아래 물결) + 자연제방 둔덕.
+  prep(p, 2.4);
+  p.drawArc(QRectF(12, 36, 18, 14), 20 * 16, 140 * 16);
+  p.drawArc(QRectF(28, 36, 22, 14), 20 * 16, 140 * 16);
+  p.drawLine(QPointF(14, 34), QPointF(24, 18));
+  p.drawLine(QPointF(24, 18), QPointF(34, 34));
+  p.drawLine(QPointF(18, 28), QPointF(30, 28));
+}
+
 void dSoil(QPainter& p) {
   prep(p, 2.4);
   p.drawRoundedRect(QRectF(14, 16, 36, 34), 3, 3);
@@ -610,6 +620,7 @@ QIcon icon(const QString& id) {
   else if (id == QLatin1String("dem") || id == QLatin1String("hillshade")) ic = bake(dDem);
   else if (id == QLatin1String("trench_grid") || id == QLatin1String("trench")) ic = bake(dTrenchGrid);
   else if (id == QLatin1String("soil")) ic = bake(dSoil);
+  else if (id == QLatin1String("paleo") || id == QLatin1String("paleo_landform")) ic = bake(dPaleo);
   else if (id == QLatin1String("geology")) ic = bake(dGeology);
   else if (id == QLatin1String("river") || id == QLatin1String("hydro")) ic = bake(dRiver);
   else if (id == QLatin1String("map_grid") || id == QLatin1String("graticule")) ic = bake(dMapGrid);

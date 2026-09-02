@@ -13,7 +13,7 @@ class QKeyEvent;
 // trial_trench 편집 도구. ArcGIS 그래픽 레이어처럼 다룬다:
 //  - Single 모드(기본): 트렌치를 클릭해 선택 → 끌어서 하나만 이동,
 //    Delete/Backspace 또는 우클릭 = 그 트렌치만 삭제
-//  - Whole 모드: 모서리 찍고 놓을 곳 찍기 = 격자 전체 이동
+//  - Whole 모드: 끌어다 놓기 = 격자 전체 이동
 class KaTrenchMoveTool : public QgsMapTool {
   Q_OBJECT
 public:

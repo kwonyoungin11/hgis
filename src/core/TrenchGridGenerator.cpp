@@ -2,8 +2,10 @@
 
 #include <cmath>
 #include <cstring>
+#include <unordered_set>
 
 #include <gdal.h>
+#include <ogr_api.h>
 #include <ogr_feature.h>
 #include <ogr_geometry.h>
 #include <ogr_spatialref.h>
@@ -57,6 +59,84 @@ std::vector<Cell> build(const Spec& spec) {
       out.push_back(cell);
     }
   }
+  return out;
+}
+
+namespace {
+
+OGRGeometry* geomFromWkb(const QByteArray& wkb) {
+  if (wkb.isEmpty())
+    return nullptr;
+  OGRGeometry* g = nullptr;
+  OGRGeometryFactory::createFromWkb(wkb.constData(), nullptr, &g, static_cast<size_t>(wkb.size()));
+  return g;
+}
+
+QByteArray wkbFromGeom(OGRGeometry* g) {
+  QByteArray out;
+  if (!g)
+    return out;
+  out.resize(static_cast<int>(g->WkbSize()));
+  g->exportToWkb(wkbNDR, reinterpret_cast<unsigned char*>(out.data()));
+  return out;
+}
+
+}  // namespace
+
+PickedArea pickAutoFillArea(const std::vector<SurveyPoly>& features,
+                            const std::vector<qint64>& selectedFids) {
+  PickedArea out;
+  std::vector<const SurveyPoly*> valid;
+  valid.reserve(features.size());
+  for (const SurveyPoly& f : features) {
+    if (f.wkb.isEmpty())
+      continue;
+    valid.push_back(&f);
+  }
+  out.totalCount = static_cast<int>(valid.size());
+  if (valid.empty())
+    return out;
+
+  std::vector<const SurveyPoly*> use;
+  const std::unordered_set<qint64> sel(selectedFids.begin(), selectedFids.end());
+  if (!sel.empty()) {
+    for (const SurveyPoly* f : valid) {
+      if (sel.count(f->fid))
+        use.push_back(f);
+    }
+    if (!use.empty())
+      out.usedSelection = true;
+  }
+  if (use.empty()) {
+    const SurveyPoly* newest = valid.front();
+    for (const SurveyPoly* f : valid) {
+      if (f->fid > newest->fid)
+        newest = f;
+    }
+    use.push_back(newest);
+    out.usedSelection = false;
+  }
+  out.usedCount = static_cast<int>(use.size());
+
+  OGRGeometry* acc = nullptr;
+  for (const SurveyPoly* f : use) {
+    OGRGeometry* g = geomFromWkb(f->wkb);
+    if (!g)
+      continue;
+    if (!acc) {
+      acc = g;
+      continue;
+    }
+    OGRGeometry* uni = acc->Union(g);
+    OGRGeometryFactory::destroyGeometry(acc);
+    OGRGeometryFactory::destroyGeometry(g);
+    acc = uni;
+  }
+  if (!acc)
+    return out;
+  out.areaM2 = OGR_G_Area(OGRGeometry::ToHandle(acc));
+  out.wkb = wkbFromGeom(acc);
+  OGRGeometryFactory::destroyGeometry(acc);
   return out;
 }
 
@@ -126,39 +206,99 @@ std::vector<Cell> buildInArea(const Spec& spec, const QByteArray& areaWkb) {
     return out;
   }
 
-  int n = 1;
-  for (long long j = 0; j < nv; ++j) {
-    const double v0 = vMin + j * stepV;
-    for (long long i = 0; i < nu; ++i) {
-      const double u0 = uMin + i * stepU;
-      const auto p0 = world(u0, v0);
-      const auto p1 = world(u0 + w, v0);
-      const auto p2 = world(u0 + w, v0 + len);
-      const auto p3 = world(u0, v0 + len);
-      OGRLinearRing ring;
-      ring.addPoint(p0.first, p0.second);
-      ring.addPoint(p1.first, p1.second);
-      ring.addPoint(p2.first, p2.second);
-      ring.addPoint(p3.first, p3.second);
-      ring.addPoint(p0.first, p0.second);
-      OGRPolygon poly;
-      poly.addRing(&ring);
-      if (!area->Contains(&poly))
-        continue;
-      Cell cell;
-      cell.name = spec.namePrefix + QString::number(n++);
-      cell.width = w;
-      cell.length = len;
-      cell.ring[0] = p0;
-      cell.ring[1] = p1;
-      cell.ring[2] = p2;
-      cell.ring[3] = p3;
-      cell.ring[4] = p0;
-      out.push_back(cell);
+  auto collect = [&](bool centroidOk) {
+    int n = 1;
+    std::vector<Cell> got;
+    for (long long j = 0; j < nv; ++j) {
+      const double v0 = vMin + j * stepV;
+      for (long long i = 0; i < nu; ++i) {
+        const double u0 = uMin + i * stepU;
+        const auto p0 = world(u0, v0);
+        const auto p1 = world(u0 + w, v0);
+        const auto p2 = world(u0 + w, v0 + len);
+        const auto p3 = world(u0, v0 + len);
+        OGRLinearRing ring;
+        ring.addPoint(p0.first, p0.second);
+        ring.addPoint(p1.first, p1.second);
+        ring.addPoint(p2.first, p2.second);
+        ring.addPoint(p3.first, p3.second);
+        ring.addPoint(p0.first, p0.second);
+        OGRPolygon poly;
+        poly.addRing(&ring);
+        if (centroidOk) {
+          OGRPoint mid((p0.first + p2.first) * 0.5, (p0.second + p2.second) * 0.5);
+          if (!area->Contains(&mid))
+            continue;
+        } else if (!area->Contains(&poly)) {
+          continue;
+        }
+        Cell cell;
+        cell.name = spec.namePrefix + QString::number(n++);
+        cell.width = w;
+        cell.length = len;
+        cell.ring[0] = p0;
+        cell.ring[1] = p1;
+        cell.ring[2] = p2;
+        cell.ring[3] = p3;
+        cell.ring[4] = p0;
+        got.push_back(cell);
+      }
     }
-  }
+    return got;
+  };
+
+  out = collect(false);
+  if (out.empty())
+    out = collect(true);
   OGRGeometryFactory::destroyGeometry(area);
   return out;
+}
+
+RatioFill buildForTargetRatio(const QByteArray& areaWkb, double targetPct, double width) {
+  RatioFill best;
+  const double w = std::abs(width);
+  if (areaWkb.isEmpty() || !(w > 0.0) || !(targetPct > 0.0))
+    return best;
+
+  OGRGeometry* area = geomFromWkb(areaWkb);
+  if (!area)
+    return best;
+  const double areaM2 = OGR_G_Area(OGRGeometry::ToHandle(area));
+  OGRGeometryFactory::destroyGeometry(area);
+  if (!(areaM2 > 1e-6))
+    return best;
+  best.areaM2 = areaM2;
+
+  Spec s;
+  s.trenchWidth = w;
+  s.azimuthDeg = 0.0;
+  s.namePrefix = targetPct <= 3.5 ? QStringLiteral("Sp-") : QStringLiteral("Tr-");
+
+  double bestScore = 1e300;
+  const double lengths[] = {8.0, 10.0, 12.0, 16.0, 20.0, 24.0, 30.0, 40.0};
+  for (double len : lengths) {
+    s.trenchLength = len;
+    for (double balk = 2.0; balk <= 120.0; balk += 2.0) {
+      s.balkWidth = balk;
+      auto cells = buildInArea(s, areaWkb);
+      if (cells.empty())
+        continue;
+      const double pct = totalArea(cells) / areaM2 * 100.0;
+      double score = std::abs(pct - targetPct);
+      if (pct > targetPct + 1.0)
+        score += (pct - targetPct) * 2.0;
+      if (score < bestScore) {
+        bestScore = score;
+        best.cells = std::move(cells);
+        best.length = len;
+        best.balk = balk;
+        best.ratioPct = pct;
+      }
+      if (bestScore < 0.12)
+        return best;
+    }
+  }
+  return best;
 }
 
 double totalArea(const std::vector<Cell>& cells) {

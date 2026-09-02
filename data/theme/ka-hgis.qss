@@ -91,34 +91,43 @@ QToolButton {
   color: #575E66;
   font-weight: 600;
   font-size: 12px;
-  border: 1px solid transparent;
-  border-radius: 8px;
+  border: 2px solid transparent;
+  border-radius: 0;
   background: transparent;
   padding: 6px 10px;
 }
-QToolButton:hover { background: #E9EBEE; color: #1F2328; }
-QToolButton:pressed { background: #E8F0FA; }
+QToolButton:hover { background: #F2F3F5; color: #1F2328; }
+QToolButton:pressed { background: #E9EBEE; }
 QToolButton:checked {
-  background: #1E67C6;
-  color: #FFFFFF;
-  border: 1px solid #1E67C6;
+  background: transparent;
+  color: #124B94;
+  border: 2px solid transparent;
+  border-bottom: 2px solid #1E67C6;
+  font-weight: 700;
 }
-QToolButton:checked:hover { background: #175AB0; color: #FFFFFF; }
+QToolButton:checked:hover {
+  background: #F2F3F5;
+  color: #124B94;
+  border: 2px solid transparent;
+  border-bottom: 2px solid #175AB0;
+}
 QToolButton:disabled { color: #A5ABB3; }
 QToolButton#btnPrimary {
-  background: #1E67C6;
-  color: #FFFFFF;
-  border: 1px solid #1E67C6;
+  background: transparent;
+  color: #124B94;
+  border: 2px solid transparent;
 }
 QToolButton#btnPrimary:hover {
-  background: #175AB0;
-  color: #FFFFFF;
-  border: 1px solid #175AB0;
+  background: #F2F3F5;
+  color: #1F2328;
+  border: 2px solid transparent;
 }
+QToolButton#btnPrimary:pressed { background: #E9EBEE; }
 QToolButton#btnPrimary:checked {
-  background: #175AB0;
-  color: #FFFFFF;
-  border: 1px solid #175AB0;
+  background: transparent;
+  color: #124B94;
+  border: 2px solid transparent;
+  border-bottom: 2px solid #1E67C6;
 }
 
 QToolBar {
@@ -151,22 +160,46 @@ QToolBar#subToolbar {
   border-top: 1px solid #D5D9DE;
   border-bottom: 1px solid #D5D9DE;
 }
+QToolBar#subToolbar QToolButton:checked {
+  background: transparent;
+  color: #124B94;
+  border: 2px solid transparent;
+  border-bottom: 2px solid #1E67C6;
+}
+QToolBar#mainToolbar {
+  spacing: 2px;
+  padding: 4px 8px;
+}
 QToolBar#mainToolbar QToolButton {
   min-width: 48px;
   min-height: 46px;
   padding: 3px 5px;
   font-size: 12px;
+  background: transparent;
+  border: 2px solid transparent;
+  border-radius: 0;
 }
+QToolBar#mainToolbar QToolButton:hover {
+  background: #F2F3F5;
+  border: 2px solid transparent;
+}
+QToolBar#mainToolbar QToolButton:pressed { background: #E9EBEE; }
 QToolBar#mainToolbar QToolButton::menu-indicator {
   image: none;
   width: 0px;
 }
 QToolBar#mainToolbar QToolButton:checked {
-  background: #1E67C6;
-  color: #FFFFFF;
-  border: 1px solid #1E67C6;
+  background: transparent;
+  color: #124B94;
+  border: 2px solid transparent;
+  border-bottom: 2px solid #1E67C6;
 }
-QToolBar#mainToolbar QToolButton:checked:hover { background: #175AB0; }
+QToolBar#mainToolbar QToolButton:checked:hover {
+  background: #F2F3F5;
+  color: #124B94;
+  border: 2px solid transparent;
+  border-bottom: 2px solid #175AB0;
+}
 QToolBar#studioToolRail {
   background: #FBFCFD;
   spacing: 1px;
@@ -202,6 +235,32 @@ QLineEdit:disabled, QComboBox:disabled, QAbstractSpinBox:disabled {
   color: #A5ABB3;
 }
 QLineEdit#locationSearch { min-height: 32px; min-width: 170px; background: #FFFFFF; border-radius: 16px; padding: 4px 14px; }
+QWidget#regionLocator { min-height: 56px; min-width: 360px; background: #F4F8FC; border: 1px solid #9DBBE8; border-radius: 10px; }
+QToolBar#mainToolbar QToolButton#regionChip {
+  min-width: 36px;
+  min-height: 24px;
+  max-height: 24px;
+  padding: 0 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #1B3A6B;
+  background: #FFFFFF;
+  border: 1px solid #D5D9DE;
+  border-radius: 8px;
+}
+QToolBar#mainToolbar QToolButton#regionChip:hover { background: #E8F1FC; border-color: #1E67C6; }
+QToolBar#mainToolbar QToolButton#regionChip:checked {
+  background: #FFFFFF;
+  color: #124B94;
+  border: 1px solid #D5D9DE;
+  border-bottom: 2px solid #1E67C6;
+}
+QFrame#regionAddressPopup {
+  background: #FFFFFF;
+  border: 1px solid #9DBBE8;
+  border-radius: 10px;
+}
+QLabel#regionSidoTitle { color: #1B3A6B; font-weight: 700; }
 
 QAbstractSpinBox { padding-right: 16px; }
 QAbstractSpinBox::up-button { width: 16px; }

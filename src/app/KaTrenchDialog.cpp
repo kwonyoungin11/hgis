@@ -17,7 +17,7 @@ KaTrenchDialog::KaTrenchDialog(QWidget* parent) : QDialog(parent) {
 
   auto* form = new QFormLayout(this);
 
-  m_auto = new QCheckBox(QStringLiteral("조사구역 전체에 자동 배치"), this);
+  m_auto = new QCheckBox(QStringLiteral("지금 그린(또는 선택한) 조사구역에 자동 배치"), this);
   form->addRow(m_auto);
 
   m_size = new QComboBox(this);
@@ -58,18 +58,18 @@ KaTrenchDialog::KaTrenchDialog(QWidget* parent) : QDialog(parent) {
   form->addRow(m_ratio);
 
   auto* hint = new QLabel(
-      QStringLiteral("개별 편집: 트렌치 클릭 = 선택, 끌기 = 하나만 이동, Delete·우클릭 = 하나만 삭제"),
+      QStringLiteral("깐 뒤 맵에서 격자를 끌어 옮기세요. 개별 편집은 트렌치 하나 이동·삭제입니다."),
       this);
   hint->setWordWrap(true);
   hint->setStyleSheet(QStringLiteral("color:#6E757D;"));
   form->addRow(hint);
 
   auto* btnRow = new QHBoxLayout();
-  auto* apply = new QPushButton(QStringLiteral("적용"), this);
+  auto* apply = new QPushButton(QStringLiteral("구역에 깔기"), this);
   apply->setDefault(true);
-  apply->setToolTip(QStringLiteral("현재 설정으로 격자를 새로 배치합니다(기존 격자 대체)."));
-  auto* manual = new QPushButton(QStringLiteral("원점 클릭 배치"), this);
-  manual->setToolTip(QStringLiteral("맵에서 격자 원점을 직접 클릭해 배치합니다."));
+  apply->setToolTip(QStringLiteral("조사구역 위에 격자를 다시 깝니다. 깐 뒤 맵에서 끌어 옮기세요."));
+  auto* manual = new QPushButton(QStringLiteral("맵에 찍기"), this);
+  manual->setToolTip(QStringLiteral("맵을 한 번 찍어 그 점을 원점으로 놓습니다."));
   auto* editOne = new QPushButton(QStringLiteral("개별 편집"), this);
   editOne->setToolTip(QStringLiteral("그래픽처럼 트렌치를 하나씩 선택·이동·삭제합니다."));
   auto* move = new QPushButton(QStringLiteral("전체 이동"), this);
@@ -114,8 +114,9 @@ void KaTrenchDialog::setArea(const QByteArray& wkb, double areaM2) {
   else if (!hadArea)
     m_auto->setChecked(true);
   m_auto->setToolTip(has
-                         ? QStringLiteral("구역 경계 안에 완전히 들어가는 트렌치만 배치합니다.")
-                         : QStringLiteral("조사구역을 먼저 그리면 구역 전체 자동 배치를 쓸 수 있습니다."));
+                         ? QStringLiteral(
+                               "조사구역이 여러 개면 선택한 곳만, 선택이 없으면 마지막에 그린 곳만 깝니다.")
+                         : QStringLiteral("조사구역을 먼저 그리면 그 구역 안에 자동 배치를 쓸 수 있습니다."));
   refreshPlan();
 }
 

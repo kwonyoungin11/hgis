@@ -16,6 +16,7 @@
 #include <qgsmapmouseevent.h>
 #include <qgsrectangle.h>
 #include <qgsfeature.h>
+#include <QFile>
 #include <QFileInfo>
 #include <QDir>
 #include <QKeyEvent>
@@ -299,7 +300,7 @@ bool KaAlignMapTool::applyPreview(QString* errorOut) {
   }
   if (canvas()) {
     canvas()->freeze(false);
-    canvas()->refresh();
+    LayerOps::refreshCanvasIfIdle(canvas());
   }
   rebuildPairMarks();
   if (!ok) {
@@ -366,41 +367,43 @@ bool KaAlignMapTool::applyMove(QString* errorOut) {
     if (errorOut) *errorOut = QStringLiteral("점 배치로 변환을 만들 수 없습니다");
     return false;
   }
-  if (!applyPreview(errorOut)) return false;
   if (m_raster) {
-    auto* old = qobject_cast<QgsRasterLayer*>(m_layer.data());
-    if (!old) {
+    auto* rl = qobject_cast<QgsRasterLayer*>(m_layer.data());
+    if (!rl) {
       if (errorOut) *errorOut = QStringLiteral("그림 레이어가 없습니다");
       return false;
     }
-    const QString src = old->source();
-    const QString name = old->name();
-    if (!GeorefService::writeWorldFile(src, m_affine, errorOut)) return false;
-    GeorefService::writeSidecarPrj(src, workCrs(), nullptr);
-    QgsProject* proj = QgsProject::instance();
-    if (proj) {
-      LayerOps::setAlignPending(old, false);
-      proj->removeMapLayer(old->id());
-      m_layer = nullptr;
-      auto* rl = new QgsRasterLayer(src, name, QStringLiteral("gdal"));
-      if (!rl->isValid()) {
-        delete rl;
-        if (errorOut) *errorOut = QStringLiteral("맞춰진 그림을 다시 열지 못했습니다");
+    if (!GeorefService::persistAlignedRaster(rl, m_affine, workCrs(), errorOut)) {
+      const QString src = rl->source();
+      const QString name = rl->name();
+      if (!QFile::exists(GeorefService::worldFilePathFor(src)))
         return false;
-      }
-      if (workCrs().isValid()) rl->setCrs(workCrs());
-      LayerOps::markReferenceLayer(rl);
+      QgsProject* proj = QgsProject::instance();
+      if (!proj) return false;
       LayerOps::setAlignPending(rl, false);
-      LayerOps::applyLegendCrsLabel(rl);
-      GeorefService::styleAlignedRasterOverlay(rl);
-      proj->addMapLayer(rl, true);
-      m_layer = rl;
-      if (GeorefService::looksUnreferencedRaster(rl)) {
+      proj->removeMapLayer(rl->id());
+      m_layer = nullptr;
+      auto* neu = new QgsRasterLayer(src, name, QStringLiteral("gdal"));
+      if (!neu->isValid() || GeorefService::looksUnreferencedRaster(neu)) {
+        delete neu;
         if (errorOut)
           *errorOut = QStringLiteral("그림을 지도 좌표로 붙이지 못했습니다. 점을 다시 찍고 이동하세요.");
         return false;
       }
+      if (workCrs().isValid()) neu->setCrs(workCrs());
+      LayerOps::markReferenceLayer(neu);
+      LayerOps::setAlignPending(neu, false);
+      LayerOps::applyLegendCrsLabel(neu);
+      GeorefService::styleAlignedRasterOverlay(neu);
+      proj->addMapLayer(neu, true);
+      m_layer = neu;
+    } else {
+      LayerOps::markReferenceLayer(rl);
+      LayerOps::applyLegendCrsLabel(rl);
+      GeorefService::styleAlignedRasterOverlay(rl);
     }
+  } else if (!applyPreview(errorOut)) {
+    return false;
   }
   if (auto* l = m_layer.data()) {
     LayerOps::setAlignPending(l, false);
@@ -411,8 +414,7 @@ bool KaAlignMapTool::applyMove(QString* errorOut) {
   }
   if (canvas()) {
     canvas()->freeze(false);
-    if (m_layer) LayerOps::zoomToLayerMax(canvas(), m_layer);
-    canvas()->refresh();
+    LayerOps::refreshCanvasIfIdle(canvas());
   }
   rebuildPairMarks();
   emit statusChanged(QStringLiteral("이동 완료 · %1점").arg(m_pairs.size()));
@@ -527,10 +529,7 @@ void KaAlignMapTool::canvasPressEvent(QgsMapMouseEvent* e) {
     return;
   }
   QgsPointXY mapPt;
-  if (m_hasHint)
-    mapPt = QgsPointXY(m_hintX, m_hintY);
-  else
-    mapPointFromEvent(e, &mapPt, nullptr);
+  mapPointFromEvent(e, &mapPt, nullptr);
   GeorefService::Pair pr;
   pr.srcX = m_srcX;
   pr.srcY = m_srcY;

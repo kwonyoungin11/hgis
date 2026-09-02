@@ -1,6 +1,9 @@
 #include "KaCaptureMapTool.h"
+#include "core/LayerOps.h"
 #include <qgsmapcanvas.h>
 #include <qgsvectorlayer.h>
+#include <qgsfeature.h>
+#include <qgsfeatureiterator.h>
 #include <qgsrubberband.h>
 #include <qgsvertexmarker.h>
 #include <qgssnappingutils.h>
@@ -54,6 +57,7 @@ void KaCaptureMapTool::setEasyDraw(bool on) {
 void KaCaptureMapTool::resetSession() {
   m_finishing = false;
   m_points.clear();
+  cancelVertexDrag();
   destroyRubber();
 }
 
@@ -175,6 +179,7 @@ void KaCaptureMapTool::activate() {
 void KaCaptureMapTool::deactivate() {
   if (canvas())
     canvas()->setContextMenuPolicy(m_savedMenuPolicy);
+  cancelVertexDrag();
   destroyRubber();
   destroySnapMarker();
   if (!m_finishing)
@@ -188,7 +193,10 @@ void KaCaptureMapTool::canvasPressEvent(QgsMapMouseEvent* e) {
 
   if (e->button() == Qt::RightButton) {
     e->accept();
-    finish();
+    if (m_draggingVertex)
+      cancelVertexDrag();
+    else
+      finish();
     return;
   }
 
@@ -203,6 +211,17 @@ void KaCaptureMapTool::canvasPressEvent(QgsMapMouseEvent* e) {
       m_points.append(mapPt);
       finish();
       return;
+    }
+    if (m_points.isEmpty() && m_mode != Mode::Point) {
+      QgsFeatureId fid = -1;
+      int vertex = -1;
+      if (hitSavedVertex(mapPt, &fid, &vertex)) {
+        m_draggingVertex = true;
+        m_dragFid = fid;
+        m_dragVertex = vertex;
+        previewMovedVertex(mapPt);
+        return;
+      }
     }
     if (m_easyDraw && !m_points.isEmpty()) {
       const int idx = indexOfSketchVertex(mapPt);
@@ -220,6 +239,15 @@ void KaCaptureMapTool::canvasPressEvent(QgsMapMouseEvent* e) {
 
 void KaCaptureMapTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
   if (!e || !canvas() || m_finishing) return;
+  if (e->button() == Qt::LeftButton && m_draggingVertex) {
+    e->accept();
+    QgsPointXY mapPt;
+    if (mapPointFromEvent(e, &mapPt))
+      finishVertexDrag(mapPt);
+    else
+      cancelVertexDrag();
+    return;
+  }
   if (e->button() != Qt::RightButton) return;
   e->accept();
   if (!m_points.isEmpty())
@@ -242,6 +270,10 @@ void KaCaptureMapTool::canvasMoveEvent(QgsMapMouseEvent* e) {
   QgsPointXY mapPt;
   bool snapped = false;
   if (!mapPointFromEvent(e, &mapPt, &snapped)) return;
+  if (m_draggingVertex) {
+    previewMovedVertex(mapPt);
+    return;
+  }
   if (m_points.isEmpty() || m_mode == Mode::Point) {
     return;
   }
@@ -390,8 +422,85 @@ void KaCaptureMapTool::finish() {
   emit geometryCaptured(geom);
 }
 
+bool KaCaptureMapTool::hitSavedVertex(const QgsPointXY& mapPt, QgsFeatureId* fid, int* vertex) const {
+  if (!fid || !vertex || !m_layer || !m_layer->isValid() || !canvas())
+    return false;
+  const double px = std::max(1e-6, canvas()->mapSettings().mapUnitsPerPixel());
+  const double tol2 = (px * 16.0) * (px * 16.0);
+  QgsFeature f;
+  QgsFeatureIterator it = m_layer->getFeatures();
+  double best = 1e300;
+  QgsFeatureId bestFid = -1;
+  int bestV = -1;
+  while (it.nextFeature(f)) {
+    if (!f.hasGeometry())
+      continue;
+    int at = -1, before = -1, after = -1;
+    double d2 = 0.0;
+    f.geometry().closestVertex(mapPt, at, before, after, d2);
+    if (at < 0 || d2 > tol2 || d2 >= best)
+      continue;
+    best = d2;
+    bestFid = f.id();
+    bestV = at;
+  }
+  if (bestFid < 0)
+    return false;
+  *fid = bestFid;
+  *vertex = bestV;
+  return true;
+}
+
+void KaCaptureMapTool::previewMovedVertex(const QgsPointXY& mapPt) {
+  if (!m_layer || m_dragFid < 0 || m_dragVertex < 0 || !canvas())
+    return;
+  QgsFeature f = m_layer->getFeature(m_dragFid);
+  if (!f.isValid() || !f.hasGeometry())
+    return;
+  QgsGeometry g = f.geometry();
+  if (!g.moveVertex(mapPt.x(), mapPt.y(), m_dragVertex))
+    return;
+  if (!m_rubber) {
+    const Qgis::GeometryType gt = m_layer->geometryType();
+    m_rubber = new QgsRubberBand(canvas(), gt);
+    m_rubber->setStrokeColor(QColor(30, 103, 198));
+    m_rubber->setFillColor(QColor(30, 103, 198, 50));
+    m_rubber->setWidth(2);
+  }
+  m_rubber->setToGeometry(g, m_layer);
+}
+
+void KaCaptureMapTool::finishVertexDrag(const QgsPointXY& mapPt) {
+  if (!m_draggingVertex || !m_layer || m_dragFid < 0 || m_dragVertex < 0) {
+    cancelVertexDrag();
+    return;
+  }
+  QString err;
+  const bool ok = LayerOps::moveFeatureVertex(m_layer, static_cast<qint64>(m_dragFid), m_dragVertex,
+                                              mapPt.x(), mapPt.y(), &err);
+  if (ok) {
+    if (!m_layer->commitChanges(false))
+      m_layer->rollBack();
+    if (!m_layer->isEditable())
+      m_layer->startEditing();
+    if (m_layer->geometryType() == Qgis::GeometryType::Polygon)
+      LayerOps::applyAreaM2Labels(m_layer);
+    m_layer->triggerRepaint();
+    emit vertexMoved();
+  }
+  cancelVertexDrag();
+}
+
+void KaCaptureMapTool::cancelVertexDrag() {
+  m_draggingVertex = false;
+  m_dragFid = -1;
+  m_dragVertex = -1;
+  destroyRubber();
+}
+
 void KaCaptureMapTool::cancel() {
   m_points.clear();
+  cancelVertexDrag();
   destroyRubber();
   m_finishing = false;
   emit captureCanceled();

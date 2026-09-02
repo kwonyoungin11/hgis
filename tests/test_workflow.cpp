@@ -1,6 +1,9 @@
 #include <cmath>
+#include <limits>
+#include <memory>
 
 #include <QtTest>
+#include <QColor>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -11,6 +14,7 @@
 #include <QCoreApplication>
 #include <QEvent>
 #include <QSettings>
+#include <QUrl>
 
 #include "core/SurveyProjectFactory.h"
 #include "core/ProjectStateBuilder.h"
@@ -21,9 +25,19 @@
 #include "core/WorkflowGuide.h"
 #include "core/VworldSettings.h"
 #include "core/LocationSearch.h"
+#include "core/KoreaRegionCatalog.h"
 #include "core/SoilMapService.h"
 #include "core/GeologyMapService.h"
 #include "core/RiverMapService.h"
+#include "core/PaleoLandformService.h"
+#include "core/GeorefService.h"
+
+#include <gdal_priv.h>
+#include <ogr_spatialref.h>
+#include <qgssinglebandpseudocolorrenderer.h>
+#include <qgsrastershader.h>
+#include <qgscolorrampshader.h>
+#include <qgsrasterblock.h>
 
 #include <qgsapplication.h>
 #include <qgsproject.h>
@@ -55,6 +69,8 @@
 #include <qgslayoutitemscalebar.h>
 #include <qgslayoutitemlegend.h>
 #include <qgsfillsymbol.h>
+#include <qgspallabeling.h>
+#include <qgsvectorlayerlabeling.h>
 
 class TestWorkflow : public QObject {
   Q_OBJECT
@@ -66,10 +82,27 @@ private slots:
   void soilShpImport_crsOverrideAndCategorizedStyle();
   void soilTerrainLegend_officialCodesAndStyle();
   void geologyEraLegend_icsColorsAndStyle();
+  void geologyLithoWfs_excludesJejuUsesOfficialRasterUri();
+  void geologyJejuLitho_sameCategorizedLegendAsMainland();
+  void thematicOverlay_secondToggleHidesLayer();
+  void mapTools_secondClickReturnsToPan();
+  void geologyDownload_skipsBlockingWmsAndRefreshWhileDrawing();
   void riverLevelLegend_waterStyleAndNameLabels();
   void thematicMapsScaleRangeTo1in100000();
   void thematicDownloadMaxSpanFourTimesPrior();
   void thematicDownloadCovers1in10000Drawing();
+  void soilDownload_usesViewExtentAndTerrainFieldOnly();
+  void soilTerrainPicture_is3857ArcGisCacheNot5186Wms();
+  void elevationMap_is3857ReferenceToggleNotTiffDialog();
+  void elevationMap_xyzOnlySkipsAbortWhilePanning();
+  void demColorRelief_is3857XyzNotTerrainMap();
+  void demElevationStyle_legendListsHeightMeters();
+  void demElevationStyle_discreteFinerMeterClasses();
+  void demElevationStyle_userClassCountAndCustomItems();
+  void demNgiiImg_loadsWithMeterLegend();
+  void paleoLandform_candidateEmphasisAndReferenceLayer();
+  void paleoLandform_toolbarIsNotDomainExport();
+  void paleoLandform_seedFromSoilSplitsFloodplain();
   void sectionLineKeepsMagentaWithHalo();
   void featurePolyStrokeDarkerOnSatellite();
   void exportPackagePrefersUserSheetPdf();
@@ -81,6 +114,8 @@ private slots:
   void vworldLayerOpsTest();
   void workflowGuideTracksSevenRealMilestones();
   void vworldSettingsAndNoKeyTests();
+  void koreaRegionCatalog_gyeonggiGangwonAddressQuery();
+  void regionLocator_sitsInToolbarGapBeforeSearch();
   void editBufferCommitSurvivesReopen();
   void undoCommittedFeature_removesLastAdded();
   void importControlCsvWritesFeatures();
@@ -110,6 +145,9 @@ private slots:
   void addVworldSatellite_syncPutsLayerOnCanvasWithExtent();
   void canvasDisplayEvent_devicePixelRatioChangeNeedsTileRefresh();
   void refreshXyzBasemapTiles_restoresStaleDevicePixelRatio();
+  void refreshXyzBasemapTiles_doesNotAbortInFlightWmsJob();
+  void uiComboActions_doNotBustTileCacheWhileDrawing();
+  void startupView_doesNotRestackXyzRefreshWhileWmsDownloads();
   void addVworldSatellite_fourKCanvasKeeps256pxTiles();
   void otf_keepsWorkCrsWhenBasemapIs3857();
   void koreaExtent_5186IsTmMetersNotDegrees();
@@ -119,10 +157,14 @@ private slots:
   void syncMapCanvas_cadastralAboveSatellite();
   void layoutBlankSheetMapItemKeepsFrameAndNonEmptyLayers();
   void layoutStudio_checkedLayersScaleBarLegendSize();
+  void layoutEnter_matchesCanvasViewWithoutNiceSnap();
   void layoutStandardSheetChrome_sitsBelowMap();
   void layoutExtentForPaperScale_keepsTypedDenominator();
   void layoutNiceScaleDenominator_endsOnTen();
   void legendTitlesHideEpsgAndUseShortKorean();
+  void sheetLegend_soilShowsTerrainClassesNotPictureName();
+  void sheetLegend_hidesUncheckedSoilLayer();
+  void sheetLegend_followsLayerCheckOnAndOff();
   void drawSubToolbarWiresEachDomainSlot();
   void digitizeTargetLayer_featurePolyIgnoresSurveyAreaCurrent();
   void newSurvey_removesUserLayersKeepsXyzBasemap();
@@ -130,6 +172,7 @@ private slots:
   void startupLoadsSatelliteAndCadastralWithoutToolbarIcons();
   void layoutCoordPointHasIconAndCallout();
   void layoutProfessionalSheet_frameGridTitleBlock();
+  void drawingStudio_sheetOmitsCrossesAndBorderRuler();
   void layoutRasterDrawnInOnePass();
   void layoutWheelZoom_keepsPointUnderCursor();
   void singleInstanceGuardIsWiredIntoBoot();
@@ -443,6 +486,14 @@ void TestWorkflow::soilTerrainLegend_officialCodesAndStyle() {
   QCOMPARE(SoilMapService::terrainColor(QStringLiteral("01")), QColor(1, 178, 0));
   QCOMPARE(SoilMapService::terrainColor(QStringLiteral("08")), QColor(254, 160, 0));
   QCOMPARE(SoilMapService::terrainName(QStringLiteral("77")), QStringLiteral("미분류"));
+  QVERIFY2(SoilMapService::terrainLabelExpression().contains(QStringLiteral("하성평탄")),
+           "label expression maps codes to Korean names");
+  const QString sparse = SoilMapService::terrainLabelExpression(40000.0, false);
+  QVERIFY2(sparse.contains(QLatin1String("area($geometry)")),
+           "작은 토양 폴리곤마다 글자를 찍으면 도면이 글자로 덮인다");
+  const QString paleoLbl = SoilMapService::terrainLabelExpression(50000.0, true);
+  QVERIFY2(paleoLbl.contains(QLatin1String("'04'")) && paleoLbl.contains(QLatin1String("산악지")) == false,
+           "고지형에서는 입지후보만 글자");
 
   QgsVectorLayer mem(QStringLiteral("MultiPolygon?crs=EPSG:5186&field=soil_type_geo:string"),
                      QStringLiteral("soilwfs"), QStringLiteral("memory"));
@@ -453,6 +504,7 @@ void TestWorkflow::soilTerrainLegend_officialCodesAndStyle() {
   QCOMPARE(cat->classAttribute(), QStringLiteral("soil_type_geo"));
   // 공식 11개 분류 + 미분류 캐치올.
   QCOMPARE(cat->categories().size(), 12);
+  QVERIFY2(mem.labelsEnabled(), "지도에 분포지형 한글 이름이 보여야 한다");
 
   // 분포지형 필드가 없으면 실패를 명확히 알린다.
   QgsVectorLayer noField(QStringLiteral("MultiPolygon?crs=EPSG:5186"),
@@ -468,6 +520,9 @@ void TestWorkflow::geologyEraLegend_icsColorsAndStyle() {
            QStringLiteral("오르도비스기"));
   QCOMPARE(GeologyMapService::eraClass(QStringLiteral("선캄브리아시대")),
            QStringLiteral("선캄브리아시대"));
+  // 제주 WFS는 「제 4기」처럼 기·숫자 사이에 공백이 있다. 본토 「제4기」와 같아야 한다.
+  QCOMPARE(GeologyMapService::eraClass(QStringLiteral("신생대 제 4기")),
+           QStringLiteral("제4기"));
   QCOMPARE(GeologyMapService::eraClass(QString()), QStringLiteral("시대미상"));
   QCOMPARE(GeologyMapService::eraColor(QStringLiteral("제4기")), QColor(249, 249, 127));
 
@@ -509,6 +564,141 @@ void TestWorkflow::geologyEraLegend_icsColorsAndStyle() {
   QgsVectorLayer noField(QStringLiteral("MultiPolygon?crs=EPSG:5186"),
                          QStringLiteral("nofield"), QStringLiteral("memory"));
   QVERIFY(!GeologyMapService::applyGeologyStyle(&noField));
+}
+
+void TestWorkflow::geologyLithoWfs_excludesJejuUsesOfficialRasterUri() {
+  // KIGAM mainland litho WFS mosaic WGS84 south edge is ~33.97N.
+  // Jeju (광령리 ~33.48N) is outside that mosaic — use Jeju litho WFS, not empty
+  // mainland WFS, and not a raster WMS legend that differs from the mainland.
+  const QgsRectangle jeju(126.40, 33.40, 126.60, 33.55);
+  QVERIFY2(!GeologyMapService::lithoWfsCoversWgs84(jeju),
+           "Jeju must not use empty mainland litho WFS as a 'no data' failure");
+  QVERIFY2(GeologyMapService::jejuLithoWfsCoversWgs84(jeju),
+           "Jeju must use geoOpen:l_jeju_50k_geology_litho_view");
+  QCOMPARE(GeologyMapService::lithoTypeNameForWgs84(jeju),
+           QStringLiteral("geoOpen:l_jeju_50k_geology_litho_view"));
+  const QgsRectangle gangneung(128.80, 37.70, 128.95, 37.80);
+  QVERIFY2(GeologyMapService::lithoWfsCoversWgs84(gangneung),
+           "mainland litho WFS path must stay");
+  QCOMPARE(GeologyMapService::lithoTypeNameForWgs84(gangneung),
+           QStringLiteral("geoOpen:l_50k_geology_litho_latest"));
+  QVERIFY2(!GeologyMapService::jejuLithoWfsCoversWgs84(gangneung),
+           "Gangneung must not switch to the Jeju typeName");
+  const QString uri = GeologyMapService::officialRasterWmsUri();
+  QVERIFY2(uri.contains(QLatin1String("L_50K_Geology_Map")), qPrintable(uri.left(180)));
+  QVERIFY2(uri.contains(QLatin1String("data.kigam.re.kr")), qPrintable(uri.left(180)));
+  QVERIFY2(uri.contains(QLatin1String("crs=EPSG:4326")), qPrintable(uri.left(180)));
+}
+
+void TestWorkflow::geologyJejuLitho_sameCategorizedLegendAsMainland() {
+  // 제주 WFS 필드명(시대·지층·기호)은 본토와 같다. 범례는 지층명, 분류 키는 기호.
+  QgsVectorLayer mem(QStringLiteral("MultiPolygon?crs=EPSG:5186"), QStringLiteral("jejuwfs"),
+                     QStringLiteral("memory"));
+  QVERIFY(mem.isValid());
+  mem.dataProvider()->addAttributes(
+      {QgsField(QStringLiteral("시대"), QMetaType::Type::QString),
+       QgsField(QStringLiteral("지층"), QMetaType::Type::QString),
+       QgsField(QStringLiteral("기호"), QMetaType::Type::QString)});
+  mem.updateFields();
+  QgsFeature f1(mem.fields());
+  f1.setAttribute(0, QStringLiteral("신생대 제 4기"));
+  f1.setAttribute(1, QStringLiteral("부면동조면현무암"));
+  f1.setAttribute(2, QStringLiteral("Qbmtb"));
+  QgsFeature f2(mem.fields());
+  f2.setAttribute(0, QStringLiteral("신생대 제 4기"));
+  f2.setAttribute(1, QStringLiteral("대포동조면현무암 분석구"));
+  f2.setAttribute(2, QStringLiteral("Qdtbs"));
+  QVERIFY(mem.dataProvider()->addFeatures(QgsFeatureList() << f1 << f2));
+  QVERIFY(GeologyMapService::applyGeologyStyle(&mem));
+  auto* cat = dynamic_cast<QgsCategorizedSymbolRenderer*>(mem.renderer());
+  QVERIFY2(cat, "Jeju must use the same categorized renderer as the mainland");
+  QCOMPARE(cat->classAttribute(), QStringLiteral("기호"));
+  QCOMPARE(cat->categories().at(0).label(), QStringLiteral("부면동조면현무암"));
+  QCOMPARE(cat->categories().at(1).label(), QStringLiteral("대포동조면현무암 분석구"));
+  QVERIFY2(mem.labelsEnabled(), "Jeju geology must keep symbol labels like the mainland");
+}
+
+void TestWorkflow::thematicOverlay_secondToggleHidesLayer() {
+  // QGIS 범례 체크 / ArcGIS 레이어 on-off: 같은 오버레이를 다시 누르면 숨긴다.
+  QgsProject proj;
+  auto* vl = new QgsVectorLayer(QStringLiteral("MultiPolygon?crs=EPSG:5186"),
+                                QStringLiteral("지질도(KIGAM 1:5만)"), QStringLiteral("memory"));
+  QVERIFY(vl->isValid());
+  LayerOps::markReferenceLayer(vl);
+  QVERIFY(proj.addMapLayer(vl));
+  QVERIFY(LayerOps::isLayerVisible(&proj, QStringLiteral("지질도(KIGAM 1:5만)")));
+  QVERIFY(LayerOps::toggleLayerVisibility(&proj, nullptr, QStringLiteral("지질도(KIGAM 1:5만)"),
+                                          false));
+  QVERIFY2(!LayerOps::isLayerVisible(&proj, QStringLiteral("지질도(KIGAM 1:5만)")),
+           "second click / explicit off must hide the overlay");
+  QVERIFY(LayerOps::toggleLayerVisibility(&proj, nullptr, QStringLiteral("지질도(KIGAM 1:5만)"),
+                                          true));
+  QVERIFY(LayerOps::isLayerVisible(&proj, QStringLiteral("지질도(KIGAM 1:5만)")));
+}
+
+void TestWorkflow::mapTools_secondClickReturnsToPan() {
+  // ArcGIS Explore / QGIS pan: 선택·줄자를 다시 누르면 팬으로 돌아간다.
+  QFile f(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text),
+           "run from source tree (ctest WORKING_DIRECTORY)");
+  const QString src = QString::fromUtf8(f.readAll());
+  auto bodyOf = [&](const QString& sig) {
+    const int fn = src.indexOf(sig);
+    if (fn < 0) return QString();
+    const int next = src.indexOf(QLatin1String("void MainWindow::"), fn + sig.size());
+    return next > fn ? src.mid(fn, next - fn) : src.mid(fn);
+  };
+  const QString sel = bodyOf(QStringLiteral("void MainWindow::startSelectTool"));
+  QVERIFY2(!sel.isEmpty(), "startSelectTool");
+  QVERIFY2(sel.contains(QLatin1String("m_selectTool")) && sel.contains(QLatin1String("m_panTool")),
+           "second 선택 click must return to pan");
+  QVERIFY2(sel.contains(QLatin1String("mapTool() == m_selectTool")) ||
+               sel.contains(QLatin1String("mapTool()==m_selectTool")),
+           "선택 must detect the already-active tool");
+  const QString meas = bodyOf(QStringLiteral("void MainWindow::startMeasureTool"));
+  QVERIFY2(!meas.isEmpty(), "startMeasureTool");
+  QVERIFY2(meas.contains(QLatin1String("m_panTool")),
+           "second 줄자 click must return to pan, not reset the session");
+  QVERIFY2(!meas.contains(QLatin1String("hideSubTools()")),
+           "줄자 must not close the draw panel (ArcGIS edit session stays)");
+  const QString hide = bodyOf(QStringLiteral("void MainWindow::hideSubTools"));
+  QVERIFY2(!hide.isEmpty(), "hideSubTools");
+  QVERIFY2(hide.contains(QLatin1String("stopCaptureTool")),
+           "그리기 닫기는 캡처를 끄고 팬으로 돌아가야 한다");
+  QVERIFY2(src.contains(QLatin1String("btnSoil")) &&
+               src.contains(QLatin1String("MenuButtonPopup")),
+           "토양도 본체는 토글, 화살표는 내려받기 메뉴");
+}
+
+void TestWorkflow::geologyDownload_skipsBlockingWmsAndRefreshWhileDrawing() {
+  // 2026-09-01 08:17 dump: provider_wms + QgsRasterProjector + sendPostedEvents AV
+  // after 지질도 download while VWorld tiles were in flight.
+  QFile geo(QStringLiteral("src/core/GeologyMapService.cpp"));
+  QVERIFY2(geo.open(QIODevice::ReadOnly | QIODevice::Text), "GeologyMapService.cpp");
+  const QString src = QString::fromUtf8(geo.readAll());
+  QVERIFY2(src.contains(QLatin1String("l_jeju_50k_geology_litho_view")),
+           "Jeju must fetch litho polygons, not only L_50K_Geology_Map WMS");
+  QVERIFY2(src.contains(QLatin1String("isDrawing")),
+           "must not refresh / sample official WMS while the canvas is drawing");
+
+  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
+  const QString app = QString::fromUtf8(mw.readAll());
+  const int fn = app.indexOf(QLatin1String("void MainWindow::refreshMapCanvasNow"));
+  QVERIFY2(fn >= 0, "refreshMapCanvasNow");
+  const int next = app.indexOf(QLatin1String("void MainWindow::"), fn + 10);
+  QVERIFY2(next > fn, "refreshMapCanvasNow body");
+  QVERIFY2(app.mid(fn, next - fn).contains(QLatin1String("isDrawing")),
+           "layersAdded must not restack an in-flight WMS job");
+
+  const int geoFn = app.indexOf(QLatin1String("void MainWindow::downloadGeologyMap"));
+  QVERIFY2(geoFn >= 0, "downloadGeologyMap");
+  const int geoNext = app.indexOf(QLatin1String("void MainWindow::"), geoFn + 10);
+  const QString geoBody = app.mid(geoFn, geoNext - geoFn);
+  QVERIFY2(geoBody.contains(QLatin1String("toggleExistingOverlay")) ||
+               geoBody.contains(QLatin1String("toggleLayerVisibility")) ||
+               geoBody.contains(QLatin1String("isLayerVisible")),
+           "지질도 second click must hide the overlay like QGIS/ArcGIS");
 }
 
 void TestWorkflow::riverLevelLegend_waterStyleAndNameLabels() {
@@ -559,17 +749,17 @@ void TestWorkflow::thematicDownloadMaxSpanFourTimesPrior() {
 }
 
 void TestWorkflow::thematicDownloadCovers1in10000Drawing() {
-  // 1:10000 A3 landscape is 4.2 km x 2.97 km. Fetch must grow to maxSpan
-  // around the view so a 만분일 도면 still has geology/soil/river coverage.
+  // Geology/river may grow the helper envelope. Soil download must not — precision
+  // soil at 80 km is tens of thousands of polygons (20–90 s). 80 km is a reject cap.
   const QgsRectangle view(200000.0, 450000.0, 204200.0, 452970.0);
   QCOMPARE(view.width(), 4200.0);
-  const QgsRectangle soil =
-      LayerOps::expandExtentToMaxSpan(view, SoilMapService::maxSpanMeters());
-  QVERIFY2(qAbs(qMax(soil.width(), soil.height()) - 80000.0) < 1.0,
-           "soil/geology envelope grows to 80 km");
-  QVERIFY(qAbs(soil.center().x() - view.center().x()) < 1.0);
-  QVERIFY(qAbs(soil.center().y() - view.center().y()) < 1.0);
-  QVERIFY2(soil.contains(view), "1:10000 view stays inside the download envelope");
+  const QgsRectangle geo =
+      LayerOps::expandExtentToMaxSpan(view, GeologyMapService::maxSpanMeters());
+  QVERIFY2(qAbs(qMax(geo.width(), geo.height()) - 80000.0) < 1.0,
+           "geology helper envelope grows to 80 km");
+  QVERIFY(qAbs(geo.center().x() - view.center().x()) < 1.0);
+  QVERIFY(qAbs(geo.center().y() - view.center().y()) < 1.0);
+  QVERIFY2(geo.contains(view), "1:10000 view stays inside the geology envelope");
 
   const QgsRectangle river =
       LayerOps::expandExtentToMaxSpan(view, RiverMapService::maxSpanMeters());
@@ -581,6 +771,662 @@ void TestWorkflow::thematicDownloadCovers1in10000Drawing() {
       LayerOps::expandExtentToMaxSpan(tooWide, SoilMapService::maxSpanMeters());
   QCOMPARE(kept.width(), tooWide.width());
   QCOMPARE(kept.height(), tooWide.height());
+}
+
+void TestWorkflow::soilDownload_usesViewExtentAndTerrainFieldOnly() {
+  // Live: Jeju ~4 km SOIL_1 full GeoJSON 2.8 MB / 3.8 s; propertyName=soil_type_geo
+  // 59 KB / 0.16 s. Growing the same view to 80 km pulled 15k features × 3 tables.
+  QFile soil(QStringLiteral("src/core/SoilMapService.cpp"));
+  QVERIFY2(soil.open(QIODevice::ReadOnly | QIODevice::Text), "SoilMapService.cpp");
+  const QString src = QString::fromUtf8(soil.readAll());
+  const int fn = src.indexOf(QLatin1String("SoilMapService::downloadAndAdd"));
+  QVERIFY2(fn >= 0, "downloadAndAdd");
+  const int next = src.indexOf(QLatin1String("\nQ"), fn + 10);
+  const QString body = next > fn ? src.mid(fn, next - fn) : src.mid(fn);
+  QVERIFY2(!body.contains(QLatin1String("expandExtentToMaxSpan")),
+           "soil must fetch the current view, not grow to 80 km");
+  QVERIFY2(body.contains(QLatin1String("wfsGetFeatureUrl")) ||
+               src.contains(QLatin1String("propertyName")),
+           "WFS must request soil_type_geo only");
+
+  const QgsRectangle jeju4326(126.45, 33.43, 126.55, 33.50);
+  const QString feature = SoilMapService::wfsGetFeatureUrl(1, jeju4326, false);
+  QVERIFY2(feature.contains(QLatin1String("propertyName=soil_type_geo,geom")),
+           feature.toUtf8().constData());
+  QVERIFY2(feature.contains(QLatin1String("typeNames=soilmap:SOIL_1")),
+           feature.toUtf8().constData());
+  QVERIFY2(feature.contains(QLatin1String("outputFormat=application/json")),
+           feature.toUtf8().constData());
+  QVERIFY2(!feature.contains(QLatin1String("resultType=hits")),
+           "GetFeature must return geometries, not hits-only");
+
+  const QString hits = SoilMapService::wfsGetFeatureUrl(2, jeju4326, true);
+  QVERIFY2(hits.contains(QLatin1String("resultType=hits")), hits.toUtf8().constData());
+  QVERIFY2(hits.contains(QLatin1String("typeNames=soilmap:SOIL_2")),
+           hits.toUtf8().constData());
+  QVERIFY2(!hits.contains(QLatin1String("outputFormat=application/json")),
+           "hits must stay XML so numberMatched is cheap");
+}
+
+void TestWorkflow::soilTerrainPicture_is3857ArcGisCacheNot5186Wms() {
+  // 흙토람 웹 분포지형은 SOIL_1/2/3 WFS가 아니라 3857 ArcGIS 캐시 그림이다.
+  // 산능선 빈곳은 벡터에 없고, L08–L15 타일이 산악지 초록으로 채운다.
+  const QString uri = SoilMapService::terrainPictureUri();
+  QVERIFY2(uri.contains(QLatin1String("type=xyz")), uri.toUtf8().constData());
+  QVERIFY2(uri.contains(QLatin1String("crs=EPSG:3857")), uri.toUtf8().constData());
+  QVERIFY2(uri.contains(QLatin1String("zmax=15")), uri.toUtf8().constData());
+  QVERIFY2(uri.contains(QLatin1String("TOP_A_SOIL_T_GEO")), uri.toUtf8().constData());
+  QVERIFY2(!uri.contains(QLatin1String("crs=EPSG:5186")), "WMS/XYZ URI must not set work CRS");
+  QVERIFY2(!uri.contains(QLatin1String("crs=EPSG:5179")), uri.toUtf8().constData());
+
+  const QUrl raw13(QStringLiteral(
+      "https://gis.naas.go.kr/Geodata/SF/TOP_A_SOIL_T_GEO/Layers/_alllayers/"
+      "L13/R3167/C7003.png"));
+  const QUrl hex13 = SoilMapService::rewriteArcGisCacheUrl(raw13);
+  QVERIFY2(hex13.path().endsWith(QLatin1String("/L13/R00000c5f/C00001b5b.png")),
+           hex13.toString().toUtf8().constData());
+
+  const QUrl raw8(QStringLiteral(
+      "https://gis.naas.go.kr/Geodata/SF/TOP_A_SOIL_T_GEO/Layers/_alllayers/"
+      "L8/R98/C218.png"));
+  const QUrl hex8 = SoilMapService::rewriteArcGisCacheUrl(raw8);
+  QVERIFY2(hex8.path().endsWith(QLatin1String("/L08/R00000062/C000000da.png")),
+           hex8.toString().toUtf8().constData());
+
+  const QUrl other(QStringLiteral("https://example.com/L8/R98/C218.png"));
+  QCOMPARE(SoilMapService::rewriteArcGisCacheUrl(other), other);
+}
+
+void TestWorkflow::elevationMap_is3857ReferenceToggleNotTiffDialog() {
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  QString err;
+  QVERIFY2(LayerOps::addElevationHillshadeMap(&proj, nullptr, QString(), &err),
+           qPrintable(err));
+  QgsMapLayer* elev = nullptr;
+  for (QgsMapLayer* l : proj.mapLayers()) {
+    if (l && l->name().contains(QStringLiteral("지형맵")))
+      elev = l;
+  }
+  QVERIFY2(elev, "지형맵 참조 레이어 (OpenTopoMap)");
+  QVERIFY2(LayerOps::isReferenceLayer(elev), "지형맵 is 참조 지도, not survey domain");
+  QVERIFY2(elev->crs().authid() == QLatin1String("EPSG:3857") ||
+               elev->source().contains(QLatin1String("EPSG:3857")),
+           "WMS/XYZ CRS is 3857; work CRS stays 5186 via OTF");
+  QCOMPARE(proj.crs().authid(), QStringLiteral("EPSG:5186"));
+  QVERIFY2(!elev->source().contains(QLatin1String("EPSG:5186")) &&
+               !elev->source().contains(QLatin1String("EPSG:5179")),
+           "do not put work/upload CRS on the terrain XYZ");
+  QVERIFY2(elev->source().contains(QLatin1String("opentopomap"), Qt::CaseInsensitive),
+           "지형맵 is contour/hillshade terrain, not color DEM");
+
+  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
+  const QString src = QString::fromUtf8(mw.readAll());
+  const int fn = src.indexOf(QLatin1String("void MainWindow::toggleTerrainMap"));
+  QVERIFY2(fn >= 0, "지형맵 버튼은 toggleTerrainMap");
+  const int next = src.indexOf(QLatin1String("\nvoid MainWindow::"), fn + 10);
+  const QString body = next > fn ? src.mid(fn, next - fn) : src.mid(fn, 1200);
+  QVERIFY2(body.contains(QLatin1String("addElevationHillshadeMap")),
+           "클릭하면 지형맵을 올린다");
+  QVERIFY2(!body.contains(QLatin1String("getOpenFileName")),
+           "지형맵 클릭은 GeoTIFF 파일 고르기가 아니다");
+  QVERIFY2(src.contains(QLatin1String("setText(QStringLiteral(\"지형맵\"))")) ||
+               src.contains(QStringLiteral("지형맵")),
+           "toolbar shows 지형맵");
+}
+
+void TestWorkflow::elevationMap_xyzOnlySkipsAbortWhilePanning() {
+  // crash-20260901-102801: 고도맵(WMS GetMap) + OTF QgsRasterProjector +
+  // 팬 중 TileDownloadManager deleteLater → 0xc0000005. 프로그램이 꺼진다.
+  QFile ops(QStringLiteral("src/core/LayerOps.cpp"));
+  QVERIFY2(ops.open(QIODevice::ReadOnly | QIODevice::Text),
+           "run from source tree (ctest WORKING_DIRECTORY)");
+  const QString opsSrc = QString::fromUtf8(ops.readAll());
+  const int fn = opsSrc.indexOf(QLatin1String("bool LayerOps::addElevationHillshadeMap"));
+  QVERIFY2(fn >= 0, "addElevationHillshadeMap");
+  const int next = opsSrc.indexOf(QLatin1String("\nbool LayerOps::"), fn + 10);
+  QVERIFY2(next > fn, "addElevationHillshadeMap body");
+  const QString elev = opsSrc.mid(fn, next - fn);
+  QVERIFY2(!elev.contains(QLatin1String("makeVworldWmsUri")),
+           "VWorld WMS GetMap + OTF pan aborts provider_wms (field dump 10:28)");
+  QVERIFY2(!elev.contains(QLatin1String("lt_c_elshade")) &&
+               !elev.contains(QLatin1String("LT_C_ELSHADE")),
+           "do not add the hillshade as a WMS layer");
+  QVERIFY2(elev.contains(QLatin1String("type=xyz")),
+           "지형맵 must be XYZ tiles, same hardened path as satellite");
+  QVERIFY2(elev.contains(QLatin1String("opentopomap"), Qt::CaseInsensitive),
+           "OpenTopoMap XYZ is the 지형맵 overlay");
+  QVERIFY2(elev.contains(QLatin1String("EPSG:3857")),
+           "tile CRS stays 3857; work CRS is OTF");
+
+  const int clampFn = opsSrc.indexOf(QLatin1String("bool LayerOps::clampCanvasToKorea"));
+  QVERIFY2(clampFn >= 0, "clampCanvasToKorea");
+  const int clampNext = opsSrc.indexOf(QLatin1String("\nvoid LayerOps::"), clampFn + 10);
+  QVERIFY2(clampNext > clampFn, "clampCanvasToKorea body");
+  QVERIFY2(opsSrc.mid(clampFn, clampNext - clampFn).contains(QLatin1String("isDrawing")),
+           "pan must not setExtent while XYZ/WMS tiles are still drawing");
+
+  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
+  const QString app = QString::fromUtf8(mw.readAll());
+  const int toggleFn = app.indexOf(QLatin1String("void MainWindow::toggleTerrainMap"));
+  QVERIFY2(toggleFn >= 0, "toggleTerrainMap");
+  const int toggleNext = app.indexOf(QLatin1String("void MainWindow::"), toggleFn + 10);
+  const QString toggle = app.mid(toggleFn, toggleNext - toggleFn);
+  QVERIFY2(!toggle.contains(QLatin1String("syncMapCanvas")) ||
+               toggle.contains(QLatin1String("isDrawing")),
+           "adding 지형맵 must not restack an in-flight tile job");
+
+  bool extentsSkipsWhileDrawing = false;
+  int pos = 0;
+  while (true) {
+    const int ext = app.indexOf(QLatin1String("&QgsMapCanvas::extentsChanged"), pos);
+    if (ext < 0) break;
+    const int end = app.indexOf(QLatin1String("});"), ext);
+    const QString lambda = app.mid(ext, qMax(80, (end > ext ? end : ext + 420) - ext));
+    if (lambda.contains(QLatin1String("clampCanvasToKorea"))) {
+      extentsSkipsWhileDrawing = lambda.contains(QLatin1String("isDrawing"));
+      break;
+    }
+    pos = ext + 10;
+  }
+  QVERIFY2(extentsSkipsWhileDrawing,
+           "extentsChanged must skip clamp while the canvas is drawing");
+}
+
+void TestWorkflow::demColorRelief_is3857XyzNotTerrainMap() {
+  // User: OpenTopoMap = 지형맵. DEM = color hypsometric + hillshade (GIBS ASTER).
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  QString err;
+  QVERIFY2(LayerOps::addDemColorReliefMap(&proj, nullptr, &err), qPrintable(err));
+  QgsMapLayer* dem = nullptr;
+  for (QgsMapLayer* l : proj.mapLayers()) {
+    if (l && l->name() == QLatin1String("DEM"))
+      dem = l;
+  }
+  QVERIFY2(dem, "DEM 참조 레이어");
+  QVERIFY2(LayerOps::isReferenceLayer(dem), "DEM is 참조 지도");
+  QVERIFY2(dem->crs().authid() == QLatin1String("EPSG:3857") ||
+               dem->source().contains(QLatin1String("EPSG:3857")),
+           "DEM tile CRS is 3857; work CRS stays 5186 via OTF");
+  QCOMPARE(proj.crs().authid(), QStringLiteral("EPSG:5186"));
+  QVERIFY2(!dem->source().contains(QLatin1String("EPSG:5186")) &&
+               !dem->source().contains(QLatin1String("EPSG:5179")),
+           "do not put work/upload CRS on the DEM XYZ");
+  QVERIFY2(dem->source().contains(QLatin1String("type=xyz")) ||
+               dem->source().contains(QLatin1String("ASTER_GDEM")) ||
+               dem->source().contains(QLatin1String("gibs.earthdata")),
+           "DEM is precolored elevation tiles, not a GeoTIFF dialog");
+  QVERIFY2(!dem->source().contains(QLatin1String("opentopomap"), Qt::CaseInsensitive),
+           "DEM must not be the OpenTopoMap terrain layer");
+
+  QFile ops(QStringLiteral("src/core/LayerOps.cpp"));
+  QVERIFY2(ops.open(QIODevice::ReadOnly | QIODevice::Text), "LayerOps.cpp");
+  const QString opsSrc = QString::fromUtf8(ops.readAll());
+  const int fn = opsSrc.indexOf(QLatin1String("bool LayerOps::addDemColorReliefMap"));
+  QVERIFY2(fn >= 0, "addDemColorReliefMap");
+  const int next = opsSrc.indexOf(QLatin1String("\nbool LayerOps::"), fn + 10);
+  QVERIFY2(next > fn, "addDemColorReliefMap body");
+  const QString body = opsSrc.mid(fn, next - fn);
+  QVERIFY2(!body.contains(QLatin1String("makeVworldWmsUri")),
+           "DEM must not use VWorld WMS GetMap (pan AV)");
+  QVERIFY2(body.contains(QLatin1String("type=xyz")), "DEM is XYZ");
+  QVERIFY2(body.contains(QLatin1String("applyDemElevationStyle")),
+           "view DEM must get a meter color-ramp legend, not RGB-only tiles");
+  QVERIFY2(body.contains(QLatin1String("vsicurl")) ||
+               body.contains(QLatin1String("copernicus-dem"), Qt::CaseInsensitive) ||
+               body.contains(QLatin1String("elevation-tiles-prod")),
+           "prefer a single-band elevation raster over painted JPEG tiles");
+  QVERIFY2(body.contains(QLatin1String("ASTER_GDEM_Color_Shaded_Relief")),
+           "GIBS color tiles stay as offline/fallback only");
+  QVERIFY2(body.contains(QLatin1String("%7By%7D/%7Bx%7D")) ||
+               body.contains(QLatin1String("{y}/{x}")),
+           "GIBS WMTS order is z/y/x, not OSM z/x/y");
+
+  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
+  const QString app = QString::fromUtf8(mw.readAll());
+  const int toggleFn = app.indexOf(QLatin1String("void MainWindow::toggleDemMap"));
+  QVERIFY2(toggleFn >= 0, "DEM 버튼은 toggleDemMap");
+  const int toggleNext = app.indexOf(QLatin1String("void MainWindow::"), toggleFn + 10);
+  const QString toggle = app.mid(toggleFn, toggleNext - toggleFn);
+  QVERIFY2(toggle.contains(QLatin1String("addDemColorReliefMap")),
+           "DEM click adds color relief, not OpenTopoMap");
+  QVERIFY2(!toggle.contains(QLatin1String("getOpenFileName")),
+           "DEM click is not a file picker");
+  QVERIFY2(!toggle.contains(QLatin1String("syncMapCanvas")) ||
+               toggle.contains(QLatin1String("isDrawing")),
+           "adding DEM must not restack an in-flight tile job");
+  QVERIFY2(app.contains(QLatin1String("btnTerrain")), "toolbar has 지형맵 button");
+  QVERIFY2(app.contains(QLatin1String("setText(QStringLiteral(\"DEM\"))")),
+           "DEM button label is DEM");
+
+  QFile boot(QStringLiteral("src/app/KaApplication.cpp"));
+  QVERIFY2(boot.open(QIODevice::ReadOnly | QIODevice::Text), "KaApplication.cpp");
+  const QString smoke = QString::fromUtf8(boot.readAll());
+  QVERIFY2(smoke.contains(QLatin1String("toolbar_dem")) &&
+               smoke.contains(QStringLiteral("DEM")),
+           "smoke looks for DEM, not the old 고도맵 label");
+  QVERIFY2(smoke.contains(QLatin1String("toolbar_terrain")) &&
+               smoke.contains(QStringLiteral("지형맵")),
+           "smoke looks for 지형맵");
+}
+
+void TestWorkflow::demElevationStyle_legendListsHeightMeters() {
+  // 조판 범례에 "DEM" 글자만 있으면 높이를 읽을 수 없다. 단일밴드 + 색띠 + m.
+  GDALAllRegister();
+  const QString path = QDir::temp().filePath(QStringLiteral("ka_hgis_dem_legend_test.tif"));
+  QFile::remove(path);
+  GDALDriver* drv = GetGDALDriverManager()->GetDriverByName("GTiff");
+  QVERIFY2(drv, "GTiff");
+  GDALDataset* ds = drv->Create(path.toUtf8().constData(), 16, 16, 1, GDT_Float32, nullptr);
+  QVERIFY2(ds, "create DEM tif");
+  double gt[6] = {200000.0, 10.0, 0.0, 450000.0, 0.0, -10.0};
+  ds->SetGeoTransform(gt);
+  OGRSpatialReference srs;
+  srs.SetFromUserInput("EPSG:5186");
+  char* wkt = nullptr;
+  srs.exportToWkt(&wkt);
+  if (wkt) {
+    ds->SetProjection(wkt);
+    CPLFree(wkt);
+  }
+  std::vector<float> z(16 * 16);
+  for (int y = 0; y < 16; ++y) {
+    for (int x = 0; x < 16; ++x)
+      z[static_cast<size_t>(y) * 16 + x] = 12.0f + float(x + y) * 8.0f;
+  }
+  QVERIFY(ds->GetRasterBand(1)->RasterIO(GF_Write, 0, 0, 16, 16, z.data(), 16, 16, GDT_Float32, 0,
+                                         0) == CE_None);
+  GDALClose(ds);
+
+  QgsRasterLayer rl(path, QStringLiteral("DEM"), QStringLiteral("gdal"));
+  QVERIFY2(rl.isValid(), "gdal DEM");
+  QVERIFY2(LayerOps::applyDemElevationStyle(&rl), "applyDemElevationStyle");
+  auto* rend = dynamic_cast<QgsSingleBandPseudoColorRenderer*>(rl.renderer());
+  QVERIFY2(rend, "QgsSingleBandPseudoColorRenderer so the layout legend can list classes");
+  QVERIFY(rend->shader());
+  auto* fn = dynamic_cast<QgsColorRampShader*>(rend->shader()->rasterShaderFunction());
+  QVERIFY2(fn, "QgsColorRampShader");
+  const QList<QgsColorRampShader::ColorRampItem> items = fn->colorRampItemList();
+  QVERIFY2(items.size() >= 3, "enough breaks for a height ramp");
+  bool sawMeters = false;
+  for (const QgsColorRampShader::ColorRampItem& it : items) {
+    if (it.label.contains(QLatin1Char('m')))
+      sawMeters = true;
+  }
+  QVERIFY2(sawMeters, "legend labels must include height in meters");
+
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  QString err;
+  QVERIFY2(LayerOps::addDemElevationRaster(&proj, nullptr, path, &err), qPrintable(err));
+  QgsMapLayer* added = nullptr;
+  for (QgsMapLayer* l : proj.mapLayers()) {
+    if (l && l->name() == QLatin1String("DEM"))
+      added = l;
+  }
+  QVERIFY(added);
+  QVERIFY(LayerOps::isReferenceLayer(added));
+  QVERIFY2(dynamic_cast<QgsSingleBandPseudoColorRenderer*>(
+               qobject_cast<QgsRasterLayer*>(added)->renderer()),
+           "imported raster uses the meter ramp");
+  QFile::remove(path);
+}
+
+void TestWorkflow::demElevationStyle_discreteFinerMeterClasses() {
+  // 약 8칸. 5 m × 24줄은 범례가 맵을 가린다.
+  QCOMPARE(LayerOps::demElevationClassStep(0.0, 18.0), 5.0);
+  QCOMPARE(LayerOps::demElevationClassStep(0.0, 120.0), 15.0);
+  QCOMPARE(LayerOps::demElevationClassStep(-2.0, 1155.0), 200.0);
+  QCOMPARE(LayerOps::demElevationClassStep(12.0, 80.0), 10.0);
+
+  GDALAllRegister();
+  const QString path = QDir::temp().filePath(QStringLiteral("ka_hgis_dem_classes.tif"));
+  QFile::remove(path);
+  GDALDriver* drv = GetGDALDriverManager()->GetDriverByName("GTiff");
+  QVERIFY2(drv, "GTiff");
+  GDALDataset* ds = drv->Create(path.toUtf8().constData(), 16, 16, 1, GDT_Float32, nullptr);
+  QVERIFY2(ds, "create DEM tif");
+  double gt[6] = {200000.0, 10.0, 0.0, 450000.0, 0.0, -10.0};
+  ds->SetGeoTransform(gt);
+  OGRSpatialReference srs;
+  srs.SetFromUserInput("EPSG:5186");
+  char* wkt = nullptr;
+  srs.exportToWkt(&wkt);
+  if (wkt) {
+    ds->SetProjection(wkt);
+    CPLFree(wkt);
+  }
+  std::vector<float> z(16 * 16);
+  for (int y = 0; y < 16; ++y) {
+    for (int x = 0; x < 16; ++x)
+      z[static_cast<size_t>(y) * 16 + x] = 12.0f + float(x + y) * 8.0f;
+  }
+  QVERIFY(ds->GetRasterBand(1)->RasterIO(GF_Write, 0, 0, 16, 16, z.data(), 16, 16, GDT_Float32, 0,
+                                         0) == CE_None);
+  GDALClose(ds);
+
+  QgsRasterLayer rl(path, QStringLiteral("DEM"), QStringLiteral("gdal"));
+  QVERIFY2(rl.isValid(), "gdal DEM");
+  QVERIFY2(LayerOps::applyDemElevationStyle(&rl), "applyDemElevationStyle");
+  auto* rend = dynamic_cast<QgsSingleBandPseudoColorRenderer*>(rl.renderer());
+  QVERIFY(rend && rend->shader());
+  auto* fn = dynamic_cast<QgsColorRampShader*>(rend->shader()->rasterShaderFunction());
+  QVERIFY2(fn, "QgsColorRampShader");
+  QCOMPARE(fn->colorRampType(), Qgis::ShaderInterpolationMethod::Discrete);
+  const QList<QgsColorRampShader::ColorRampItem> items = fn->colorRampItemList();
+  QVERIFY2(items.size() >= 4 && items.size() <= 8,
+           "enough height classes, but short enough for the layer-tree legend");
+  QVERIFY2(!std::isfinite(items.last().value) && items.last().value > 0,
+           "QGIS Discrete shade() returns false (white hole) unless last class is +inf");
+  QVERIFY2(items.last().label.contains(QStringLiteral("이상")),
+           "top class reads as N m 이상");
+  int sr = 0, sg = 0, sb = 0, sa = 0;
+  QVERIFY2(fn->shade(9000.0, &sr, &sg, &sb, &sa) && sa > 0,
+           "peak above sampled max must still get a color");
+  QVERIFY2(fn->shade(-500.0, &sr, &sg, &sb, &sa) && sa > 0,
+           "values below the first break must still get a color");
+  std::unique_ptr<QgsRasterBlock> blk(rend->block(1, rl.extent(), 16, 16));
+  QVERIFY2(blk && !blk->isEmpty(), "DEM render block");
+  for (int row = 0; row < 16; ++row) {
+    for (int col = 0; col < 16; ++col) {
+      QVERIFY2(qAlpha(blk->color(row, col)) > 0,
+               "no transparent DEM pixel — Discrete overflow leaves white holes");
+    }
+  }
+  for (const QgsColorRampShader::ColorRampItem& it : items) {
+    QVERIFY2(!it.label.contains(QStringLiteral("m m")),
+             "legend must not double the meter suffix");
+    QVERIFY2(it.label.contains(QLatin1Char('m')), "each class lists meters");
+  }
+  QFile::remove(path);
+}
+
+void TestWorkflow::demElevationStyle_userClassCountAndCustomItems() {
+  // 사용자가 칸 수·간격·색·라벨을 여러 줄 한꺼번에 바꾼다.
+  const QList<LayerOps::DemElevationClass> built =
+      LayerOps::buildDemElevationClasses(0.0, 600.0, 6, 100.0);
+  QCOMPARE(built.size(), 6);
+  QCOMPARE(built[0].lo, 0.0);
+  QCOMPARE(built[0].hi, 100.0);
+  QCOMPARE(built[4].lo, 400.0);
+  QCOMPARE(built[4].hi, 500.0);
+  QVERIFY2(!std::isfinite(built.last().hi) && built.last().hi > 0,
+           "user classes still end with +inf so peaks are not white holes");
+  QVERIFY(built.last().label.contains(QStringLiteral("이상")));
+  QVERIFY(built[0].label.contains(QLatin1Char('m')));
+
+  QList<LayerOps::DemElevationClass> custom;
+  LayerOps::DemElevationClass a;
+  a.lo = 0.0;
+  a.hi = 40.0;
+  a.color = QColor(10, 20, 30);
+  a.label = QStringLiteral("낮음");
+  custom.append(a);
+  LayerOps::DemElevationClass b;
+  b.lo = 40.0;
+  b.hi = 90.0;
+  b.color = QColor(40, 50, 60);
+  b.label = QStringLiteral("중간");
+  custom.append(b);
+  LayerOps::DemElevationClass c;
+  c.lo = 90.0;
+  c.hi = 1.0e9;
+  c.color = QColor(200, 10, 10);
+  c.label = QStringLiteral("90 m 이상");
+  custom.append(c);
+
+  GDALAllRegister();
+  const QString path = QDir::temp().filePath(QStringLiteral("ka_hgis_dem_user_classes.tif"));
+  QFile::remove(path);
+  GDALDriver* drv = GetGDALDriverManager()->GetDriverByName("GTiff");
+  QVERIFY2(drv, "GTiff");
+  GDALDataset* ds = drv->Create(path.toUtf8().constData(), 8, 8, 1, GDT_Float32, nullptr);
+  QVERIFY2(ds, "create DEM tif");
+  double gt[6] = {200000.0, 10.0, 0.0, 450000.0, 0.0, -10.0};
+  ds->SetGeoTransform(gt);
+  std::vector<float> z(8 * 8, 25.0f);
+  z[0] = 120.0f;
+  QVERIFY(ds->GetRasterBand(1)->RasterIO(GF_Write, 0, 0, 8, 8, z.data(), 8, 8, GDT_Float32, 0, 0) ==
+          CE_None);
+  GDALClose(ds);
+
+  QgsRasterLayer rl(path, QStringLiteral("DEM"), QStringLiteral("gdal"));
+  QVERIFY(rl.isValid());
+  LayerOps::DemElevationStyle style;
+  style.classes = custom;
+  QVERIFY2(LayerOps::applyDemElevationStyle(&rl, QgsRectangle(), style), "apply custom classes");
+  auto* rend = dynamic_cast<QgsSingleBandPseudoColorRenderer*>(rl.renderer());
+  QVERIFY(rend && rend->shader());
+  auto* fn = dynamic_cast<QgsColorRampShader*>(rend->shader()->rasterShaderFunction());
+  QVERIFY(fn);
+  const QList<QgsColorRampShader::ColorRampItem> items = fn->colorRampItemList();
+  QCOMPARE(items.size(), 3);
+  QCOMPARE(items[0].label, QStringLiteral("낮음"));
+  QCOMPARE(items[1].color, QColor(40, 50, 60));
+  QVERIFY2(!std::isfinite(items.last().value), "applied custom list still ends with +inf");
+  int sr = 0, sg = 0, sb = 0, sa = 0;
+  QVERIFY(fn->shade(120.0, &sr, &sg, &sb, &sa) && sa > 0);
+  QCOMPARE(QColor(sr, sg, sb), QColor(200, 10, 10));
+  QFile::remove(path);
+}
+
+void TestWorkflow::paleoLandform_candidateEmphasisAndReferenceLayer() {
+  QVERIFY(PaleoLandformService::isCandidateTerrainCode(QStringLiteral("04")));
+  QVERIFY(PaleoLandformService::isCandidateTerrainCode(QStringLiteral("05")));
+  QVERIFY(PaleoLandformService::isCandidateTerrainCode(QStringLiteral("06")));
+  QVERIFY(PaleoLandformService::isCandidateTerrainCode(QStringLiteral("08")));
+  QVERIFY(!PaleoLandformService::isCandidateTerrainCode(QStringLiteral("01")));
+  QVERIFY(!LayerOps::domainLayerKeys().contains(QStringLiteral("paleo_landform")));
+
+  QgsVectorLayer soil(QStringLiteral("MultiPolygon?crs=EPSG:5186&field=soil_type_geo:string"),
+                      QStringLiteral("soilwfs"), QStringLiteral("memory"));
+  QVERIFY(soil.isValid());
+  QVERIFY(SoilMapService::applyTerrainStyle(&soil));
+  QVERIFY(PaleoLandformService::applyCandidateEmphasis(&soil));
+  auto* cat = dynamic_cast<QgsCategorizedSymbolRenderer*>(soil.renderer());
+  QVERIFY2(cat, "categorized after emphasis");
+  int candAlpha = -1;
+  int otherAlpha = -1;
+  const QgsCategoryList cats = cat->categories();
+  for (const QgsRendererCategory& c : cats) {
+    if (!c.symbol()) continue;
+    if (c.value().toString() == QLatin1String("04"))
+      candAlpha = c.symbol()->color().alpha();
+    if (c.value().toString() == QLatin1String("01"))
+      otherAlpha = c.symbol()->color().alpha();
+  }
+  QVERIFY2(candAlpha >= 160, "alluvial candidate stays strong");
+  QVERIFY2(otherAlpha >= 90 && otherAlpha < candAlpha,
+           "non-candidate must stay readable, not nearly invisible");
+  QVERIFY2(soil.labelsEnabled(), "고지형 강조 뒤에도 한글 지형명이 지도에 보여야 한다");
+  const auto* soilLab = dynamic_cast<const QgsVectorLayerSimpleLabeling*>(soil.labeling());
+  QVERIFY2(soilLab, "토양 라벨 엔진");
+  const QString paleoExpr = soilLab->settings().fieldName;
+  QVERIFY2(paleoExpr.contains(QLatin1String("area($geometry)")), "작은 면 글자 생략");
+  QVERIFY2(paleoExpr.contains(QLatin1String("'01'")) == false ||
+               paleoExpr.contains(QLatin1String("NOT IN")),
+           "고지형 글자는 산악지·산록경사를 반복하지 않는다");
+  bool sawCandidateLegend = false;
+  for (const QgsRendererCategory& c : cats) {
+    if (c.value().toString() == QLatin1String("06") &&
+        c.label().contains(QStringLiteral("하성평탄")))
+      sawCandidateLegend = true;
+  }
+  QVERIFY2(sawCandidateLegend, "범례에 하성평탄지 한글이 있어야 한다");
+
+  const QString gpkg = QDir::temp().filePath(QStringLiteral("ka_hgis_paleo_test.gpkg"));
+  QFile::remove(gpkg);
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  QString err;
+  QgsVectorLayer* vl = PaleoLandformService::ensureInterpretationLayer(&proj, gpkg, &err);
+  QVERIFY2(vl, qPrintable(err));
+  QCOMPARE(LayerOps::layerKeyOf(vl), QStringLiteral("paleo_landform"));
+  QVERIFY(LayerOps::isReferenceLayer(vl));
+  QVERIFY(!GeorefService::isDomainSurveyLayer(vl));
+  QVERIFY(vl->fields().indexOf(QStringLiteral("kind")) >= 0);
+  QVERIFY(vl->fields().indexOf(QStringLiteral("status")) >= 0);
+  QVERIFY2(dynamic_cast<QgsSingleSymbolRenderer*>(vl->renderer()),
+           "빈 고지형 판독은 조판 범례에 자연제방·구하도 목록을 올리면 안 된다");
+  QFile::remove(gpkg);
+}
+
+void TestWorkflow::paleoLandform_toolbarIsNotDomainExport() {
+  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
+  const QString app = QString::fromUtf8(mw.readAll());
+  QVERIFY2(app.contains(QStringLiteral("고지형")), "toolbar label 고지형");
+  QVERIFY2(app.contains(QLatin1String("startPaleoLandform")), "slot startPaleoLandform");
+  const int paleoFn = app.indexOf(QLatin1String("void MainWindow::startPaleoLandform"));
+  QVERIFY2(paleoFn >= 0, "startPaleoLandform");
+  const int paleoNext = app.indexOf(QLatin1String("void MainWindow::"), paleoFn + 10);
+  const QString paleo = app.mid(paleoFn, paleoNext > paleoFn ? paleoNext - paleoFn : 4000);
+  QVERIFY2(!paleo.contains(QLatin1String("ensureDomainLayer")),
+           "고지형 must not create a domain layer");
+  QVERIFY2(paleo.contains(QLatin1String("seedInterpretationFromSoil")),
+           "고지형 클릭은 흙토람 면을 가설 판독으로 자동 깔아야 한다");
+  QVERIFY2(paleo.contains(QLatin1String("downloadAndAdd")),
+           "고지형 click must fetch 흙토람 분포지형 so the map is not empty");
+  QVERIFY2(paleo.contains(QLatin1String("clampCanvasToThematicScale")),
+           "country-scale view hides thematic soil; clamp to 1:100000");
+
+  QFile boot(QStringLiteral("src/app/KaApplication.cpp"));
+  QVERIFY2(boot.open(QIODevice::ReadOnly | QIODevice::Text), "KaApplication.cpp");
+  const QString smoke = QString::fromUtf8(boot.readAll());
+  QVERIFY2(smoke.contains(QLatin1String("toolbar_paleo")) &&
+               smoke.contains(QStringLiteral("고지형")),
+           "smoke looks for 고지형");
+
+  QFile exp(QStringLiteral("src/core/ExportService.cpp"));
+  QVERIFY2(exp.open(QIODevice::ReadOnly | QIODevice::Text), "ExportService.cpp");
+  const QString pack = QString::fromUtf8(exp.readAll());
+  QVERIFY2(!pack.contains(QLatin1String("paleo_landform")),
+           "판독 layer is not a 5179 submit domain");
+}
+
+void TestWorkflow::paleoLandform_seedFromSoilSplitsFloodplain() {
+  QCOMPARE(PaleoLandformService::suggestKindFromTerrain(QStringLiteral("04")),
+           QStringLiteral("선상지"));
+  QCOMPARE(PaleoLandformService::suggestKindFromTerrain(QStringLiteral("05")),
+           QStringLiteral("해성평탄"));
+  QCOMPARE(PaleoLandformService::suggestKindFromTerrain(QStringLiteral("08")),
+           QStringLiteral("하안단구"));
+  QVERIFY(PaleoLandformService::suggestKindFromTerrain(QStringLiteral("06")).isEmpty());
+  QVERIFY(PaleoLandformService::suggestKindFromTerrain(QStringLiteral("01")).isEmpty());
+
+  QgsVectorLayer soil(QStringLiteral("Polygon?crs=EPSG:5186&field=soil_type_geo:string"),
+                      QStringLiteral("soil"), QStringLiteral("memory"));
+  QVERIFY(soil.isValid());
+  QVERIFY(soil.startEditing());
+  auto addSoil = [&](const QString& code, const QgsRectangle& r) {
+    QgsFeature f(soil.fields());
+    f.setAttribute(QStringLiteral("soil_type_geo"), code);
+    f.setGeometry(QgsGeometry::fromRect(r));
+    QVERIFY(soil.addFeature(f));
+  };
+  addSoil(QStringLiteral("01"), QgsRectangle(0, 0, 80, 80));
+  addSoil(QStringLiteral("04"), QgsRectangle(200, 0, 350, 150));
+  addSoil(QStringLiteral("05"), QgsRectangle(400, 0, 550, 150));
+  addSoil(QStringLiteral("06"), QgsRectangle(0, 200, 400, 400));
+  addSoil(QStringLiteral("06"), QgsRectangle(600, 0, 620, 20));
+  addSoil(QStringLiteral("08"), QgsRectangle(0, 500, 200, 700));
+  QVERIFY(soil.commitChanges());
+
+  QgsVectorLayer paleo(
+      QStringLiteral("Polygon?crs=EPSG:5186&field=kind:string&field=note:string&field=status:string"),
+      QStringLiteral("고지형 판독"), QStringLiteral("memory"));
+  QVERIFY(paleo.isValid());
+  QVERIFY(paleo.startEditing());
+  QgsFeature user(paleo.fields());
+  user.setGeometry(QgsGeometry::fromRect(QgsRectangle(900, 900, 920, 920)));
+  user.setAttribute(QStringLiteral("kind"), QStringLiteral("미분류"));
+  user.setAttribute(QStringLiteral("note"), QStringLiteral("손으로 그림"));
+  user.setAttribute(QStringLiteral("status"), QStringLiteral("가설"));
+  QVERIFY(paleo.addFeature(user));
+  QVERIFY(paleo.commitChanges());
+
+  QString err;
+  const auto first = PaleoLandformService::seedInterpretationFromSoil(&soil, &paleo, &err);
+  QVERIFY2(first.added > 0, qPrintable(err));
+  QVERIFY(first.keptUser >= 1);
+
+  int kindsGu = 0, kindsRim = 0, kindsFan = 0, kindsMarine = 0, kindsTerr = 0, kindsLow = 0,
+      kindsMtn = 0, userKept = 0;
+  QgsFeature pf;
+  auto it = paleo.getFeatures();
+  while (it.nextFeature(pf)) {
+    const QString k = pf.attribute(QStringLiteral("kind")).toString();
+    const QString note = pf.attribute(QStringLiteral("note")).toString();
+    QCOMPARE(pf.attribute(QStringLiteral("status")).toString(), QStringLiteral("가설"));
+    if (note == QStringLiteral("손으로 그림"))
+      ++userKept;
+    if (k == QStringLiteral("구하도"))
+      ++kindsGu;
+    else if (k == QStringLiteral("자연제방"))
+      ++kindsRim;
+    else if (k == QStringLiteral("선상지"))
+      ++kindsFan;
+    else if (k == QStringLiteral("해성평탄"))
+      ++kindsMarine;
+    else if (k == QStringLiteral("하안단구"))
+      ++kindsTerr;
+    else if (k == QStringLiteral("미저지"))
+      ++kindsLow;
+    else if (k.contains(QStringLiteral("산악")))
+      ++kindsMtn;
+  }
+  QCOMPARE(userKept, 1);
+  QCOMPARE(kindsFan, 1);
+  QCOMPARE(kindsMarine, 1);
+  QCOMPARE(kindsTerr, 1);
+  QCOMPARE(kindsMtn, 0);
+  QVERIFY2(kindsGu >= 1 && kindsRim >= 1, "넓은 하성평탄은 구하도+자연제방으로 나눠야 한다");
+  QVERIFY2(kindsLow >= 1, "좁은 하성평탄은 미저지 가설");
+
+  const auto second = PaleoLandformService::seedInterpretationFromSoil(&soil, &paleo, &err);
+  QCOMPARE(second.keptUser, 1);
+  int userAfter = 0, terrAfter = 0;
+  auto it2 = paleo.getFeatures();
+  while (it2.nextFeature(pf)) {
+    if (pf.attribute(QStringLiteral("note")).toString() == QStringLiteral("손으로 그림"))
+      ++userAfter;
+    if (pf.attribute(QStringLiteral("kind")).toString() == QStringLiteral("하안단구"))
+      ++terrAfter;
+  }
+  QCOMPARE(userAfter, 1);
+  QCOMPARE(terrAfter, 1);
+  QVERIFY2(dynamic_cast<QgsCategorizedSymbolRenderer*>(paleo.renderer()),
+           "가설이 깔리면 조판 범례에 종류가 나와야 한다");
+}
+
+void TestWorkflow::demNgiiImg_loadsWithMeterLegend() {
+  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
+  const QString app = QString::fromUtf8(mw.readAll());
+  QVERIFY2(app.contains(QLatin1String("importDemElevationRaster")),
+           "DEM menu loads 국토지리원 .img");
+  QVERIFY2(app.contains(QLatin1String(".img")), "file filter includes ERDAS Imagine");
+  QVERIFY2(app.contains(QStringLiteral("국토지리원")) || app.contains(QLatin1String(".img")),
+           "menu names the NGII DEM");
+  const int fn = app.indexOf(QLatin1String("void MainWindow::toggleDemMap"));
+  QVERIFY2(fn >= 0, "toggleDemMap");
+  const int next = app.indexOf(QLatin1String("void MainWindow::"), fn + 10);
+  const QString toggle = app.mid(fn, next - fn);
+  QVERIFY2(!toggle.contains(QLatin1String("getOpenFileName")),
+           "DEM body click stays one-click, not the NGII file picker");
+
+  QFile ops(QStringLiteral("src/core/LayerOps.cpp"));
+  QVERIFY2(ops.open(QIODevice::ReadOnly | QIODevice::Text), "LayerOps.cpp");
+  const QString opsSrc = QString::fromUtf8(ops.readAll());
+  const int addFn = opsSrc.indexOf(QLatin1String("bool LayerOps::addDemElevationRaster"));
+  QVERIFY2(addFn >= 0, "addDemElevationRaster");
+  const int addNext = opsSrc.indexOf(QLatin1String("\nbool LayerOps::"), addFn + 10);
+  QVERIFY2(opsSrc.mid(addFn, addNext - addFn).contains(QLatin1String("applyDemElevationStyle")),
+           "NGII .img must get the meter legend");
 }
 
 void TestWorkflow::thematicMapsScaleRangeTo1in100000() {
@@ -943,6 +1789,59 @@ void TestWorkflow::vworldSettingsAndNoKeyTests() {
   QVERIFY2(!LayerOps::addVworldBaseMap(&proj2, nullptr, QString(), &err),
            "empty api key must reject basemap add");
   QVERIFY(!projectHasLayerNamedLike(&proj2, QStringLiteral("VWorld 배경")));
+}
+
+void TestWorkflow::koreaRegionCatalog_gyeonggiGangwonAddressQuery() {
+  const QStringList sido = KoreaRegionCatalog::sidoNames();
+  QVERIFY(sido.contains(QStringLiteral("경기도")));
+  QVERIFY(sido.contains(QStringLiteral("강원특별자치도")));
+  QVERIFY(KoreaRegionCatalog::citiesOf(QStringLiteral("경기도"))
+              .contains(QStringLiteral("수원시")));
+  QVERIFY(KoreaRegionCatalog::citiesOf(QStringLiteral("강원도"))
+              .contains(QStringLiteral("강릉시")));
+  QCOMPARE(KoreaRegionCatalog::composeAddress(QStringLiteral("경기도"), QStringLiteral("수원시"),
+                                              QStringLiteral("영통동"), QStringLiteral("123-4")),
+           QStringLiteral("경기도 수원시 영통동 123-4"));
+  QCOMPARE(KoreaRegionCatalog::composeAddress(QStringLiteral("강원도"), QStringLiteral("강릉시"),
+                                              QStringLiteral("포남동"), QString()),
+           QStringLiteral("강원특별자치도 강릉시 포남동"));
+  QVERIFY(KoreaRegionCatalog::composeAddress(QStringLiteral("경기도"), QString(), QString(), QString())
+              .contains(QStringLiteral("경기도")));
+  QVERIFY2(KoreaRegionCatalog::dongsOf(QStringLiteral("경기도"), QStringLiteral("수원시"))
+               .contains(QStringLiteral("영통동")),
+           "수원시 동 목록");
+  QVERIFY2(KoreaRegionCatalog::dongsOf(QStringLiteral("강원도"), QStringLiteral("강릉시"))
+               .contains(QStringLiteral("병산동")),
+           "강릉시 동 목록");
+  QVERIFY2(KoreaRegionCatalog::dongsOf(QStringLiteral("제주특별자치도"), QStringLiteral("제주시"))
+               .contains(QStringLiteral("애월읍")),
+           "제주시 읍면동");
+}
+
+void TestWorkflow::regionLocator_sitsInToolbarGapBeforeSearch() {
+  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
+  const QString src = QString::fromUtf8(mw.readAll());
+  const int region = src.indexOf(QLatin1String("regionLocator"));
+  const int search = src.indexOf(QLatin1String("locationSearch"));
+  QVERIFY2(region >= 0, "toolbar gap must host KaRegionLocator");
+  QVERIFY2(search >= 0, "locationSearch");
+  QVERIFY2(region < search, "region map sits in the gap before the address field");
+  QVERIFY2(src.contains(QLatin1String("searchRequested")),
+           "시·동·번지 찾기는 LocationSearch로 넘어가야 한다");
+
+  QFile loc(QStringLiteral("src/app/KaRegionLocator.cpp"));
+  QVERIFY2(loc.open(QIODevice::ReadOnly | QIODevice::Text), "KaRegionLocator.cpp");
+  const QString body = QString::fromUtf8(loc.readAll());
+  QVERIFY2(body.contains(QLatin1String("QGridLayout")),
+           "시·도 칩은 격자여야 한다. 겹친 약도 좌표는 안 된다");
+  QVERIFY2(body.contains(QLatin1String("regionChip")), "regionChip buttons");
+  QVERIFY2(!body.contains(QLatin1String("NormChip")),
+           "must not paint overlapping normalized chips");
+  QVERIFY2(body.contains(QLatin1String("regionDong")), "동은 콤보로 고른다");
+  QVERIFY2(body.contains(QLatin1String("setEditable(true)")), "동은 목록 선택 + 한글 입력");
+  QVERIFY2(!body.contains(QLatin1String("Qt::Popup")),
+           "Popup 창은 Windows에서 한글 IME를 막는다");
 }
 
 void TestWorkflow::editBufferCommitSurvivesReopen() {
@@ -1549,6 +2448,163 @@ void TestWorkflow::refreshXyzBasemapTiles_restoresStaleDevicePixelRatio() {
   QVERIFY(want > 0.05f);
 }
 
+void TestWorkflow::refreshXyzBasemapTiles_doesNotAbortInFlightWmsJob() {
+  // 현장 덤프 2026-08-31: provider_wms → deleteLater → lockThreadPostEventList 0xc0000005.
+  // stopRendering/clearCache 가 내려오는 타일 QObject를 끊으면 Qt6에서 AV.
+  QgsMapCanvas canvas;
+  canvas.resize(640, 480);
+  canvas.setParallelRenderingEnabled(true);
+  LayerOps::refreshXyzBasemapTiles(&canvas);
+  QVERIFY2(!canvas.isParallelRenderingEnabled(),
+           "XYZ refresh must force sequential; ParallelJob + WMS deleteLater AV");
+
+  QFile f(QStringLiteral("src/core/LayerOps.cpp"));
+  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text),
+           "run from source tree (ctest WORKING_DIRECTORY)");
+  const QString src = QString::fromUtf8(f.readAll());
+  const int fn = src.indexOf(QLatin1String("void LayerOps::refreshXyzBasemapTiles"));
+  QVERIFY2(fn >= 0, "refreshXyzBasemapTiles must exist");
+  const int next = src.indexOf(QLatin1String("\nbool LayerOps::"), fn + 10);
+  QVERIFY2(next > fn, "refreshXyzBasemapTiles body");
+  const QString body = src.mid(fn, next - fn);
+  QVERIFY2(!body.contains(QLatin1String("stopRendering")),
+           "must not abort an in-flight WMS job");
+  QVERIFY2(!body.contains(QLatin1String("clearCache")),
+           "must not drop TileDownloadManager objects still finishing");
+  QVERIFY2(!body.contains(QLatin1String("refreshAllLayers")),
+           "refreshAllLayers plus refresh re-enters provider_wms block()");
+  QVERIFY2(body.contains(QLatin1String("isDrawing")),
+           "skip a second refresh while the first WMS job is still drawing");
+}
+
+void TestWorkflow::uiComboActions_doNotBustTileCacheWhileDrawing() {
+  // 툴바 지형맵·DEM·토양·지질·수계·검색·레이어순서·줌이 겹치면
+  // refreshAllLayers가 지적 WMS 캐시를 버리고 UI 스레드가 멈춘다.
+  QFile ops(QStringLiteral("src/core/LayerOps.cpp"));
+  QVERIFY2(ops.open(QIODevice::ReadOnly | QIODevice::Text), "LayerOps.cpp");
+  const QString opsSrc = QString::fromUtf8(ops.readAll());
+
+  int fn = opsSrc.indexOf(QLatin1String("bool LayerOps::zoomToLayerMax"));
+  QVERIFY2(fn >= 0, "zoomToLayerMax");
+  int next = opsSrc.indexOf(QLatin1String("\nbool LayerOps::isolateAndZoomToLayer"), fn + 10);
+  QVERIFY2(next > fn, "zoomToLayerMax body");
+  const QString zoom = opsSrc.mid(fn, next - fn);
+  QVERIFY2(!zoom.contains(QLatin1String("refreshAllLayers")),
+           "zoomToLayerMax must not dump WMS/XYZ cache when overlays stack");
+  QVERIFY2(zoom.contains(QLatin1String("refreshCanvasIfIdle")),
+           "zoom after a toolbar click must wait until the canvas is idle");
+
+  fn = opsSrc.indexOf(QLatin1String("bool LayerOps::isolateAndZoomToLayer"));
+  QVERIFY2(fn >= 0, "isolateAndZoomToLayer");
+  next = opsSrc.indexOf(QLatin1String("\nvoid LayerOps::zoomToFullMax"), fn + 10);
+  QVERIFY2(next > fn, "isolateAndZoomToLayer body");
+  QVERIFY2(!opsSrc.mid(fn, next - fn).contains(QLatin1String("refreshAllLayers")),
+           "isolateAndZoomToLayer must not restack in-flight tiles");
+
+  fn = opsSrc.indexOf(QLatin1String("bool LayerOps::setLayerOpacity"));
+  QVERIFY2(fn >= 0, "setLayerOpacity");
+  next = opsSrc.indexOf(QLatin1String("\nbool LayerOps::toggleLayerVisibility"), fn + 10);
+  QVERIFY2(next > fn, "setLayerOpacity body");
+  QVERIFY2(!opsSrc.mid(fn, next - fn).contains(QLatin1String("refreshAllLayers")),
+           "opacity slider must not bust the tile cache");
+
+  fn = opsSrc.indexOf(QLatin1String("LayerOps::FieldBasemapPackResult LayerOps::prepareFieldBasemapPack"));
+  QVERIFY2(fn >= 0, "prepareFieldBasemapPack");
+  next = opsSrc.indexOf(QLatin1String("\nbool LayerOps::addVworldHybridMap"), fn + 10);
+  QVERIFY2(next > fn, "prepareFieldBasemapPack body");
+  QVERIFY2(!opsSrc.mid(fn, next - fn).contains(QLatin1String("refreshAllLayers")),
+           "위성+지적 동시 추가는 refreshAllLayers 금지");
+
+  fn = opsSrc.indexOf(QLatin1String("void LayerOps::zoomToKorea"));
+  QVERIFY2(fn >= 0, "zoomToKorea");
+  next = opsSrc.indexOf(QLatin1String("\nQString LayerOps::convertToShp5179"), fn + 10);
+  QVERIFY2(next > fn, "zoomToKorea body");
+  QVERIFY2(!opsSrc.mid(fn, next - fn).contains(QLatin1String("refreshAllLayers")),
+           "전체 보기도 타일 캐시를 버리면 안 됨");
+
+  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
+  const QString app = QString::fromUtf8(mw.readAll());
+  fn = app.indexOf(QLatin1String("void MainWindow::onLayerTreeRowsMoved"));
+  QVERIFY2(fn >= 0, "onLayerTreeRowsMoved");
+  next = app.indexOf(QLatin1String("void MainWindow::"), fn + 10);
+  QVERIFY2(next > fn, "onLayerTreeRowsMoved body");
+  QVERIFY2(!app.mid(fn, next - fn).contains(QLatin1String("refreshAllLayers")),
+           "레이어 순서 바꾸기가 지적 타일을 다시 받으면 멈춤");
+
+  fn = app.indexOf(QLatin1String("void MainWindow::zoomToLocation"));
+  QVERIFY2(fn >= 0, "zoomToLocation");
+  next = app.indexOf(QLatin1String("void MainWindow::"), fn + 10);
+  QVERIFY2(next > fn, "zoomToLocation body");
+  QVERIFY2(!app.mid(fn, next - fn).contains(QLatin1String("refreshAllLayers")),
+           "주소 검색 이동이 refreshAllLayers면 위성·지적이 다시 로딩됨");
+
+  fn = app.indexOf(QLatin1String("void MainWindow::undoLastAction"));
+  QVERIFY2(fn >= 0, "undoLastAction");
+  next = app.indexOf(QLatin1String("void MainWindow::"), fn + 10);
+  QVERIFY2(next > fn, "undoLastAction body");
+  QVERIFY2(!app.mid(fn, next - fn).contains(QLatin1String("refreshAllLayers")),
+           "Ctrl+Z clearCache+refreshAllLayers is the provider_wms AV");
+
+  fn = app.indexOf(QLatin1String("void MainWindow::applyMapScaleFromUi"));
+  QVERIFY2(fn >= 0, "applyMapScaleFromUi");
+  next = app.indexOf(QLatin1String("void MainWindow::"), fn + 10);
+  QVERIFY2(next > fn, "applyMapScaleFromUi body");
+  const QString scaleBody = app.mid(fn, next - fn);
+  QVERIFY2(scaleBody.contains(QLatin1String("refreshCanvasIfIdle")),
+           "축척 콤보도 그리는 중이면 refresh 금지");
+  QVERIFY2(!scaleBody.contains(QLatin1String("->refresh()")),
+           "축척 적용의 빈 refresh()는 지적 타일 위에 겹치면 멈춤");
+}
+
+void TestWorkflow::startupView_doesNotRestackXyzRefreshWhileWmsDownloads() {
+  QFile f(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text),
+           "run from source tree (ctest WORKING_DIRECTORY)");
+  const QString src = QString::fromUtf8(f.readAll());
+  const int fn = src.indexOf(QLatin1String("void MainWindow::ensureStartupViewReady"));
+  QVERIFY2(fn >= 0, "ensureStartupViewReady must exist");
+  const int next = src.indexOf(QLatin1String("void MainWindow::"), fn + 10);
+  QVERIFY2(next > fn, "ensureStartupViewReady body");
+  const QString body = src.mid(fn, next - fn);
+  QVERIFY2(!body.contains(QLatin1String("QTimer::singleShot(600")),
+           "600ms restack stops in-flight VWorld tiles");
+  QVERIFY2(!body.contains(QLatin1String("QTimer::singleShot(1800")),
+           "1800ms restack is the 16:04 field crash window");
+
+  QFile app(QStringLiteral("src/app/KaApplication.cpp"));
+  QVERIFY2(app.open(QIODevice::ReadOnly | QIODevice::Text), "KaApplication.cpp");
+  const QString boot = QString::fromUtf8(app.readAll());
+  QVERIFY2(boot.contains(QStringLiteral("qgis/parallel_rendering")),
+           "boot must persist sequential rendering in QgsSettings");
+  QVERIFY2(boot.contains(QLatin1String("setMaxThreads(1)")),
+           "WMS block()+QEventLoop on a thread-pool worker is the ParallelJob AV");
+
+  const int afterFn = src.indexOf(QLatin1String("static void afterBasemapAdded"));
+  QVERIFY2(afterFn >= 0, "afterBasemapAdded must exist");
+  const int afterNext = src.indexOf(QLatin1String("\nvoid MainWindow::"), afterFn + 10);
+  QVERIFY2(afterNext > afterFn, "afterBasemapAdded body");
+  const QString after = src.mid(afterFn, afterNext - afterFn);
+  QVERIFY2(!after.contains(QLatin1String("clearCache")),
+           "clearCache after add + processEvents is the same deleteLater AV");
+  QVERIFY2(!after.contains(QLatin1String("processEvents")),
+           "nested processEvents while WMS tiles finish re-enters provider_wms");
+  QVERIFY2(!after.contains(QLatin1String("refreshAllLayers")),
+           "delayed refreshAllLayers restacks an in-flight job");
+  QVERIFY2(after.contains(QLatin1String("refreshXyzBasemapTiles")),
+           "basemap add must use the safe XYZ refresh");
+
+  QFile ops(QStringLiteral("src/core/LayerOps.cpp"));
+  QVERIFY2(ops.open(QIODevice::ReadOnly | QIODevice::Text), "LayerOps.cpp");
+  const QString opsSrc = QString::fromUtf8(ops.readAll());
+  const int clampFn = opsSrc.indexOf(QLatin1String("bool LayerOps::clampCanvasToKorea"));
+  QVERIFY2(clampFn >= 0, "clampCanvasToKorea");
+  const int clampNext = opsSrc.indexOf(QLatin1String("\nvoid LayerOps::"), clampFn + 10);
+  QVERIFY2(clampNext > clampFn, "clampCanvasToKorea body");
+  QVERIFY2(!opsSrc.mid(clampFn, clampNext - clampFn).contains(QLatin1String("stopRendering")),
+           "pan/extentsChanged clamp must not abort in-flight WMS tiles");
+}
+
 void TestWorkflow::addVworldSatellite_fourKCanvasKeeps256pxTiles() {
   QgsProject proj;
   proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
@@ -1715,6 +2771,58 @@ void TestWorkflow::layoutBlankSheetMapItemKeepsFrameAndNonEmptyLayers() {
   QVERIFY(map->extent().width() > 0.0);
 }
 
+void TestWorkflow::layoutEnter_matchesCanvasViewWithoutNiceSnap() {
+  // 조판 진입 시 지도 화면과 같은 범위·1:N을 쓴다. niceScaleDenominator로
+  // 1847→2000처럼 분모를 올리면 맵이 축소된다. setExtent는 칸 mm를 바꾼다.
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  QString err;
+  QVERIFY(!LayoutService::createBlankSheet(&proj, 297.0, 210.0, QStringLiteral("user_sheet"), &err)
+               .isEmpty());
+  auto* ly = dynamic_cast<QgsPrintLayout*>(
+      proj.layoutManager()->layoutByName(QStringLiteral("user_sheet")));
+  QVERIFY(ly);
+  auto* map = new QgsLayoutItemMap(ly);
+  map->setId(QStringLiteral("ka_map"));
+  map->attemptSetSceneRect(QRectF(20.0, 20.0, 200.0, 140.0));
+  map->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  map->zoomToExtent(QgsRectangle(0.0, 0.0, 80000.0, 56000.0));
+  if (map->scene() != ly)
+    ly->addLayoutItem(map);
+  QVERIFY2(map->scale() > 10000.0, "precondition: sheet starts zoomed out");
+
+  const QgsRectangle view(200000.0, 450000.0, 200400.0, 450280.0);
+  QVERIFY(LayoutService::applyCanvasViewToLayoutMap(map, view, 2000.0));
+  QVERIFY2(qAbs(map->rect().width() - 200.0) < 1.0, "zoomToExtent/setScale must keep map frame mm");
+  QVERIFY2(qAbs(map->rect().height() - 140.0) < 1.0, "setExtent must not resize the frame");
+  const QgsPointXY c = map->extent().center();
+  QVERIFY(qAbs(c.x() - view.center().x()) < 1.0);
+  QVERIFY(qAbs(c.y() - view.center().y()) < 1.0);
+  QVERIFY2(qAbs(map->scale() - 2000.0) < 5.0,
+           qPrintable(QStringLiteral("layout scale must match canvas 1:2000 (got %1)")
+                          .arg(map->scale())));
+  QVERIFY2(map->extent().width() < 2000.0, "must not keep the 80 km start envelope");
+
+  QCOMPARE(LayoutService::niceScaleDenominator(1847.0), 2000);
+  QVERIFY(LayoutService::applyCanvasViewToLayoutMap(map, view, 1847.0));
+  QVERIFY2(qAbs(map->scale() - 1847.0) < 5.0,
+           qPrintable(QStringLiteral("must not snap 1:1847 up to 1:2000 (got %1)")
+                          .arg(map->scale())));
+
+  QFile studio(QStringLiteral("src/app/KaDrawingStudio.cpp"));
+  QVERIFY2(studio.open(QIODevice::ReadOnly | QIODevice::Text), "KaDrawingStudio.cpp");
+  const QString src = QString::fromUtf8(studio.readAll());
+  const int fn = src.indexOf(QLatin1String("void KaDrawingStudio::centerOnMapCanvas"));
+  QVERIFY2(fn >= 0, "centerOnMapCanvas");
+  const int next = src.indexOf(QLatin1String("void KaDrawingStudio::"), fn + 10);
+  QVERIFY2(next > fn, "centerOnMapCanvas body");
+  const QString body = src.mid(fn, next - fn);
+  QVERIFY2(body.contains(QLatin1String("applyCanvasViewToLayoutMap")),
+           "layout enter must copy the canvas view, not only pan");
+  QVERIFY2(!body.contains(QLatin1String("niceScaleDenominator")),
+           "layout enter must not snap the canvas scale up");
+}
+
 void TestWorkflow::layoutStudio_checkedLayersScaleBarLegendSize() {
   QgsProject proj;
   proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
@@ -1865,6 +2973,176 @@ void TestWorkflow::layoutNiceScaleDenominator_endsOnTen() {
   const double barMm = LayoutService::scaleBarWidthMm(seg, 4, 500.0);
   QVERIFY(barMm >= 32.0);
   QVERIFY(barMm <= 200.0);
+}
+
+void TestWorkflow::sheetLegend_soilShowsTerrainClassesNotPictureName() {
+  // 도면 범례는 흙토람 분포지형 색칸이어야 한다. 그림·지적·위성 레이어 이름은 범례가 아니다.
+  // tuneSheetLegend는 Manual 전용 트리를 쓴다. 프로젝트 범례 노드를 지우면 안 된다.
+  QVERIFY(LayoutService::sheetLegendOmitsLayerName(QStringLiteral("토양도(흙토람 그림)")));
+  QVERIFY(LayoutService::sheetLegendOmitsLayerName(QStringLiteral("위성")));
+  QVERIFY(LayoutService::sheetLegendOmitsLayerName(QStringLiteral("지적 본번")));
+  QVERIFY(LayoutService::sheetLegendOmitsLayerName(QStringLiteral("지적 부번")));
+  QVERIFY(!LayoutService::sheetLegendOmitsLayerName(QStringLiteral("토양도(흙토람)")));
+  QVERIFY(!LayoutService::sheetLegendOmitsLayerName(QStringLiteral("고지형 판독")));
+
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  auto* soil = new QgsVectorLayer(
+      QStringLiteral("Polygon?crs=EPSG:5186&field=soil_type_geo:string"),
+      QStringLiteral("토양도(흙토람)"), QStringLiteral("memory"));
+  QVERIFY(soil->isValid());
+  QVERIFY(SoilMapService::applyTerrainStyle(soil));
+  proj.addMapLayer(soil);
+  auto* picture = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:3857"),
+                                     QStringLiteral("토양도(흙토람 그림)"),
+                                     QStringLiteral("memory"));
+  QVERIFY(picture->isValid());
+  proj.addMapLayer(picture);
+  auto* sat = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:3857"),
+                                 QStringLiteral("위성"), QStringLiteral("memory"));
+  QVERIFY(sat->isValid());
+  proj.addMapLayer(sat);
+
+  QVERIFY(!LayoutService::createBlankSheet(&proj, 297.0, 210.0, QStringLiteral("user_sheet"), nullptr)
+               .isEmpty());
+  auto* ly = dynamic_cast<QgsPrintLayout*>(
+      proj.layoutManager()->layoutByName(QStringLiteral("user_sheet")));
+  QVERIFY(ly);
+  auto* map = new QgsLayoutItemMap(ly);
+  map->setId(QStringLiteral("ka_map"));
+  map->attemptSetSceneRect(QRectF(20.0, 20.0, 160.0, 120.0));
+  map->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  map->setKeepLayerSet(true);
+  map->setLayers({soil, picture, sat});
+  if (map->scene() != ly)
+    ly->addLayoutItem(map);
+
+  auto* legend = new QgsLayoutItemLegend(ly);
+  legend->setTitle(QStringLiteral("범례"));
+  legend->setLinkedMap(map);
+  legend->setResizeToContents(false);
+  legend->attemptSetSceneRect(QRectF(190.0, 20.0, 48.0, 74.0));
+  ly->addLayoutItem(legend);
+  legend->updateLegend();
+  LayoutService::tuneSheetLegend(legend);
+
+  const QString dump = LayoutService::sheetLegendLabelDump(legend);
+  QVERIFY2(dump.contains(QStringLiteral("산악지")), dump.toUtf8().constData());
+  QVERIFY2(dump.contains(QStringLiteral("하성평탄")) || dump.contains(QStringLiteral("곡간")),
+           dump.toUtf8().constData());
+  QVERIFY2(!dump.contains(QStringLiteral("흙토람 그림")), dump.toUtf8().constData());
+  QVERIFY2(!dump.contains(QStringLiteral("위성")), dump.toUtf8().constData());
+}
+
+void TestWorkflow::sheetLegend_hidesUncheckedSoilLayer() {
+  // 레이어 목록에서 토양도를 끄면 도면 범례에도 없어야 한다. 숨긴 레이어를 다시 끼워 넣지 않는다.
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  auto* soil = new QgsVectorLayer(
+      QStringLiteral("Polygon?crs=EPSG:5186&field=soil_type_geo:string"),
+      QStringLiteral("토양도(흙토람)"), QStringLiteral("memory"));
+  QVERIFY(soil->isValid());
+  QVERIFY(SoilMapService::applyTerrainStyle(soil));
+  proj.addMapLayer(soil);
+  auto* sat = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:3857"),
+                                 QStringLiteral("위성"), QStringLiteral("memory"));
+  QVERIFY(sat->isValid());
+  proj.addMapLayer(sat);
+
+  QVERIFY(!LayoutService::createBlankSheet(&proj, 297.0, 210.0, QStringLiteral("user_sheet"), nullptr)
+               .isEmpty());
+  auto* ly = dynamic_cast<QgsPrintLayout*>(
+      proj.layoutManager()->layoutByName(QStringLiteral("user_sheet")));
+  QVERIFY(ly);
+  auto* map = new QgsLayoutItemMap(ly);
+  map->setId(QStringLiteral("ka_map"));
+  map->attemptSetSceneRect(QRectF(20.0, 20.0, 160.0, 120.0));
+  map->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  map->setKeepLayerSet(true);
+  map->setLayers({soil, sat});
+  if (map->scene() != ly)
+    ly->addLayoutItem(map);
+
+  auto* legend = new QgsLayoutItemLegend(ly);
+  legend->setTitle(QStringLiteral("범례"));
+  legend->setLinkedMap(map);
+  legend->setResizeToContents(false);
+  legend->attemptSetSceneRect(QRectF(190.0, 20.0, 48.0, 74.0));
+  ly->addLayoutItem(legend);
+  legend->updateLegend();
+  LayoutService::tuneSheetLegend(legend);
+  QVERIFY(LayoutService::sheetLegendLabelDump(legend).contains(QStringLiteral("산악지")));
+
+  QgsLayerTreeLayer* soilNode = proj.layerTreeRoot()->findLayer(soil->id());
+  QVERIFY(soilNode);
+  soilNode->setItemVisibilityChecked(false);
+  QVERIFY(!soilNode->isVisible());
+  map->setLayers({sat});
+  LayoutService::tuneSheetLegend(legend);
+  const QString dump = LayoutService::sheetLegendLabelDump(legend);
+  QVERIFY2(!dump.contains(QStringLiteral("산악지")), dump.toUtf8().constData());
+  QVERIFY2(!dump.contains(QStringLiteral("토양도(흙토람)")), dump.toUtf8().constData());
+
+  soilNode->setItemVisibilityChecked(true);
+  map->setLayers({soil, sat});
+  LayoutService::tuneSheetLegend(legend);
+  const QString dumpOn = LayoutService::sheetLegendLabelDump(legend);
+  QVERIFY2(dumpOn.contains(QStringLiteral("산악지")), dumpOn.toUtf8().constData());
+}
+
+void TestWorkflow::sheetLegend_followsLayerCheckOnAndOff() {
+  // 레이어 체크를 끄면 그 항목만 범례에서 빠지고, 다시 켜면 돌아온다. 다른 켠 레이어는 유지.
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  auto* soil = new QgsVectorLayer(
+      QStringLiteral("Polygon?crs=EPSG:5186&field=soil_type_geo:string"),
+      QStringLiteral("토양도(흙토람)"), QStringLiteral("memory"));
+  QVERIFY(soil->isValid());
+  QVERIFY(SoilMapService::applyTerrainStyle(soil));
+  proj.addMapLayer(soil);
+  auto* zone = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                  QStringLiteral("조사구역"), QStringLiteral("memory"));
+  QVERIFY(zone->isValid());
+  proj.addMapLayer(zone);
+
+  QVERIFY(!LayoutService::createBlankSheet(&proj, 297.0, 210.0, QStringLiteral("user_sheet"), nullptr)
+               .isEmpty());
+  auto* ly = dynamic_cast<QgsPrintLayout*>(
+      proj.layoutManager()->layoutByName(QStringLiteral("user_sheet")));
+  QVERIFY(ly);
+  auto* map = new QgsLayoutItemMap(ly);
+  map->setId(QStringLiteral("ka_map"));
+  map->attemptSetSceneRect(QRectF(20.0, 20.0, 160.0, 120.0));
+  map->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  map->setKeepLayerSet(true);
+  map->setLayers({soil, zone});
+  if (map->scene() != ly)
+    ly->addLayoutItem(map);
+
+  auto* legend = new QgsLayoutItemLegend(ly);
+  legend->setLinkedMap(map);
+  legend->setResizeToContents(false);
+  ly->addLayoutItem(legend);
+  LayoutService::tuneSheetLegend(legend);
+  QString dump = LayoutService::sheetLegendLabelDump(legend);
+  QVERIFY2(dump.contains(QStringLiteral("산악지")), dump.toUtf8().constData());
+  QVERIFY2(dump.contains(QStringLiteral("조사구역")), dump.toUtf8().constData());
+
+  QgsLayerTreeLayer* zoneNode = proj.layerTreeRoot()->findLayer(zone->id());
+  QVERIFY(zoneNode);
+  zoneNode->setItemVisibilityChecked(false);
+  map->setLayers({soil});
+  LayoutService::tuneSheetLegend(legend);
+  dump = LayoutService::sheetLegendLabelDump(legend);
+  QVERIFY2(dump.contains(QStringLiteral("산악지")), dump.toUtf8().constData());
+  QVERIFY2(!dump.contains(QStringLiteral("조사구역")), dump.toUtf8().constData());
+
+  zoneNode->setItemVisibilityChecked(true);
+  map->setLayers({soil, zone});
+  LayoutService::tuneSheetLegend(legend);
+  dump = LayoutService::sheetLegendLabelDump(legend);
+  QVERIFY2(dump.contains(QStringLiteral("산악지")), dump.toUtf8().constData());
+  QVERIFY2(dump.contains(QStringLiteral("조사구역")), dump.toUtf8().constData());
 }
 
 void TestWorkflow::legendTitlesHideEpsgAndUseShortKorean() {
@@ -2161,6 +3439,43 @@ void TestWorkflow::layoutProfessionalSheet_frameGridTitleBlock() {
       LayoutService::renderPreview(&proj, QStringLiteral("survey_area_map"), QSize(1400, 990), &err);
   QVERIFY2(!img.isNull(), qPrintable(err));
   img.save(QDir::temp().filePath(QStringLiteral("ka-hgis-layout-pro.png")));
+}
+
+// 도면만들기 용지: 맵 안 + 십자와 바깥 테두리 좌표 자(주기)는 기본으로 끄고,
+// PDF는 그 조판을 그대로 보낸다(내보낼 때 도곽을 다시 켜지 않음).
+void TestWorkflow::drawingStudio_sheetOmitsCrossesAndBorderRuler() {
+  QFile hdr(QStringLiteral("src/app/KaDrawingStudio.h"));
+  QVERIFY2(hdr.open(QIODevice::ReadOnly | QIODevice::Text), "KaDrawingStudio.h");
+  const QString h = QString::fromUtf8(hdr.readAll());
+  QVERIFY2(h.contains(QLatin1String("m_gridEnabled = false")),
+           "도면만들기 기본은 좌표 격자(+·테두리 자)를 끈다");
+  QVERIFY2(h.contains(QLatin1String("m_gridShowNums = false")),
+           "바깥 테두리 좌표 숫자도 기본 꺼짐");
+
+  QFile cpp(QStringLiteral("src/app/KaDrawingStudio.cpp"));
+  QVERIFY2(cpp.open(QIODevice::ReadOnly | QIODevice::Text), "KaDrawingStudio.cpp");
+  const QString src = QString::fromUtf8(cpp.readAll());
+
+  const int stdDecor = src.indexOf(QLatin1String("void KaDrawingStudio::ensureStandardDecorations()"));
+  const int nextStd = src.indexOf(QLatin1String("void KaDrawingStudio::applyStandardChromePositions()"));
+  QVERIFY2(stdDecor >= 0 && nextStd > stdDecor, "ensureStandardDecorations");
+  const QString decor = src.mid(stdDecor, nextStd - stdDecor);
+  QVERIFY2(decor.contains(QLatin1String("applyCrsGrid")),
+           "조판을 열면 기본(꺼짐)대로 격자를 걷어 조판과 PDF가 같아진다");
+
+  const int save = src.indexOf(QLatin1String("void KaDrawingStudio::savePdf()"));
+  QVERIFY2(save >= 0, "savePdf");
+  const QString pdfFn = src.mid(save, 900);
+  QVERIFY2(pdfFn.contains(QLatin1String("applyCrsGrid")),
+           "PDF 저장 전에 조판과 같은 격자 상태를 맞춘다");
+  QVERIFY2(!pdfFn.contains(QLatin1String("applySurveyFrameGrid")),
+           "PDF가 도곽 +/자를 다시 켜면 조판과 달라진다");
+
+  const int apply = src.indexOf(QLatin1String("void KaDrawingStudio::applyCrsGrid"));
+  QVERIFY2(apply >= 0, "applyCrsGrid");
+  const QString applyFn = src.mid(apply, 1600);
+  QVERIFY2(applyFn.contains(QLatin1String("removeGrid")),
+           "격자 꺼짐이면 맵 안 +와 테두리 자를 지운다");
 }
 
 void TestWorkflow::layoutRasterDrawnInOnePass() {

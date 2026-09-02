@@ -158,13 +158,46 @@ Visual Studio 설치도 필요 없습니다.
 주의:
   - apps, bin, share 폴더를 지우면 실행되지 않습니다.
   - 폴더 이름에 한글이 있어도 되지만, 경로가 너무 길면 start.bat 을 쓰세요.
-  - VWorld 위성·지적 지도는 그 PC에서 도움말 → API 키를 한 번 넣습니다.
+  - VWorld 키는 만든 PC의 키를 config\secrets.ini 에 넣었습니다. USB를 다른 사람에게 주지 마세요.
   - GNU GPL v2 이상 (QGIS 라이브러리 링크). 자세한 공지는 앱 정보 창.
 
 제작: 동국문화재연구원  ·  버전 1
 "@
 Set-Content -LiteralPath (Join-Path $out "README.txt") -Value $readmeKo -Encoding UTF8
 Set-Content -LiteralPath (Join-Path $out "사용법.txt") -Value $readmeKo -Encoding UTF8
+
+function Copy-VworldKeyToPortable([string]$portableRoot) {
+  $dstDir = Join-Path $portableRoot "config"
+  New-Item -ItemType Directory -Force -Path $dstDir | Out-Null
+  $dst = Join-Path $dstDir "secrets.ini"
+  $cands = @(
+    (Join-Path $env:APPDATA "ka-hgis\ka-hgis-vworld.ini"),
+    (Join-Path $env:LOCALAPPDATA "ka-hgis\ka-hgis-vworld.ini"),
+    (Join-Path $env:APPDATA "ka-hgis\ka-hgis\ka-hgis-vworld.ini"),
+    (Join-Path $env:LOCALAPPDATA "ka-hgis\ka-hgis\ka-hgis-vworld.ini")
+  )
+  $key = $null
+  foreach ($p in $cands) {
+    if (-not (Test-Path -LiteralPath $p)) { continue }
+    foreach ($line in Get-Content -LiteralPath $p -ErrorAction SilentlyContinue) {
+      if ($line -match '^\s*ApiKey\s*=\s*(.+)\s*$') {
+        $cand = $Matches[1].Trim().Trim('"')
+        if ($cand) { $key = $cand; break }
+      }
+    }
+    if ($key) { break }
+  }
+  if (-not $key -and $env:VWORLD_API_KEY) { $key = $env:VWORLD_API_KEY.Trim() }
+  if (-not $key) {
+    Write-Host "VWorld key: not found on this PC (other PC will need 도움말 → API 키)"
+    return
+  }
+  $ini = "[VWorld]`r`nApiKey=$key`r`n"
+  [System.IO.File]::WriteAllText($dst, $ini, [System.Text.UTF8Encoding]::new($false))
+  Write-Host "VWorld key: copied into portable config/secrets.ini (value not printed)"
+}
+
+Copy-VworldKeyToPortable $out
 
 Write-Host "Portable folder ready: $out"
 Get-ChildItem $out | Select-Object Name, Mode, @{n='MB';e={ if ($_.PSIsContainer) { '' } else { [math]::Round($_.Length/1MB,1) } }}

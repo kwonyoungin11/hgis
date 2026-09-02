@@ -48,6 +48,10 @@ public:
   static bool applyFeaturePolyStyle(QgsVectorLayer* featurePoly);
   static bool applyDomainDrawStyle(QgsVectorLayer* layer, const QString& layerKey = {});
   static bool applyAreaM2Labels(QgsVectorLayer* layer);
+  // Vector labeling only. Cadastral WMS/XYZ text is baked into tiles.
+  static bool hasToggleableLabels(const QgsMapLayer* layer);
+  static bool labelsVisible(const QgsMapLayer* layer);
+  static bool setLabelsVisible(QgsMapLayer* layer, bool on);
   static bool applySimpleVectorStyle(QgsVectorLayer* layer, const QColor& fill, const QColor& stroke,
                                      double strokeWidthMm, double markerSizeMm = 3.5,
                                      bool noFill = false, bool noStroke = false, bool dashed = false);
@@ -87,6 +91,43 @@ public:
 
   static bool addVworldContourMap(QgsProject* project, QgsMapCanvas* canvas, const QString& apiKey, QString* errorOut = nullptr);
 
+  // 지형맵: OpenTopoMap XYZ only (EPSG:3857). Never VWorld WMS GetMap —
+  // WMS + OTF(QgsRasterProjector) + pan aborts TileDownloadManager (Windows AV).
+  // 작업 CRS(5186/5187)는 OTF destinationCrs — URI에 5186/5179를 넣지 않는다.
+  static bool addElevationHillshadeMap(QgsProject* project, QgsMapCanvas* canvas,
+                                       const QString& apiKey, QString* errorOut = nullptr);
+
+  // DEM click: Copernicus GLO-30 COG (single-band, meter legend) when the
+  // canvas has an extent; NASA GIBS color tiles as fallback. Never VWorld WMS.
+  static bool addDemColorReliefMap(QgsProject* project, QgsMapCanvas* canvas,
+                                   QString* errorOut = nullptr);
+
+  // 국토지리원 공개DEM(.img) / GeoTIFF. Single-band elevation + meter ramp.
+  static bool addDemElevationRaster(QgsProject* project, QgsMapCanvas* canvas,
+                                    const QString& path, QString* errorOut = nullptr);
+
+  // Color-ramp renderer so 조판 범례 lists height in meters.
+  struct DemElevationClass {
+    double lo = 0.0;
+    double hi = 0.0;  // last class is +inf
+    QColor color;
+    QString label;
+  };
+  struct DemElevationStyle {
+    int classCount = 0;      // 0 = auto (2–8)
+    double stepMeters = 0.0; // 0 = auto nice step
+    QList<DemElevationClass> classes;  // if set, used as-is (last forced +inf)
+  };
+  static bool applyDemElevationStyle(QgsRasterLayer* layer);
+  static bool applyDemElevationStyle(QgsRasterLayer* layer, const QgsRectangle& statsExtent);
+  static bool applyDemElevationStyle(QgsRasterLayer* layer, const QgsRectangle& statsExtent,
+                                     const DemElevationStyle& style);
+  static QList<DemElevationClass> buildDemElevationClasses(double zMin, double zMax, int classCount,
+                                                           double stepMeters);
+  static QList<DemElevationClass> readDemElevationClasses(const QgsRasterLayer* layer);
+  // Equal-interval step (m) so alluvial sites get 1–5 m classes, not one -2…1155 band.
+  static double demElevationClassStep(double zMin, double zMax);
+
   // 흙토람(농진청) 토양도 신청으로 내려받은 SHP를 참조 지도로 불러온다.
   // crsOverrideAuthId가 비어 있지 않으면 레이어 좌표계를 그 값으로 지정한다
   // (.prj 없는 배포본 대응 — 흙토람 고시 좌표계는 EPSG:2097 중부원점/Bessel).
@@ -99,6 +140,9 @@ public:
   static bool setLayerOpacity(QgsProject* project, QgsMapCanvas* canvas, const QString& name, double opacity);
 
   static bool toggleLayerVisibility(QgsProject* project, QgsMapCanvas* canvas, const QString& name, bool visible);
+  static bool isLayerVisible(QgsProject* project, const QString& name);
+  // refresh() only when no WMS/XYZ job is in flight (provider_wms deleteLater AV).
+  static void refreshCanvasIfIdle(QgsMapCanvas* canvas);
 
   static bool addKoreaBasemap(QgsProject* project, QgsMapCanvas* canvas, KoreaBasemap kind,
                               QString* errorOut = nullptr);
@@ -165,4 +209,7 @@ public:
                                                 QString* errorOut = nullptr);
   static void applyLegendCrsLabel(QgsMapLayer* layer);
   static bool undoCommittedFeature(QgsVectorLayer* layer, qint64 featureId, QString* errorOut = nullptr);
+  // Moves one vertex of a saved feature. Does not commit; caller writes GPKG.
+  static bool moveFeatureVertex(QgsVectorLayer* layer, qint64 featureId, int vertex,
+                                double x, double y, QString* errorOut = nullptr);
 };

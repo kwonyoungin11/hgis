@@ -367,7 +367,7 @@ QgsVectorLayer* RiverMapService::downloadAndAdd(QgsProject* project, QgsMapCanva
     LayerOps::ensureOtfEnabled(project, canvas, workAuth);
     LayerOps::syncMapCanvas(project, canvas, false);
     // refreshAllLayers()는 배경 타일 캐시까지 버려 재다운로드를 유발한다.
-    canvas->refresh();
+    LayerOps::refreshCanvasIfIdle(canvas);
   }
   return layer;
 }

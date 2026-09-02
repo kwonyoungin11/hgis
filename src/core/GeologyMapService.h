@@ -5,6 +5,7 @@
 #include <QString>
 
 class QgsMapCanvas;
+class QgsMapLayer;
 class QgsProject;
 class QgsRectangle;
 class QgsVectorLayer;
@@ -22,11 +23,22 @@ class QgsVectorLayer;
 class GeologyMapService {
 public:
   // extent(EPSG:5186) 범위의 암상 폴리곤을 내려받아 outGpkgPath에 저장하고
-  // 프로젝트 「참조 지도」 그룹에 추가한다. 성공 시 추가된 레이어를 반환.
-  static QgsVectorLayer* downloadAndAdd(QgsProject* project, QgsMapCanvas* canvas,
-                                        const QgsRectangle& extent5186,
-                                        const QString& outGpkgPath,
-                                        QString* errorOut = nullptr);
+  // 프로젝트 「참조 지도」 그룹에 추가한다. 본토는 l_50k_geology_litho_latest,
+  // 제주(남단 ~33.97°N 밖)는 l_jeju_50k_geology_litho_view. 둘 다 같은 기호·지층
+  // 분류 범례. 암상 벡터가 전혀 없으면 공식 5만 래스터(WMS)를 최후 수단으로 올린다.
+  static QgsMapLayer* downloadAndAdd(QgsProject* project, QgsMapCanvas* canvas,
+                                     const QgsRectangle& extent5186,
+                                     const QString& outGpkgPath,
+                                     QString* errorOut = nullptr);
+
+  // KIGAM litho WFS 모자이크(한반도, 남단 ~33.97°N)가 이 위경도 박스를 덮는지.
+  static bool lithoWfsCoversWgs84(const QgsRectangle& extentWgs84);
+  // 제주 전용 암상 WFS(광령리 등 ≤33.56°N) 범위.
+  static bool jejuLithoWfsCoversWgs84(const QgsRectangle& extentWgs84);
+  // 본토 또는 제주 typeName. 둘 다 아니면 빈 문자열(래스터 폴백).
+  static QString lithoTypeNameForWgs84(const QgsRectangle& extentWgs84);
+  // 공식 5만 지질도 래스터 WMS URI (레이어 CRS EPSG:4326, 캔버스는 OTF).
+  static QString officialRasterWmsUri();
 
   // 서버의 시대 문자열(예: "현생누대 신생대 제4기") → 정규화된 시대 분류 이름.
   static QString eraClass(const QString& eraText);

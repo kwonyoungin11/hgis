@@ -2,6 +2,7 @@
 
 #include <QByteArray>
 #include <QString>
+#include <QtGlobal>
 #include <array>
 #include <vector>
 
@@ -33,10 +34,42 @@ struct Cell {
 
 std::vector<Cell> build(const Spec& spec);
 
+// One survey_area feature (work CRS WKB). fid is QGIS/OGR id; newer draws
+// usually have a higher fid.
+struct SurveyPoly {
+  QByteArray wkb;
+  qint64 fid = -1;
+};
+
+struct PickedArea {
+  QByteArray wkb;
+  double areaM2 = 0.0;
+  int usedCount = 0;
+  int totalCount = 0;
+  bool usedSelection = false;
+};
+
+// Auto-fill must not union leftover survey polygons. Selected fids (if any
+// match) are combined; otherwise only the highest fid (last drawn) is used.
+PickedArea pickAutoFillArea(const std::vector<SurveyPoly>& features,
+                            const std::vector<qint64>& selectedFids);
+
 // Fills the survey-area polygon (WKB) with trenches: a rotated regular grid
-// anchored at the polygon envelope centre; only cells fully inside the area
-// are kept. rows/cols/origin of the spec are ignored.
+// anchored at the polygon envelope centre. Prefer cells fully inside; if none
+// fit (trench longer than the area), keep cells whose centroid is inside.
+// rows/cols/origin of the spec are ignored.
 std::vector<Cell> buildInArea(const Spec& spec, const QByteArray& areaWkb);
+
+// Width stays 2 m. Length and balk are searched so total trench area / survey
+// area ≈ targetPct (시굴 10, 표본 2). Cells stay inside the picked polygon.
+struct RatioFill {
+  std::vector<Cell> cells;
+  double length = 20.0;
+  double balk = 10.0;
+  double ratioPct = 0.0;
+  double areaM2 = 0.0;
+};
+RatioFill buildForTargetRatio(const QByteArray& areaWkb, double targetPct, double width = 2.0);
 
 // Sum of trench areas (w × len per cell, square metres).
 double totalArea(const std::vector<Cell>& cells);

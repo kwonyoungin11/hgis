@@ -148,9 +148,9 @@ private:
   KaLayoutCoordPointTool* m_toolCoordPoint = nullptr;
   QgsLayerTreeView* m_layerTree = nullptr;
   QgsLayerTreeModel* m_layerModel = nullptr;
-  // 전문 도곽(지브라 프레임+좌표 주기)이 기본. 간격 0 = 축척에 맞춰 자동(1-2-5 계열).
-  bool m_gridEnabled = true;
-  bool m_gridShowNums = true;
+  // 도곽 +/테두리 자는 격자 설정에서 켠다. 간격 0 = 축척에 맞춰 자동(1-2-5).
+  bool m_gridEnabled = false;
+  bool m_gridShowNums = false;
   double m_gridIntervalM = 0.0;
   QLabel* m_status = nullptr;
   QFrame* m_adjustBar = nullptr;

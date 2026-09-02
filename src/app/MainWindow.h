@@ -110,15 +110,22 @@ private slots:
   void convertShpFileTo5179();
   void startSelectTool();
   void startMeasureTool();
+  void toggleTerrainMap();
+  void toggleDemMap();
+  void importDemElevationRaster();
   void runDemHillshade();
+  void editDemElevationClasses();
+  void startPaleoLandform();
   void startTrenchGrid();
   void placeTrenchGridAt(const QgsPointXY& origin);
   // Replaces the previous grid (clearLayer) and reports the excavation ratio
   // against the survey area when known. areaM2 <= 0 skips the ratio line.
-  bool applyTrenchCells(const std::vector<TrenchGridGenerator::Cell>& cells, double areaM2);
+  bool applyTrenchCells(const std::vector<TrenchGridGenerator::Cell>& cells, double areaM2,
+                       double targetPct = 0.0);
+  void applyTrenchByRatio(double targetPct);
   // 속성 창의 「적용」: 자동 채움이면 구역 재배치, 아니면 기존 격자 중심을
   // 유지한 채 회전·간격만 바꿔 재배치. 격자가 없으면 원점 클릭으로 넘어간다.
-  void applyTrenchFromDialog();
+  bool applyTrenchFromDialog();
   void beginTrenchOriginPick();
   void startTrenchGridMove();   // 전체 이동 모드
   void startTrenchGridEdit();   // 개별 편집 모드(그래픽식 선택·이동·삭제)
@@ -217,6 +224,8 @@ private:
   void editAttributesAtCanvasPos(const QPoint& canvasPos);
   static QString attributeFieldLabelKo(const QString& fieldName);
 #endif
+  void persistSurveyWork();
+  void restoreLastSurvey();
 
   // Non-blocking feedback on the canvas. Reserve QMessageBox for questions and
   // for failures the user must acknowledge before anything else happens.
@@ -258,7 +267,13 @@ private:
   KaMeasureMapTool* m_measureTool = nullptr;
   QAction* m_actMeasure = nullptr;
   QAction* m_actSelect = nullptr;
+  QAction* m_actGeology = nullptr;
+  QAction* m_actRiver = nullptr;
   QToolButton* m_btnDraw = nullptr;
+  QToolButton* m_btnSoil = nullptr;
+  QToolButton* m_btnTerrain = nullptr;
+  QToolButton* m_btnDem = nullptr;
+  QToolButton* m_btnPaleo = nullptr;
   QgsMapToolEmitPoint* m_trenchOriginTool = nullptr;
   class KaTrenchMoveTool* m_trenchMoveTool = nullptr;
   class KaTrenchDialog* m_trenchDlg = nullptr;
@@ -285,7 +300,6 @@ private:
   double m_alignCursorX = 0;
   double m_alignCursorY = 0;
   QPoint m_alignLiveScreen;
-  QVector<QPoint> m_alignDstScreen;
   QTimer* m_alignCursorTimer = nullptr;
   QgsMapToolPan* m_panTool = nullptr;
   QgsMapToolSelect* m_selectTool = nullptr;
@@ -299,6 +313,7 @@ private:
   bool m_startupViewApplied = false;
   bool m_mapScreenBound = false;
   QTimer* m_displayRefresh = nullptr;
+  QTimer* m_autosaveTimer = nullptr;
   QToolBar* m_subToolbar = nullptr;
   QString m_subToolsMode;
   bool m_snapEnabled = true;

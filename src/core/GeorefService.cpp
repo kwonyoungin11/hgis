@@ -19,9 +19,12 @@
 #include <qgsvectorfilewriter.h>
 #include <qgscoordinatetransform.h>
 #include <qgscoordinatetransformcontext.h>
+#include <QPainter>
 #include <qgsdataprovider.h>
+#include <qgsrasterdataprovider.h>
 #include <qgsrastertransparency.h>
 #include <qgsrasterrenderer.h>
+#include <qgsbrightnesscontrastfilter.h>
 #include <qgsproject.h>
 #include <qgslayertree.h>
 #include <qgslayertreelayer.h>
@@ -29,6 +32,7 @@
 #include <qgsfield.h>
 #include <qgis.h>
 #include <qgswkbtypes.h>
+#include <gdal.h>
 
 namespace GeorefService {
 namespace {
@@ -250,6 +254,30 @@ bool writeSidecarPrj(const QString& imagePath, const QgsCoordinateReferenceSyste
   return true;
 }
 
+bool stampGdalGeoTransform(const QString& imagePath, const Affine& a) {
+  if (!a.valid || imagePath.isEmpty()) return false;
+  GDALAllRegister();
+  GDALDatasetH ds = GDALOpen(qUtf8Printable(imagePath), GA_Update);
+  if (!ds)
+    ds = GDALOpen(qUtf8Printable(imagePath), GA_ReadOnly);
+  if (!ds) return false;
+  double gt[6] = {a.c, a.a, a.b, a.f, a.d, a.e};
+  const CPLErr err = GDALSetGeoTransform(ds, gt);
+  GDALClose(ds);
+  return err == CE_None;
+}
+
+void dropGdalPamSidecar(const QString& imagePath) {
+  const QFileInfo fi(imagePath);
+  const QStringList pam = {
+      imagePath + QStringLiteral(".aux.xml"),
+      fi.path() + QLatin1Char('/') + fi.completeBaseName() + QStringLiteral(".aux.xml"),
+  };
+  for (const QString& p : pam) {
+    if (QFile::exists(p)) QFile::remove(p);
+  }
+}
+
 bool applyWorldFileToRaster(QgsRasterLayer* layer, const Affine& a,
                             const QgsCoordinateReferenceSystem& crs, QString* errorOut) {
   if (!layer || !layer->isValid()) {
@@ -259,6 +287,8 @@ bool applyWorldFileToRaster(QgsRasterLayer* layer, const Affine& a,
   const QString src = layer->source();
   if (!writeWorldFile(src, a, errorOut)) return false;
   if (crs.isValid()) writeSidecarPrj(src, crs, nullptr);
+  dropGdalPamSidecar(src);
+  stampGdalGeoTransform(src, a);
   if (crs.isValid()) layer->setCrs(crs);
   if (QgsDataProvider* p = layer->dataProvider()) p->reloadData();
   if (crs.isValid()) layer->setCrs(crs);
@@ -271,6 +301,30 @@ bool applyWorldFileToRaster(QgsRasterLayer* layer, const Affine& a,
   }
   layer->triggerRepaint();
   return layer->isValid();
+}
+
+bool persistAlignedRaster(QgsRasterLayer* layer, const Affine& a,
+                          const QgsCoordinateReferenceSystem& crs, QString* errorOut) {
+  if (!applyWorldFileToRaster(layer, a, crs, errorOut)) return false;
+  if (!looksUnreferencedRaster(layer)) return true;
+  const QString src = layer->source();
+  const QString name = layer->name();
+  layer->setDataSource(src, name, QStringLiteral("gdal"), false);
+  if (crs.isValid()) layer->setCrs(crs);
+  if (!layer->isValid()) {
+    if (errorOut) *errorOut = QStringLiteral("맞춰진 그림을 다시 열지 못했습니다");
+    return false;
+  }
+  if (looksUnreferencedRaster(layer)) {
+    if (errorOut)
+      *errorOut = QStringLiteral("그림을 지도 좌표로 붙이지 못했습니다. 점을 다시 찍고 이동하세요.");
+    return false;
+  }
+  return true;
+}
+
+bool mustRebuildRasterAfterWorldFile(const QgsRasterLayer* layer) {
+  return looksUnreferencedRaster(layer);
 }
 
 bool transformGeometry(QgsGeometry* geom, const Affine& a) {
@@ -454,13 +508,24 @@ bool isCadPath(const QString& path) {
 
 void styleAlignedRasterOverlay(QgsRasterLayer* layer) {
   if (!layer || !layer->isValid()) return;
-  layer->setOpacity(0.82);
+  // 흰 도화지만 빼고 먹선은 진하게. 0.82+넓은 흰색 허용은 스캔 선을 흐리게 만든다.
+  layer->setOpacity(1.0);
+  layer->setBlendMode(QPainter::CompositionMode_Multiply);
+  layer->setResamplingStage(Qgis::RasterResamplingStage::Provider);
+  if (QgsRasterDataProvider* p = layer->dataProvider()) {
+    p->setZoomedInResamplingMethod(Qgis::RasterResamplingMethod::Nearest);
+    p->setZoomedOutResamplingMethod(Qgis::RasterResamplingMethod::Nearest);
+  }
+  if (QgsBrightnessContrastFilter* bf = layer->brightnessFilter()) {
+    bf->setContrast(55);
+    bf->setBrightness(-28);
+    bf->setGamma(0.75);
+  }
   QgsRasterRenderer* rend = layer->renderer();
   if (!rend) return;
   auto* tr = new QgsRasterTransparency();
   QVector<QgsRasterTransparency::TransparentThreeValuePixel> rgb;
-  rgb.append(QgsRasterTransparency::TransparentThreeValuePixel(255, 255, 255, 0.0, 20, 20, 20));
-  rgb.append(QgsRasterTransparency::TransparentThreeValuePixel(248, 248, 242, 0.0, 14, 14, 14));
+  rgb.append(QgsRasterTransparency::TransparentThreeValuePixel(255, 255, 255, 0.0, 8, 8, 8));
   tr->setTransparentThreeValuePixelList(rgb);
   rend->setRasterTransparency(tr);
   layer->triggerRepaint();
@@ -479,7 +544,10 @@ bool looksUnreferencedRaster(const QgsRasterLayer* layer) {
   if (e.xMinimum() > -2.0 && e.yMinimum() > -2.0 && e.xMaximum() < pw + 2.0
       && e.yMaximum() < ph + 2.0)
     return true;
-  if (std::abs(e.width() - pw) < 2.0 && std::abs(e.height() - ph) < 2.0)
+  // Size ≈ pixels is only a raw scan when the box is still near the pixel origin.
+  // 1 m/pixel on EPSG:5186 must not be treated as unreferenced.
+  if (std::abs(e.width() - pw) < 2.0 && std::abs(e.height() - ph) < 2.0
+      && e.xMinimum() < pw + 10.0 && e.yMinimum() < ph + 10.0)
     return true;
   return false;
 }

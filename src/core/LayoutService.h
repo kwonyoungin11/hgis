@@ -92,6 +92,11 @@ public:
   static QgsRectangle extentForPaperScale(const QgsRectangle& currentExtent,
                                           double mapWidthMm, double scaleDenominator);
 
+  // 지도 화면 범위·축척을 조판 맵 칸에 그대로 옮긴다. zoomToExtent + setScale.
+  // setExtent는 쓰지 않는다(칸 mm가 바뀜). niceScaleDenominator로 분모를 올리지 않는다.
+  static bool applyCanvasViewToLayoutMap(QgsLayoutItemMap* map, const QgsRectangle& canvasExtent,
+                                         double canvasScale);
+
   // 커서 아래 지점을 고정한 채 확대·축소한 지도 범위.
   // fx, fy는 지도 칸 안에서 커서의 상대 위치(0~1, fy는 위에서 아래로).
   // zoomFactor > 1 이면 확대(범위가 좁아짐).
@@ -144,4 +149,9 @@ public:
 
   static int exportDrawingPdfs(QgsProject* project, const QString& outDir,
                                QString* errorOut = nullptr);
+
+  // 도면 범례는 분포지형 색칸. 흙토람 그림·위성·지적 레이어 이름은 범례가 아니다.
+  static bool sheetLegendOmitsLayerName(const QString& name);
+  static void tuneSheetLegend(class QgsLayoutItemLegend* legend);
+  static QString sheetLegendLabelDump(class QgsLayoutItemLegend* legend);
 };

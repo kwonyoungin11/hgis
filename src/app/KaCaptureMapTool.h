@@ -3,6 +3,7 @@
 #include <qgsgeometry.h>
 #include <qgspointxy.h>
 #include <qgsmapmouseevent.h>
+#include <qgsfeatureid.h>
 #include <QVector>
 #include <QPointer>
 
@@ -41,6 +42,7 @@ public:
 signals:
   void geometryCaptured(const QgsGeometry& geom);
   void captureCanceled();
+  void vertexMoved();
 
 private:
   void finish();
@@ -52,6 +54,10 @@ private:
   bool mapPointFromEvent(QgsMapMouseEvent* e, QgsPointXY* out, bool* snapped = nullptr);
   bool nearPoint(const QgsPointXY& a, const QgsPointXY& b) const;
   int indexOfSketchVertex(const QgsPointXY& pt) const;
+  bool hitSavedVertex(const QgsPointXY& mapPt, QgsFeatureId* fid, int* vertex) const;
+  void previewMovedVertex(const QgsPointXY& mapPt);
+  void finishVertexDrag(const QgsPointXY& mapPt);
+  void cancelVertexDrag();
 
   Mode m_mode = Mode::Polygon;
   QPointer<QgsVectorLayer> m_layer;
@@ -61,5 +67,8 @@ private:
   bool m_finishing = false;
   bool m_snapEnabled = true;
   bool m_easyDraw = false;
+  bool m_draggingVertex = false;
+  QgsFeatureId m_dragFid = -1;
+  int m_dragVertex = -1;
   Qt::ContextMenuPolicy m_savedMenuPolicy = Qt::DefaultContextMenu;
 };

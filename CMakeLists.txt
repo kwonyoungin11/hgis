@@ -36,6 +36,7 @@ add_library(ka_core STATIC
   src/core/LayoutService.cpp
   src/core/LayerOps.cpp
   src/core/LocationSearch.cpp
+  src/core/KoreaRegionCatalog.cpp
   src/core/WorkflowGuide.cpp
   src/core/VworldSettings.cpp
   src/core/GeorefService.cpp
@@ -46,6 +47,7 @@ add_library(ka_core STATIC
   src/core/DemAnalyzer.cpp
   src/core/TrenchGridGenerator.cpp
   src/core/SoilMapService.cpp
+  src/core/PaleoLandformService.cpp
   src/core/GeologyMapService.cpp
   src/core/RiverMapService.cpp
   src/core/SectionLayoutService.cpp
@@ -56,6 +58,7 @@ add_library(ka_core STATIC
   src/core/LayoutService.h
   src/core/LayerOps.h
   src/core/LocationSearch.h
+  src/core/KoreaRegionCatalog.h
   src/core/WorkflowGuide.h
   src/core/VworldSettings.h
   src/core/GeorefService.h
@@ -66,6 +69,7 @@ add_library(ka_core STATIC
   src/core/DemAnalyzer.h
   src/core/TrenchGridGenerator.h
   src/core/SoilMapService.h
+  src/core/PaleoLandformService.h
   src/core/GeologyMapService.h
   src/core/RiverMapService.h
   src/core/SectionLayoutService.h
@@ -74,7 +78,7 @@ target_include_directories(ka_core PUBLIC ${KA_INCLUDES})
 target_link_directories(ka_core PUBLIC ${KA_LIBDIRS})
 target_link_libraries(ka_core PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml Qt6::PrintSupport Qt6::Network Qt6::Svg qgis_core qgis_gui gdal_i)
 if (MSVC)
-  target_compile_options(ka_core PRIVATE /openmp)
+  target_compile_options(ka_core PRIVATE /openmp /utf-8)
 endif()
 target_compile_definitions(ka_core PUBLIC KA_HGIS_HAS_QGIS=1 "CORE_EXPORT=__declspec(dllimport)" "GUI_EXPORT=__declspec(dllimport)")
 
@@ -107,8 +111,10 @@ add_executable(ka-hgis
   src/app/KaCanvasGridOverlay.cpp
   src/app/KaTrenchMoveTool.cpp
   src/app/KaTrenchDialog.cpp
+  src/app/KaDemClassDialog.cpp
   src/app/KaStatusBar.cpp
   src/app/KaCrashGuard.cpp
+  src/app/KaRegionLocator.cpp
   src/app/MainWindow.h
   src/app/KaApplication.h
   src/app/KaTheme.h
@@ -126,7 +132,9 @@ add_executable(ka-hgis
   src/app/KaCanvasGridOverlay.h
   src/app/KaTrenchMoveTool.h
   src/app/KaTrenchDialog.h
+  src/app/KaDemClassDialog.h
   src/app/KaStatusBar.h
+  src/app/KaRegionLocator.h
   src/app/KaCrashGuard.h
 )
 target_include_directories(ka-hgis PRIVATE ${KA_INCLUDES} ${CMAKE_BINARY_DIR}/generated)
@@ -138,7 +146,7 @@ target_compile_definitions(ka-hgis PRIVATE KA_HGIS_HAS_QGIS=1 "CORE_EXPORT=__dec
 # /FS: 병렬 컴파일에서 같은 PDB에 안전하게 쓰도록(C1041 방지).
 if(MSVC)
   target_compile_options(ka_core PRIVATE "$<$<CONFIG:Release>:/Zi>" "$<$<CONFIG:Release>:/FS>")
-  target_compile_options(ka-hgis PRIVATE "$<$<CONFIG:Release>:/Zi>" "$<$<CONFIG:Release>:/FS>")
+  target_compile_options(ka-hgis PRIVATE /utf-8 "$<$<CONFIG:Release>:/Zi>" "$<$<CONFIG:Release>:/FS>")
   target_link_options(ka-hgis PRIVATE
     "$<$<CONFIG:Release>:/DEBUG>" "$<$<CONFIG:Release>:/OPT:REF>" "$<$<CONFIG:Release>:/OPT:ICF>")
 endif()
@@ -152,6 +160,9 @@ add_custom_command(TARGET ka-hgis POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${CMAKE_SOURCE_DIR}/data/styles/feature_presets.json"
     "$<TARGET_FILE_DIR:ka-hgis>/data/styles/feature_presets.json"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_SOURCE_DIR}/data/korea_dongs.json"
+    "$<TARGET_FILE_DIR:ka-hgis>/data/korea_dongs.json"
   COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:ka-hgis>/data/theme"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${CMAKE_SOURCE_DIR}/data/theme/ka-hgis.qss"
@@ -182,6 +193,9 @@ if(KA_HGIS_BUILD_TESTS)
   target_include_directories(ka_workflow_tests PRIVATE ${KA_INCLUDES})
   target_link_directories(ka_workflow_tests PRIVATE ${KA_LIBDIRS})
   target_compile_definitions(ka_workflow_tests PRIVATE ${KA_TEST_DEFS})
+  if (MSVC)
+    target_compile_options(ka_workflow_tests PRIVATE /utf-8)
+  endif()
   add_test(NAME workflow_engine COMMAND ka_workflow_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
   add_executable(ka_georef_tests tests/test_georef.cpp)
@@ -217,6 +231,9 @@ if(KA_HGIS_BUILD_TESTS)
   target_include_directories(ka_dem_trench_tests PRIVATE ${KA_INCLUDES})
   target_link_directories(ka_dem_trench_tests PRIVATE ${KA_LIBDIRS})
   target_compile_definitions(ka_dem_trench_tests PRIVATE ${KA_TEST_DEFS})
+  if (MSVC)
+    target_compile_options(ka_dem_trench_tests PRIVATE /utf-8)
+  endif()
   add_test(NAME dem_trench_engine COMMAND ka_dem_trench_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
   add_executable(ka_section_layout_tests tests/test_section_layout.cpp)

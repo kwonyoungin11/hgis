@@ -19,6 +19,12 @@ if (Test-Path -LiteralPath $qssSrc) {
   New-Item -ItemType Directory -Force -Path $qssDstDir | Out-Null
   Copy-Item -LiteralPath $qssSrc -Destination (Join-Path $qssDstDir "ka-hgis.qss") -Force
 }
+$dongSrc = Join-Path $root "data\korea_dongs.json"
+$dongDstDir = Join-Path $dstDir "data"
+if (Test-Path -LiteralPath $dongSrc) {
+  New-Item -ItemType Directory -Force -Path $dongDstDir | Out-Null
+  Copy-Item -LiteralPath $dongSrc -Destination (Join-Path $dongDstDir "korea_dongs.json") -Force
+}
 $pdb = Join-Path $root "build\Release\ka-hgis.pdb"
 if (Test-Path -LiteralPath $pdb) { Copy-Item -LiteralPath $pdb -Destination $dstDir -Force }
 

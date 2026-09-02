@@ -247,25 +247,11 @@ void KaTrenchMoveTool::canvasPressEvent(QgsMapMouseEvent* e) {
     return;
   }
 
-  // Whole 모드: 모서리 찍고 → 놓을 곳 찍기
-  if (m_awaitDrop) {
-    const QgsPointXY dest = snapPt(click);
-    applyTranslate(dest.x() - m_from.x(), dest.y() - m_from.y());
-    m_awaitDrop = false;
-    m_dragging = false;
-    if (m_rubber)
-      m_rubber->reset(Qgis::GeometryType::Polygon);
-    emit statusMessage(QStringLiteral("찍은 모서리를 그 위치로 옮겼습니다."));
-    return;
-  }
-  const QgsPointXY vert = nearestVertex(click);
-  const double mupp = canvas() ? std::max(canvas()->mapUnitsPerPixel(), 1e-6) : 1.0;
-  const double grabTol = std::max(m_snapM, 15.0 * mupp);
-  m_from = (vert.sqrDist(click) <= grabTol * grabTol) ? vert : snapPt(click);
-  m_awaitDrop = true;
-  m_dragging = false;
+  m_from = snapPt(click);
+  m_awaitDrop = false;
+  m_dragging = true;
   rebuildRubber(QgsPointXY(0, 0));
-  emit statusMessage(QStringLiteral("옮길 모서리를 잡았습니다. 놓을 격자점을 클릭하세요."));
+  emit statusMessage(QStringLiteral("격자를 끌어 옮기세요. 놓으면 전체가 이동합니다."));
 }
 
 void KaTrenchMoveTool::canvasMoveEvent(QgsMapMouseEvent* e) {
@@ -278,22 +264,31 @@ void KaTrenchMoveTool::canvasMoveEvent(QgsMapMouseEvent* e) {
     rebuildSingleRubber(m_selFid, QgsPointXY(dest.x() - m_from.x(), dest.y() - m_from.y()));
     return;
   }
-  if (!m_awaitDrop)
-    return;
-  const QgsPointXY dest = snapPt(e->mapPoint());
-  rebuildRubber(QgsPointXY(dest.x() - m_from.x(), dest.y() - m_from.y()));
+  if (m_dragging) {
+    const QgsPointXY dest = snapPt(e->mapPoint());
+    rebuildRubber(QgsPointXY(dest.x() - m_from.x(), dest.y() - m_from.y()));
+  }
 }
 
 void KaTrenchMoveTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
-  if (!e || m_mode != Mode::Single)
+  if (!e || e->button() != Qt::LeftButton)
     return;
-  if (e->button() != Qt::LeftButton || !m_dragSingle || m_selFid < 0)
-    return;
-  m_dragSingle = false;
   const QgsPointXY dest = snapPt(e->mapPoint());
   const double dx = dest.x() - m_from.x();
   const double dy = dest.y() - m_from.y();
   const double mupp = canvas() ? std::max(canvas()->mapUnitsPerPixel(), 1e-6) : 1.0;
+  if (m_mode == Mode::Whole && m_dragging) {
+    m_dragging = false;
+    if (std::hypot(dx, dy) > 2.0 * mupp)
+      applyTranslate(dx, dy);
+    if (m_rubber)
+      m_rubber->reset(Qgis::GeometryType::Polygon);
+    emit statusMessage(QStringLiteral("격자 이동 완료. 다시 끌어 옮기거나 우클릭으로 하나씩 지우세요."));
+    return;
+  }
+  if (m_mode != Mode::Single || !m_dragSingle || m_selFid < 0)
+    return;
+  m_dragSingle = false;
   if (std::hypot(dx, dy) > 2.0 * mupp) {
     applyTranslateOne(m_selFid, dx, dy);
     emit statusMessage(QStringLiteral("%1 이동 완료. Delete = 삭제, 다른 트렌치 클릭 = 선택 변경")
@@ -332,7 +327,7 @@ void KaTrenchMoveTool::activate() {
   } else {
     setCursor(Qt::CrossCursor);
     emit statusMessage(QStringLiteral(
-        "전체 이동: 모서리를 찍고 놓을 곳을 찍으세요(격자 간격에 붙습니다). 우클릭 = 개별 삭제"));
+        "전체 이동: 격자를 끌어 옮기세요. 우클릭 = 개별 삭제"));
   }
 }
 

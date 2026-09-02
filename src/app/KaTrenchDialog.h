@@ -20,7 +20,7 @@ class KaTrenchDialog : public QDialog {
 public:
   explicit KaTrenchDialog(QWidget* parent = nullptr);
 
-  // survey_area 전체(union) WKB와 면적(㎡). 비어 있으면 수동 배치만 가능.
+  // 선택한(없으면 마지막) survey_area WKB와 면적(㎡). 비어 있으면 수동 배치만.
   void setArea(const QByteArray& wkb, double areaM2);
   TrenchGridGenerator::Spec spec() const;
   bool autoFill() const;

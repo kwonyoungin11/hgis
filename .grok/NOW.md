@@ -1,7 +1,161 @@
 # NOW — Grok resume (2026-08-22)
 
+## 지금 (2026-09-02 맞추기 줌 화살표 + 먹선)
+
+줌 안 하면 번호·화살표 정상. 오른쪽 지적만 줌/팬하면 화면 좌표 캐시가 지적에서 떨어짐. 이동은 mapX/mapY라 사진은 맞음.
+고침: 화살표는 `mapToPixel`+`viewport()->mapTo`(QgsMapMouseEvent와 같음). `mapFromScene`은 빼 둠(오른쪽 끝으로 감). 오른쪽 클릭은 힌트 말고 캔버스 `mapPoint`. 왼쪽 그림 `viewChanged`·CAD 줌·DPI에도 다시 찍음.
+이동 후 선이 연한 이유: 흰 종이 투명 + opacity 0.82 + 흰색 허용 20이 연한 먹선까지 지움.
+고침: opacity 1.0, 흰 여백만 허용 8, Multiply, 대비↑·밝기↓, Nearest.
+검증: cmake 0 · georef_engine PASS · smoke 0 · publish 2192384.
+필드: 옛 창 닫고 아이콘 → 맞추기 → 점 찍고 오른쪽 줌/팬(화살표가 점에 붙어 있어야 함) → 이동(먹선이 지적 위에서 진해야 함). 커밋 금지. PR 없음.
+
+## 지금 (2026-09-02 맞추기 사진 안 붙음)
+
+멈춤 고치며 in-place persist만 쓰다 JPG가 지적에 안 붙음. 화면은 점 3개·분할은 되는데 이동 후 그림이 좌표에 안 앉음.
+고침: 월드파일 + GDAL PAM GT 찍기. persist 실패 시에만 같은 파일 재오픈(refreshAllLayers 없음). 지적 그리는 중이면 350ms 후 한 번 더 그림.
+검증: cmake 0 · georef_engine PASS · jpeg 5187 PASS · smoke 0 · publish 0.
+필드: 옛 창 닫고 아이콘 → 맞추기 → 점 2개 이상 → 이동. 커밋 금지. PR 없음(autopilot 해당 없음).
+
+## 지금 (2026-09-02 툴바 조합 로딩 최적화)
+
+지형맵·DEM·토양·지질·수계·검색·레이어순서·줌을 잇달아 누르면 `refreshAllLayers`가 지적 WMS 캐시를 버리고 멈춤.
+고침: `zoomToLayerMax`/`zoomToKorea`/`setLayerOpacity`/`prepareFieldBasemapPack`/검색/되돌리기/레이어순서는 `refreshCanvasIfIdle`만. 그리는 중이면 skip.
+검증: cmake 0 · uiComboActions + zoomToLayerMax + zoomToKorea + refreshXyz QTest PASS · smoke · publish.
+필드: 옛 창 닫고 아이콘 → 위성·지적 켠 뒤 툴바를 여러 개 잇달아 켜기. 커밋 금지.
+
+## 지금 (2026-09-02 맞추기 이동 멈춤)
+
+사진을 **열 때가 아님**. 점 짝을 찍고 **이동**할 때 로딩되며 멈춤.
+원인: `applyMove`가 월드파일 적용 후 같은 JPG를 `removeMapLayer`+`QgsRasterLayer` 재생성하고, `zoomToLayerMax`/`refreshAllLayers`가 지적 WMS+큰 JPEG를 UI 스레드에서 다시 그림.
+고침: `persistAlignedRaster` (같은 레이어, PAM sidecar 제거, 재생성 없음). 이동 후 `refreshCanvasIfIdle`만. 현재 지적 화면 유지.
+검증: cmake 0 · georef_engine PASS · smoke-quit 0 · publish-desktop 0 (2191360).
+필드: 옛 창 닫고 아이콘 → 맞추기 → 점 2개 이상 → 이동. 커밋 금지.
+
+## 지금 (2026-09-02 범례=레이어 체크)
+
+토양도 두 줄은 맞음: `토양도(흙토람)` 벡터 + `토양도(흙토람 그림)` 산능선 타일. 한 제품.
+레이어에서 끄면 범례에서도 빼야 함. 예전에 숨긴 토양도를 범례에 다시 끼워 넣던 버그.
+고침: `tuneSheetLegend`는 `isVisible()`만. `syncMapFromLayers`가 범례를 다시 맞춤.
+검증: cmake 0 · sheetLegend_followsLayerCheckOnAndOff PASS · smoke · publish.
+필드: 아이콘 → 도면만들기 → 레이어 켜고 끄면 범례가 같이 바뀜. 커밋 금지.
+
+## 지금 (2026-09-02 조판 범례)
+
+사용자 스크린샷 범례는 **틀림**. 흙토람 분포지형 색칸이 아니라 `토양도(흙토람 그림)`·지적 본번/부번·위성 **레이어 이름**만 나옴.
+고침: `LayoutService::tuneSheetLegend` — Manual 전용 트리에서 그림·WMS/XYZ·지적·위성을 빼고 벡터 `토양도(흙토람)` 분류(산악지·곡간·하성평탄)를 남김. 지도에는 그림이 그대로 깔림.
+검증: cmake 0 · sheetLegend QTest PASS · smoke 0 · publish 0.
+필드: 옛 창 닫고 아이콘 → 도면만들기 → 범례를 다시 놓기. 커밋 금지.
+
+## 지금 (2026-09-02 토양도 산능선 빈곳)
+
+고지형을 꺼도 산능선이 비는 것은 페이드가 아님. SOIL_1/2/3 벡터에 능선 폴리곤이 없고, 흙토람 웹은 `TOP_A_SOIL_T_GEO` 3857 타일로 산악지를 채운다.
+고침: 토양도 내려받기 시 그 그림을 벡터 아래에 깐다. URI crs=3857, zmax=15. 타일 경로는 L00/Rhex/Chex.
+검증: cmake 0 · soilTerrainPicture PASS · smoke · publish.
+필드: 옛 창 닫고 아이콘 → 토양도 다시 받기. 커밋 금지.
+
+## 지금 (2026-09-02 고지형 가설 자동 깔기)
+
+고지형 클릭 → 흙토람 04/05/06/08을 고지형 판독 가설로 깐다. 06은 안쪽 구하도·가장자리 자연제방(좁으면 미저지).
+사용자가 그린 면은 유지. 복원 아님. 제출 도메인 아님.
+검증: cmake 0 · paleo seed 3 QTest PASS · smoke 0.
+필드: 옛 창 닫고 아이콘 → 고지형. 커밋 금지.
+
+## 지금 (2026-09-02 고지형 글자 과다)
+
+스크린샷은 흙토람 토양도(산악지·곡간·선상 글자) + 빈 고지형 판독 범례. 복원 아님.
+고침: 고지형 시 산악지 글자 제거, 4 ha 이상·입지후보만 라벨. 산지 색 흐리게. 빈 판독은 단일 심볼.
+검증: cmake 0 · soil/paleo QTest 0 · smoke 0.
+필드: 옛 창 닫고 아이콘 → 고지형·도면만들기. 커밋 금지.
+
+## 지금 (2026-09-02 글자 토글 + 시굴 10%/표본 2%)
+
+벡터 레이어 우클릭 「글자 끄기/켜기」. 토양·고지형 한글 라벨은 면은 두고 글자만 끔.
+조사구역 레이어 우클릭 → 시굴격자 → 시굴(10%) / 표본(2%). 폭 2 m, 길이 배분. leftover union 없음.
+지적 지번 글자·선은 VWorld 그림 → 글자만 분리 불가, 자석 불가.
+고지형은 흙토람 04/05/06/08 강조(자동 적용). 옛 지형 복원 아님.
+검증: cmake 0 · dem_trench_engine PASS · buffer_ring PASS · smoke · publish.
+리뷰 후속: 라벨 없던 폴리곤에도 「글자 켜기」 (hasToggleableLabels). buffer_ring 0.
+필드: 옛 창 닫고 아이콘. 커밋 금지. Autopilot PR 없음.
+
+## 지금 (2026-09-01 자동저장 + 폴리곤 점 수정)
+
+닫기·20초·저장 = persistSurveyWork (GPKG commit, 마지막 조사 재오픈). QGZ 대화상자 없음.
+그리기 완료 후 꼭짓점 끌기 = KaCaptureMapTool hitSavedVertex + LayerOps::moveFeatureVertex.
+검증: cmake 0 · recent 7 PASS · moveFeatureVertex PASS · smoke 0 · publish 0.
+필드: 옛 창 닫고 아이콘. 커밋 금지.
+
+## 지금 (2026-09-01 조판 +/테두리 자 끄기)
+
+도면만들기 기본: 맵 안 LineCrosses(+)·바깥 좌표 주기(자) 꺼짐. PDF는 조판과 같은 격자 상태.
+축척자·방위·CRS 글자는 유지. 격자 설정에서 다시 켤 수 있음.
+검증: cmake 0 · drawingStudio_sheetOmitsCrossesAndBorderRuler PASS.
+필드: 옛 창 닫고 아이콘 → 도면만들기 → PDF. 커밋 금지.
+
+## 지금 (2026-09-01 시굴격자 = 현재 조사구역 / 지적 자석)
+
+시굴격자 자동배치는 leftover `survey_area`를 union 하지 않는다. 선택한 구역, 없으면 마지막(fid 최대)만.
+지적은 VWorld WMS/XYZ 그림 → 꼭짓점 자석 불가. 자석은 조사구역·유구·SHP/CAD Vertex+Segment.
+검증: cmake 0 · dem_trench_engine 15 PASS · smoke 0 · publish 0.
+필드: 옛 창 닫고 아이콘. 커밋 금지.
+
+
+
 Cursor에서 Grok Build로 이 대화를 이을 때 **이 파일을 먼저** 읽는다.
 커밋·리셋·force-push 금지. 기존 미커밋 파일은 절대 초기화하지 않는다.
+
+## 지금 (2026-09-01 툴바 B Underline)
+
+사용자 선택: B Underline. `:checked`는 파란 면 없이 아래 2px 선 + 남색 글자.
+검증: cmake 0 · toolbarCheckedIsUnderline PASS · smoke 0 · publish 0.
+필드: 옛 창 닫고 아이콘 — 파란 면 없이 밑줄만. 커밋 금지.
+
+## 지금 (2026-09-01 툴바 Soft Chip)
+
+## 지금 (2026-09-01 DEM 높이 구간 사용자 편집)
+
+DEM 화살표 **높이 구간 바꾸기…**: 칸 수(2–12)·간격·여러 줄 하한/상한/색/이름을 한꺼번에 적용.
+마지막 칸은 +inf / `N m 이상` (Discrete overflow 흰구멍 방지).
+검증: cmake 0 · userClassCountAndCustomItems PASS · smoke 0 · publish 0.
+필드: 옛 창 닫고 DEM 켠 뒤 화살표 → 높이 구간. 커밋 금지.
+
+## 지금 (2026-09-01 DEM 흰구멍 + 바탕화면 포터블)
+
+Discrete 마지막 칸을 `1e9` / `N m 이상` + `setClip(false)`. 샘플 통계보다 높은 봉우리도 색이 빠지지 않음. `/vsicurl` 전체 스캔 금지(sampleSize=200).
+포터블: `publish-desktop` + 바탕화면 `ka-hgis-portable` (OneDrive 바탕 화면).
+검증: cmake 0 · discreteFinerMeterClasses PASS · smoke 0 · publish 0 · robocopy 1.
+필드: 옛 창 닫고 `ka-hgis-portable\start.bat` 또는 아이콘 **고고학 전용 HGIS**. DEM 끄고 다시 켜기.
+커밋 금지.
+
+## 지금 (2026-09-01 고지형 1단계 + DEM 레벨 세분)
+
+- DEM 범례: Discrete 등간격. 화면/통계 범위가 좁으면 1–5 m 단, 타일 전체(~1000 m)면 50 m. 라벨 `12–22 m` (접미사 중복 없음).
+- 툴바 **고지형**: 토양 04/05/06/08 강조 + `paleo_landform` 가설 판독(참조). 제출 도메인 아님.
+- 항공사진 원클릭·palaeo-DEM·입체시 없음.
+커밋 금지.
+
+## 지금 (2026-09-01 DEM 범례·국토지리원 .img)
+
+- 국토지리원 공개DEM(B080, ERDAS `.img`)은 **수동 다운로드만**. 클릭 자동 API 없음.
+- DEM 본체 클릭: Copernicus GLO-30 (약 30 m, 높이 m 범례). 실패 시 GIBS 색타일.
+- DEM 화살표: **국토지리원 DEM 불러오기(.img)** → 5 m급 도엽 + 범례 m.
+검증: cmake 0 · `demElevationStyle_legendListsHeightMeters` PASS · smoke 0 · publish 0.
+필드: 바탕화면 아이콘. 커밋 금지.
+
+## 지금 (2026-09-01 지형맵 / DEM 분리)
+
+사용자: OpenTopoMap은 **지형맵**. DEM은 색+음영 고도맵.
+- 지형맵 = OpenTopoMap XYZ (등고·도로)
+- DEM = NASA GIBS ASTER color shaded relief XYZ (`z/y/x`, zmax=12). VWorld WMS 금지.
+검증: cmake 0 · `demColorRelief_is3857XyzNotTerrainMap` PASS · smoke-quit 0 · publish 0.
+필드: 바탕화면 **고고학 전용 HGIS** → 지형맵 / DEM. 커밋 금지.
+
+## 지금 (2026-09-01 고도맵 팬 크래시)
+
+증상: 고도맵 켠 뒤 맵을 움직이면 **레이어가 꺼지는 게 아니라 프로그램 종료** (0xc0000005).
+원인: VWorld WMS GetMap + OTF 5186 `QgsRasterProjector` + 팬 중 `provider_wms` `deleteLater` (crash-20260901-102801).
+고침: 타일 오버레이는 **XYZ만**. `clampCanvasToKorea` / `extentsChanged`는 `isDrawing()`이면 `setExtent` 금지.
+검증: cmake 0 · `elevationMap_xyzOnlySkipsAbortWhilePanning` PASS · smoke-quit 0 · publish 0.
+필드: 바탕화면 **고고학 전용 HGIS**. 커밋 금지.
 
 ## 이 PC
 

@@ -168,6 +168,7 @@ void KaImageView::wheelEvent(QWheelEvent* e) {
   const double s = e->angleDelta().y() > 0 ? 1.15 : 1.0 / 1.15;
   scale(s, s);
   m_fitted = false;
+  emit viewChanged();
 }
 
 void KaImageView::mousePressEvent(QMouseEvent* e) {
@@ -193,6 +194,7 @@ void KaImageView::mouseMoveEvent(QMouseEvent* e) {
     m_lastPan = e->pos();
     horizontalScrollBar()->setValue(horizontalScrollBar()->value() - d.x());
     verticalScrollBar()->setValue(verticalScrollBar()->value() - d.y());
+    emit viewChanged();
     e->accept();
     return;
   }
@@ -212,4 +214,5 @@ void KaImageView::mouseReleaseEvent(QMouseEvent* e) {
 void KaImageView::resizeEvent(QResizeEvent* e) {
   QGraphicsView::resizeEvent(e);
   if (m_fitted) fitImage();
+  emit viewChanged();
 }

@@ -10,7 +10,7 @@ Visual Studio 설치도 필요 없습니다.
 주의:
   - apps, bin, share 폴더를 지우면 실행되지 않습니다.
   - 폴더 이름에 한글이 있어도 되지만, 경로가 너무 길면 start.bat 을 쓰세요.
-  - VWorld 위성·지적 지도는 그 PC에서 도움말 → API 키를 한 번 넣습니다.
+  - VWorld 키는 만든 PC의 키를 config\secrets.ini 에 넣었습니다. USB를 다른 사람에게 주지 마세요.
   - GNU GPL v2 이상 (QGIS 라이브러리 링크). 자세한 공지는 앱 정보 창.
 
 제작: 동국문화재연구원  ·  버전 1

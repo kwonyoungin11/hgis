@@ -20,9 +20,11 @@
 #include <qgsfillsymbol.h>
 #include <qgsgeometry.h>
 #include <qgsmapcanvas.h>
+#include <qgsmaplayer.h>
 #include <qgspallabeling.h>
 #include <qgspointxy.h>
 #include <qgsproject.h>
+#include <qgsrasterlayer.h>
 #include <qgsrectangle.h>
 #include <qgstextformat.h>
 #include <qgsvectorfilewriter.h>
@@ -35,6 +37,7 @@ namespace {
 
 constexpr const char* kWfsUrl = "https://data.kigam.re.kr/geoserver/ows";
 constexpr const char* kTypeName = "geoOpen:l_50k_geology_litho_latest";
+constexpr const char* kJejuTypeName = "geoOpen:l_jeju_50k_geology_litho_view";
 constexpr const char* kWmsRaster = "geoOpen:L_50K_Geology_Map";
 constexpr const char* kLayerTitle = "지질도(KIGAM 1:5만)";
 constexpr const char* kEraSrcField = "시대";
@@ -87,11 +90,24 @@ QgsSymbol* eraFillSymbol(const QColor& base) {
   return fs.release();
 }
 
+// 제주 WFS는 「제 4기」처럼 기·숫자 사이에 공백이 있다.
+QString compactEra(const QString& eraText) {
+  QString s = eraText;
+  s.remove(QLatin1Char(' '));
+  return s;
+}
+
+bool eraTextMatches(const QString& eraText, const char* keyword) {
+  const QString kw = QString::fromUtf8(keyword);
+  if (eraText.contains(kw)) return true;
+  return compactEra(eraText).contains(compactEra(kw));
+}
+
 // 시대 문자열의 젊은→오래된 순위(범례 정렬용). kEras 배열 순서를 그대로 쓴다.
 int eraRank(const QString& eraText) {
   int i = 0;
   for (const EraClassDef& e : kEras) {
-    if (eraText.contains(QString::fromUtf8(e.keyword))) return i;
+    if (eraTextMatches(eraText, e.keyword)) return i;
     ++i;
   }
   return int(std::size(kEras));
@@ -186,13 +202,18 @@ QHash<QString, QColor> sampleOfficialColors(const QgsRectangle& ext4326,
 }
 
 // 현재 화면 bbox(위경도)의 암상 GeoJSON을 임시 파일로 받아 경로를 돌려준다.
-QString fetchLithoGeojson(const QgsRectangle& extent4326, QString* errorOut) {
+QString fetchLithoGeojson(const QgsRectangle& extent4326, const QString& typeName,
+                          QString* errorOut) {
+  if (typeName.isEmpty()) {
+    if (errorOut) *errorOut = QStringLiteral("암상 레이어 이름이 없습니다.");
+    return {};
+  }
   const QString url =
       QStringLiteral(
           "%1?service=WFS&version=2.0.0&request=GetFeature&typeNames=%2"
           "&outputFormat=application/json&srsName=EPSG:5186&count=100000"
           "&bbox=%3,%4,%5,%6,urn:ogc:def:crs:EPSG::4326")
-          .arg(QLatin1String(kWfsUrl), QLatin1String(kTypeName))
+          .arg(QLatin1String(kWfsUrl), typeName)
           .arg(extent4326.yMinimum(), 0, 'f', 8)
           .arg(extent4326.xMinimum(), 0, 'f', 8)
           .arg(extent4326.yMaximum(), 0, 'f', 8)
@@ -225,7 +246,7 @@ QString fetchLithoGeojson(const QgsRectangle& extent4326, QString* errorOut) {
 
 QString GeologyMapService::eraClass(const QString& eraText) {
   for (const EraClassDef& e : kEras)
-    if (eraText.contains(QString::fromUtf8(e.keyword))) return QString::fromUtf8(e.name);
+    if (eraTextMatches(eraText, e.keyword)) return QString::fromUtf8(e.name);
   return QString::fromUtf8(kEraUnknown);
 }
 
@@ -313,7 +334,82 @@ bool GeologyMapService::applyGeologyStyle(QgsVectorLayer* layer,
   return true;
 }
 
-QgsVectorLayer* GeologyMapService::downloadAndAdd(QgsProject* project, QgsMapCanvas* canvas,
+bool GeologyMapService::lithoWfsCoversWgs84(const QgsRectangle& extentWgs84) {
+  if (extentWgs84.isNull() || !extentWgs84.isFinite()) return false;
+  // geoOpen:l_50k_geology_litho_latest WGS84BoundingBox (GetCapabilities 2026-08-31).
+  const QgsRectangle litho(124.60999365859936, 33.96870721929159, 129.58472763044148,
+                           38.60507408091925);
+  return litho.intersects(extentWgs84);
+}
+
+bool GeologyMapService::jejuLithoWfsCoversWgs84(const QgsRectangle& extentWgs84) {
+  if (extentWgs84.isNull() || !extentWgs84.isFinite()) return false;
+  // geoOpen:l_jeju_50k_geology_litho_view — 제주본섬·추자 주변 (GetFeature 2026-08-31).
+  const QgsRectangle jeju(126.10, 33.10, 127.00, 33.62);
+  return jeju.intersects(extentWgs84);
+}
+
+QString GeologyMapService::lithoTypeNameForWgs84(const QgsRectangle& extentWgs84) {
+  if (lithoWfsCoversWgs84(extentWgs84)) return QLatin1String(kTypeName);
+  if (jejuLithoWfsCoversWgs84(extentWgs84)) return QLatin1String(kJejuTypeName);
+  return {};
+}
+
+QString GeologyMapService::officialRasterWmsUri() {
+  const QString base = QLatin1String(kWfsUrl);
+  const QString enc = QString::fromLatin1(QUrl::toPercentEncoding(base));
+  return QStringLiteral(
+             "IgnoreGetMapUrl=1&IgnoreGetFeatureInfoUrl=1&contextualWMSLegend=0"
+             "&crs=EPSG:4326&dpiMode=7&format=image/png&transparent=true"
+             "&layers=%1&styles&url=%2")
+      .arg(QLatin1String(kWmsRaster), enc);
+}
+
+static void removeOldGeologyLayers(QgsProject* project, const QString& outGpkgPath) {
+  QStringList removeIds;
+  for (QgsMapLayer* old : project->mapLayers()) {
+    if (!old) continue;
+    if (old->name() == QString::fromUtf8(kLayerTitle) ||
+        old->name().startsWith(QString::fromUtf8(kLayerTitle) + QStringLiteral(" [")) ||
+        (!outGpkgPath.isEmpty() && old->source().contains(outGpkgPath)))
+      removeIds.append(old->id());
+  }
+  for (const QString& id : removeIds)
+    project->removeMapLayer(id);
+}
+
+static QgsRasterLayer* addOfficialGeologyRaster(QgsProject* project, QgsMapCanvas* canvas,
+                                                const QString& outGpkgPath, QString* errorOut) {
+  removeOldGeologyLayers(project, outGpkgPath);
+  auto* rl = new QgsRasterLayer(GeologyMapService::officialRasterWmsUri(),
+                                QString::fromUtf8(kLayerTitle), QStringLiteral("wms"));
+  if (!rl->isValid()) {
+    if (errorOut)
+      *errorOut = QStringLiteral("공식 5만 지질도 래스터를 열지 못했습니다.");
+    delete rl;
+    return nullptr;
+  }
+  rl->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:4326")));
+  LayerOps::markReferenceLayer(rl);
+  LayerOps::applyLegendCrsLabel(rl);
+  if (!project->addMapLayer(rl, true)) {
+    delete rl;
+    if (errorOut) *errorOut = QStringLiteral("지질도 레이어를 프로젝트에 넣지 못했습니다.");
+    return nullptr;
+  }
+  LayerOps::placeInLegendGroup(project, rl, QStringLiteral("참조 지도"));
+  LayerOps::applyThematicOverlayScaleRange(rl);
+  if (canvas) {
+    const QString workAuth = project->crs().isValid() ? project->crs().authid()
+                                                      : QStringLiteral("EPSG:5186");
+    LayerOps::ensureOtfEnabled(project, canvas, workAuth);
+    LayerOps::syncMapCanvas(project, canvas, false);
+    LayerOps::refreshCanvasIfIdle(canvas);
+  }
+  return rl;
+}
+
+QgsMapLayer* GeologyMapService::downloadAndAdd(QgsProject* project, QgsMapCanvas* canvas,
                                                   const QgsRectangle& extent5186,
                                                   const QString& outGpkgPath,
                                                   QString* errorOut) {
@@ -344,8 +440,12 @@ QgsVectorLayer* GeologyMapService::downloadAndAdd(QgsProject* project, QgsMapCan
     return nullptr;
   }
 
+  const QString typeName = lithoTypeNameForWgs84(ext4326);
+  if (typeName.isEmpty())
+    return addOfficialGeologyRaster(project, canvas, outGpkgPath, errorOut);
+
   QString netErr;
-  const QString jsonPath = fetchLithoGeojson(ext4326, &netErr);
+  const QString jsonPath = fetchLithoGeojson(ext4326, typeName, &netErr);
   if (jsonPath.isEmpty()) {
     if (errorOut)
       *errorOut = netErr.isEmpty() ? QStringLiteral("지질도를 내려받지 못했습니다.")
@@ -356,10 +456,7 @@ QgsVectorLayer* GeologyMapService::downloadAndAdd(QgsProject* project, QgsMapCan
   QgsVectorLayer src(jsonPath, QStringLiteral("part"), QStringLiteral("ogr"));
   if (!src.isValid() || src.featureCount() == 0) {
     QFile::remove(jsonPath);
-    if (errorOut)
-      *errorOut = QStringLiteral("이 범위에는 지질도 데이터가 없습니다. (바다이거나 "
-                                 "도폭 미구축 지역입니다)");
-    return nullptr;
+    return addOfficialGeologyRaster(project, canvas, outGpkgPath, errorOut);
   }
 
   // 메모리 레이어로 복사하며 era_class 파생 필드를 채우고 속성의 HTML 링크를 걷어낸다.
@@ -427,17 +524,7 @@ QgsVectorLayer* GeologyMapService::downloadAndAdd(QgsProject* project, QgsMapCan
   merged->dataProvider()->addFeatures(batch);
   merged->updateExtents();
 
-  // 같은 GPKG를 쓰는 기존 레이어를 먼저 내려 파일 잠금을 푼다.
-  QStringList removeIds;
-  for (QgsMapLayer* old : project->mapLayers()) {
-    if (!old) continue;
-    if (old->name() == QString::fromUtf8(kLayerTitle) ||
-        old->name().startsWith(QString::fromUtf8(kLayerTitle) + QStringLiteral(" [")) ||
-        old->source().contains(outGpkgPath))
-      removeIds.append(old->id());
-  }
-  for (const QString& id : removeIds)
-    project->removeMapLayer(id);
+  removeOldGeologyLayers(project, outGpkgPath);
 
   QgsVectorFileWriter::SaveVectorOptions opts;
   opts.driverName = QStringLiteral("GPKG");
@@ -459,8 +546,11 @@ QgsVectorLayer* GeologyMapService::downloadAndAdd(QgsProject* project, QgsMapCan
     delete layer;
     return nullptr;
   }
-  // 공식 지질도 래스터를 한 번만 받아 단위별 도폭색을 샘플링(실패 단위는 시대 계열색).
-  const QHash<QString, QColor> officialColors = sampleOfficialColors(ext4326, bestPt);
+  // 공식 도폭색 샘플은 blocking WMS GetMap이다. 캔버스가 위성 타일을 그리는
+  // 중이면 nested QEventLoop가 provider_wms deleteLater AV를 낸다(2026-09-01).
+  QHash<QString, QColor> officialColors;
+  if (!(canvas && canvas->isDrawing()))
+    officialColors = sampleOfficialColors(ext4326, bestPt);
   applyGeologyStyle(layer, officialColors);
   LayerOps::markReferenceLayer(layer);
   LayerOps::applyLegendCrsLabel(layer);
@@ -477,8 +567,8 @@ QgsVectorLayer* GeologyMapService::downloadAndAdd(QgsProject* project, QgsMapCan
     LayerOps::ensureOtfEnabled(project, canvas, workAuth);
     LayerOps::syncMapCanvas(project, canvas, false);
     // refreshAllLayers()는 모든 레이어 캐시를 버려 배경 타일까지 다시 받는다.
-    // 새 레이어만 그리면 되므로 refresh()로 충분하다.
-    canvas->refresh();
+    // isDrawing()이면 refresh도 건너뛴다(WMS deleteLater AV).
+    LayerOps::refreshCanvasIfIdle(canvas);
   }
   return layer;
 }

@@ -35,6 +35,11 @@ QVector<RecentSurveys::Item> RecentSurveys::load(QSettings& settings) {
   return out;
 }
 
+QString RecentSurveys::lastPath(QSettings& settings) {
+  const QVector<Item> items = load(settings);
+  return items.isEmpty() ? QString() : items.first().path;
+}
+
 void RecentSurveys::remember(QSettings& settings, const QString& path, const QString& name) {
   const QString abs = QFileInfo(path).absoluteFilePath();
   if (abs.isEmpty() || !QFileInfo::exists(abs))

@@ -46,6 +46,10 @@ bool writeSidecarPrj(const QString& imagePath, const QgsCoordinateReferenceSyste
                      QString* errorOut = nullptr);
 bool applyWorldFileToRaster(QgsRasterLayer* layer, const Affine& a,
                             const QgsCoordinateReferenceSystem& crs, QString* errorOut = nullptr);
+// World file + same QgsRasterLayer. Never removeMapLayer / new QgsRasterLayer.
+bool persistAlignedRaster(QgsRasterLayer* layer, const Affine& a,
+                          const QgsCoordinateReferenceSystem& crs, QString* errorOut = nullptr);
+bool mustRebuildRasterAfterWorldFile(const QgsRasterLayer* layer);
 
 bool transformGeometry(QgsGeometry* geom, const Affine& a);
 bool applyAffineToVector(QgsVectorLayer* layer, const Affine& a,

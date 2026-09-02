@@ -40,6 +40,7 @@ public:
 
 signals:
   void pixelClicked(double x, double y);
+  void viewChanged();
 
 protected:
   void wheelEvent(QWheelEvent* e) override;

@@ -19,6 +19,8 @@ class TestBuffer : public QObject {
 private slots:
   void ringHasGapAndLabel();
   void offsetIs500mFromSource();
+  void moveFeatureVertex_updatesPolygonCorner();
+  void setLabelsVisible_togglesPolygonLabels();
 };
 
 void TestBuffer::ringHasGapAndLabel() {
@@ -105,6 +107,47 @@ void TestBuffer::offsetIs500mFromSource() {
     if (d > maxD) maxD = d;
   }
   QVERIFY2(maxD >= 500.0 && maxD < 720.0, qPrintable(QStringLiteral("maxD=%1").arg(maxD)));
+}
+
+void TestBuffer::moveFeatureVertex_updatesPolygonCorner() {
+  auto* vl = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5187"), QStringLiteral("poly"),
+                                QStringLiteral("memory"));
+  QVERIFY(vl->isValid());
+  QVERIFY(vl->startEditing());
+  QgsFeature f(vl->fields());
+  f.setGeometry(QgsGeometry::fromRect(QgsRectangle(0, 0, 10, 10)));
+  QVERIFY(vl->addFeature(f));
+  QVERIFY(vl->commitChanges());
+  QgsFeature got;
+  QVERIFY(vl->getFeatures().nextFeature(got));
+  int at = -1, before = -1, after = -1;
+  double d2 = 0;
+  got.geometry().closestVertex(QgsPointXY(10, 10), at, before, after, d2);
+  QVERIFY(at >= 0);
+  QString err;
+  QVERIFY(vl->startEditing());
+  QVERIFY2(LayerOps::moveFeatureVertex(vl, static_cast<qint64>(got.id()), at, 20.0, 10.0, &err),
+           qPrintable(err));
+  QVERIFY(vl->commitChanges());
+  const QgsFeature afterF = vl->getFeature(got.id());
+  QVERIFY(afterF.isValid());
+  const QgsRectangle ext = afterF.geometry().boundingBox();
+  QVERIFY2(std::abs(ext.xMaximum() - 20.0) < 1e-6, qPrintable(QString::number(ext.xMaximum())));
+}
+
+void TestBuffer::setLabelsVisible_togglesPolygonLabels() {
+  auto* vl = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"), QStringLiteral("조사구역"),
+                                QStringLiteral("memory"));
+  QVERIFY(vl->isValid());
+  QVERIFY2(LayerOps::hasToggleableLabels(vl),
+           "라벨을 아직 안 켠 폴리곤에도 우클릭 「글자 켜기」가 나와야 한다");
+  QVERIFY(LayerOps::setLabelsVisible(vl, true));
+  QVERIFY(LayerOps::labelsVisible(vl));
+  QVERIFY(LayerOps::setLabelsVisible(vl, false));
+  QVERIFY2(!LayerOps::labelsVisible(vl), "글자 끄기는 면은 두고 글자만 꺼야 한다");
+  QVERIFY(LayerOps::setLabelsVisible(vl, true));
+  QVERIFY2(LayerOps::labelsVisible(vl), "글자 켜기는 같은 레이어 라벨을 다시 켜야 한다");
+  delete vl;
 }
 
 #include "test_buffer.moc"

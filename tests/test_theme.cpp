@@ -14,6 +14,8 @@ private slots:
   void noUrl();
   void gisExcludePresent();
   void requiredSelectorsPresent();
+  void toolbarCheckedIsUnderline();
+  void primaryToolbarIconsUseInk();
   void noCheapSpinArrowBlock();
   void noCatchAllWidgetRules();
   void chromeFontIsFieldKorean();
@@ -81,6 +83,32 @@ void TestTheme::requiredSelectorsPresent() {
   for (const char* sel : need) {
     QVERIFY2(qss.contains(QLatin1String(sel)), sel);
   }
+}
+
+void TestTheme::toolbarCheckedIsUnderline() {
+  const QString qss = KaTheme::embeddedStyleSheet();
+  const QRegularExpression solidMain(
+      QStringLiteral(R"(QToolBar#mainToolbar QToolButton:checked\s*\{[^}]*background:\s*#1E67C6)"));
+  QVERIFY2(!solidMain.match(qss).hasMatch(),
+           "main toolbar :checked must not stay solid blue");
+  const QRegularExpression washMain(
+      QStringLiteral(R"(QToolBar#mainToolbar QToolButton:checked\s*\{[^}]*background:\s*#E8F0FA)"));
+  QVERIFY2(!washMain.match(qss).hasMatch(),
+           "B Underline: no pale-blue fill on main toolbar checked");
+  QVERIFY2(qss.contains(QLatin1String("border-bottom: 2px solid #1E67C6")),
+           "checked tools use a 2px underline, not a filled chip");
+  const QRegularExpression solidPrimary(
+      QStringLiteral(R"(QToolButton#btnPrimary\s*\{[^}]*background:\s*#1E67C6)"));
+  QVERIFY2(!solidPrimary.match(qss).hasMatch(),
+           "새조사/열기/저장 must not be always-on solid blue");
+}
+
+void TestTheme::primaryToolbarIconsUseInk() {
+  QFile f(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
+  const QString src = QString::fromUtf8(f.readAll());
+  QVERIFY2(!src.contains(QLatin1String("KaIcons::icon(iconId, QColor(255, 255, 255))")),
+           "outlined 새조사/열기/저장 chips must not use white icons");
 }
 
 void TestTheme::noCheapSpinArrowBlock() {

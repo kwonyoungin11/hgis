@@ -42,7 +42,12 @@
 #include <qgslayoutmeasurement.h>
 #include <qgslayoutpagecollection.h>
 #include <qgslayoutsize.h>
+#include <qgis.h>
+#include <qgslayertree.h>
+#include <qgslayertreelayer.h>
+#include <qgslayertreemodellegendnode.h>
 #include <qgsmaplayer.h>
+#include <qgsmaplayerlegend.h>
 #include <qgsmasterlayoutinterface.h>
 #include <qgsprintlayout.h>
 #include <qgsproject.h>
@@ -551,6 +556,7 @@ static void fillLayout(QgsPrintLayout* layout, QgsProject* project,
   legend->attemptSetSceneRect(QRectF(sideX, legendTop, sideW, legendH));
   layout->addLayoutItem(legend);
   legend->updateLegend();
+  LayoutService::tuneSheetLegend(legend);
 
   if (!kinds.isEmpty()) {
     auto* kindsLbl = new QgsLayoutItemLabel(layout);
@@ -910,6 +916,18 @@ LayoutService::SheetChromeRects LayoutService::standardSheetChrome(const QRectF&
   return out;
 }
 
+bool LayoutService::applyCanvasViewToLayoutMap(QgsLayoutItemMap* map,
+                                               const QgsRectangle& canvasExtent,
+                                               double canvasScale) {
+  if (!map || canvasExtent.isNull() || !canvasExtent.isFinite() || canvasExtent.width() <= 0.0 ||
+      canvasExtent.height() <= 0.0)
+    return false;
+  map->zoomToExtent(canvasExtent);
+  if (canvasScale > 1.0 && std::isfinite(canvasScale))
+    map->setScale(canvasScale, true);
+  return true;
+}
+
 QgsRectangle LayoutService::extentForPaperScale(const QgsRectangle& currentExtent,
                                                 double mapWidthMm, double scaleDenominator) {
   if (mapWidthMm <= 0.0 || scaleDenominator <= 0.0)
@@ -1189,4 +1207,107 @@ int LayoutService::exportDrawingPdfs(QgsProject* project, const QString& outDir,
   if (n == 0 && errorOut)
     *errorOut = lastErr.isEmpty() ? QStringLiteral("도면 PDF를 만들지 못했습니다.") : lastErr;
   return n;
+}
+
+bool LayoutService::sheetLegendOmitsLayerName(const QString& name) {
+  const QString n = name.trimmed();
+  if (n.contains(QStringLiteral("흙토람 그림"))) return true;
+  if (n == QStringLiteral("위성") || n.contains(QStringLiteral("VWorld 위성")) ||
+      n.startsWith(QStringLiteral("Google 위성")))
+    return true;
+  if (n.startsWith(QStringLiteral("지적")) || n.contains(QStringLiteral("지적 본번")) ||
+      n.contains(QStringLiteral("지적 부번")))
+    return true;
+  return false;
+}
+
+namespace {
+
+bool omitSheetLegendLayer(QgsMapLayer* ml, const QString& fallbackName) {
+  const QString name = ml ? ml->name() : fallbackName;
+  if (LayoutService::sheetLegendOmitsLayerName(name)) return true;
+  if (ml && ml->customProperty(QStringLiteral("ka_hgis/omit_sheet_legend")).toBool())
+    return true;
+  if (ml) {
+    const QString p = ml->providerType().toLower();
+    if (p == QLatin1String("wms") || p == QLatin1String("xyz")) return true;
+  }
+  return false;
+}
+
+bool projectLayerChecked(QgsMapLayer* ml) {
+  if (!ml) return false;
+  QgsProject* proj = ml->project();
+  if (!proj || !proj->layerTreeRoot()) return true;
+  QgsLayerTreeLayer* node = proj->layerTreeRoot()->findLayer(ml->id());
+  if (!node) return false;
+  // LayerOps::visibleLayersPaintOrder uses the checkbox, not ancestor isVisible().
+  return node->itemVisibilityChecked();
+}
+
+bool onLinkedMap(QgsLayoutItemLegend* legend, QgsMapLayer* ml) {
+  if (!legend || !ml) return false;
+  QgsLayoutItemMap* map = legend->linkedMap();
+  if (!map) return true;
+  const QList<QgsMapLayer*> onMap = map->layers();
+  return onMap.contains(ml);
+}
+
+}  // namespace
+
+void LayoutService::tuneSheetLegend(QgsLayoutItemLegend* legend) {
+  if (!legend) return;
+
+  QgsProject* proj = legend->layout() ? legend->layout()->project() : nullptr;
+  if (proj) {
+    for (QgsMapLayer* ml : proj->mapLayers()) {
+      if (!ml || !omitSheetLegendLayer(ml, ml->name())) continue;
+      ml->setCustomProperty(QStringLiteral("ka_hgis/omit_sheet_legend"), true);
+      if (QgsMapLayerLegend* lg = ml->legend())
+        lg->setFlag(Qgis::MapLayerLegendFlag::ExcludeByDefault, true);
+    }
+  }
+
+  // Manual clone of the linked map layer set (체크된 레이어). Do not strip the project tree.
+  legend->setSyncMode(Qgis::LegendSyncMode::Manual);
+  legend->resetManualLayers(legend->linkedMap() ? Qgis::LegendSyncMode::VisibleLayers
+                                                : Qgis::LegendSyncMode::AllProjectLayers);
+  legend->updateLegend();
+
+  QgsLegendModel* model = legend->model();
+  if (!model || !model->rootGroup()) return;
+  QgsLayerTree* root = model->rootGroup();
+
+  QList<QgsLayerTreeLayer*> toRemove;
+  for (QgsLayerTreeLayer* ll : root->findLayers()) {
+    if (!ll) continue;
+    QgsMapLayer* ml = ll->layer();
+    const QString name = ml ? ml->name() : ll->name();
+    if (omitSheetLegendLayer(ml, name) || !projectLayerChecked(ml) ||
+        !onLinkedMap(legend, ml))
+      toRemove.append(ll);
+  }
+  for (QgsLayerTreeLayer* ll : toRemove) {
+    QgsLayerTreeNode* parent = ll->parent();
+    if (parent && QgsLayerTree::isGroup(parent))
+      QgsLayerTree::toGroup(parent)->removeChildNode(ll);
+  }
+}
+
+QString LayoutService::sheetLegendLabelDump(QgsLayoutItemLegend* legend) {
+  if (!legend || !legend->model() || !legend->model()->rootGroup()) return {};
+  QgsLegendModel* model = legend->model();
+  QStringList labels;
+  for (QgsLayerTreeLayer* ll : model->rootGroup()->findLayers()) {
+    if (!ll) continue;
+    if (!ll->name().isEmpty()) labels << ll->name();
+    if (ll->layer() && ll->layer()->name() != ll->name()) labels << ll->layer()->name();
+    const QList<QgsLayerTreeModelLegendNode*> nodes = model->layerLegendNodes(ll);
+    for (QgsLayerTreeModelLegendNode* node : nodes) {
+      if (!node) continue;
+      const QString t = node->data(Qt::DisplayRole).toString().trimmed();
+      if (!t.isEmpty()) labels << t;
+    }
+  }
+  return labels.join(QLatin1Char('\n'));
 }

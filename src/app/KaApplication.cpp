@@ -48,6 +48,7 @@
 #endif
 #include "core/VworldSettings.h"
 #include "core/LayerOps.h"
+#include "core/SoilMapService.h"
 #include "core/SurveyProjectFactory.h"
 #include "core/ExportService.h"
 #include <QTemporaryDir>
@@ -56,6 +57,7 @@
 #include <qgsapplication.h>
 #include <qgsproviderregistry.h>
 #include <qgsnetworkaccessmanager.h>
+#include <QUrl>
 #include <qgssettings.h>
 #include <qgslayertreeview.h>
 #include <qgsmapcanvas.h>
@@ -447,7 +449,21 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
     all = step(QStringLiteral("toolbar_basemap_toggle"), hasText(QStringLiteral("배경"))) && all;
     all = step(QStringLiteral("toolbar_submit_toggle"), hasText(QStringLiteral("도면만들기"))) && all;
     all = step(QStringLiteral("toolbar_measure_tape"), hasText(QStringLiteral("줄자"))) && all;
-    all = step(QStringLiteral("toolbar_dem"), hasText(QStringLiteral("지형분석"))) && all;
+    all = step(QStringLiteral("toolbar_dem"), hasText(QStringLiteral("DEM"))) && all;
+    bool demClasses = false;
+    if (auto* btnDem = w->findChild<QToolButton*>(QStringLiteral("btnDem"))) {
+      if (QMenu* dm = btnDem->menu()) {
+        for (QAction* a : dm->actions()) {
+          if (a && a->text().contains(QStringLiteral("높이 구간"))) {
+            demClasses = true;
+            break;
+          }
+        }
+      }
+    }
+    all = step(QStringLiteral("toolbar_dem_classes"), demClasses) && all;
+    all = step(QStringLiteral("toolbar_paleo"), hasText(QStringLiteral("고지형"))) && all;
+    all = step(QStringLiteral("toolbar_terrain"), hasText(QStringLiteral("지형맵"))) && all;
     all = step(QStringLiteral("toolbar_trench_grid"), hasText(QStringLiteral("시굴격자"))) && all;
     all = step(QStringLiteral("map_grid_check"), hasText(QStringLiteral("좌표격자"))) && all;
     all = step(QStringLiteral("toolbar_no_crs_peer"),
@@ -700,6 +716,9 @@ int KaApplication::run(int argc, char** argv) {
     const QString host = req->url().host();
     if (host.contains(QLatin1String("vworld.kr"), Qt::CaseInsensitive))
       req->setRawHeader("Referer", "https://localhost");
+    const QUrl fixed = SoilMapService::rewriteArcGisCacheUrl(req->url());
+    if (fixed != req->url())
+      req->setUrl(fixed);
   });
   qInfo() << "QGIS prefix:" << prefix;
   qInfo() << "Providers:" << QgsProviderRegistry::instance()->providerList();
@@ -722,6 +741,10 @@ int KaApplication::run(int argc, char** argv) {
   {
     QgsSettings tileSettings;
     tileSettings.setValue(QStringLiteral("qgis/defaultTileMaxRetry"), 6);
+    // QgsMapCanvas reads this; ParallelJob + provider_wms nested QEventLoop
+    // → deleteLater ACCESS_VIOLATION on Windows (field dumps 2026-08-31).
+    tileSettings.setValue(QStringLiteral("qgis/parallel_rendering"), false);
+    QgsApplication::setMaxThreads(1);
     KaCrashGuard::logLine(QStringLiteral("[boot] 타일 재시도 한도 = %1")
                               .arg(tileSettings.value(QStringLiteral("qgis/defaultTileMaxRetry"), 3)
                                        .toInt()));
