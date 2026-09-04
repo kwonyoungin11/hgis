@@ -96,6 +96,8 @@ private slots:
   void startEditArtifact();
   void startEasyDraw();
   void mergeFeaturePolygons();
+  void clipOverlappingLayers();
+  void startSplitPolygonTool();
   void onWorkControlClicked(QListWidgetItem* item);
   void refreshWorkPanel();
   void saveEdits();
@@ -337,6 +339,7 @@ private:
   KaFoundLocationMark* m_locationMark = nullptr;
   QString m_locationMarkTitle;
   QgsVectorLayer* m_editLayer = nullptr;
+  bool m_isSplittingPolygon = false;
   QgsLayerTreeMapCanvasBridge* m_bridge = nullptr;
   QgsMessageBar* m_messageBar = nullptr;
   QLineEdit* m_scaleEdit = nullptr;

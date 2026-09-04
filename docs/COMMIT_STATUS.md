@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-09-04 21:39:40 +09:00 |
+| Updated (local) | 2026-09-04 21:46:35 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `30db1c4` |
-| HEAD full | `30db1c421528948b1d2d3b6264aba5f5363cb1ca` |
-| HEAD date | 2026-09-04 18:05:19 +0900 |
-| HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | fix(layers): ensure satellite layer stays at bottom and prevent deletion via reorderGroupLayers |
-| Total commits | 42 |
+| HEAD short | `72cb771` |
+| HEAD full | `72cb77140e270862a2c098721524758841fe3ce0` |
+| HEAD date | 2026-09-04 21:39:40 +0900 |
+| HEAD author | kwonypungin <kyi25@nate.com> |
+| HEAD subject | feat(core): 레이어 클립(구간 분리) 및 폴리곤 분할(Split) 코어 연산 추가 |
+| Total commits | 43 |
 | Upstream | `origin/main` |
-| Sync | ahead 4 of origin/main (push pending) |
+| Sync | ahead 5 of origin/main (push pending) |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (5 paths) |
+| Working tree dirty | **yes** (4 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** fix(layers): ensure satellite layer stays at bottom and prevent deletion via reorderGroupLayers (`30db1c4` @ 2026-09-04 18:05:19 +0900)
-- **Remote sync at write time:** ahead 4 of origin/main (push pending)
-- **Uncommitted local changes at write time:** yes (5 paths)
+- **Recorded tip when this file was written:** feat(core): 레이어 클립(구간 분리) 및 폴리곤 분할(Split) 코어 연산 추가 (`72cb771` @ 2026-09-04 21:39:40 +0900)
+- **Remote sync at write time:** ahead 5 of origin/main (push pending)
+- **Uncommitted local changes at write time:** yes (4 paths)
 
 ### Read this correctly
 
@@ -56,6 +56,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `72cb771` | 2026-09-04T21:39:40+09:00 | feat(core): 레이어 클립(구간 분리) 및 폴리곤 분할(Split) 코어 연산 추가 |
 | `30db1c4` | 2026-09-04T18:05:19+09:00 | fix(layers): ensure satellite layer stays at bottom and prevent deletion via reorderGroupLayers |
 | `d910e9b` | 2026-09-04T17:11:58+09:00 | fix(georef): instant canvas update on align move/save and fix raster layer order above basemaps |
 | `4a5341d` | 2026-09-02T17:57:24+09:00 | Ship align overlay viewport mapping, scan-ink overlay, paleo/soil maps, and trench field GIS. |
@@ -85,15 +86,13 @@
 | `f4c1901` | 2026-08-15T15:29:21+09:00 | Sync COMMIT_STATUS to tip after field HGIS push. |
 | `1f5e990` | 2026-08-15T15:29:07+09:00 | Ship field HGIS: layout studio, keyed VWorld basemap, icon chrome, Ctrl+Z undo. |
 | `3a5a87a` | 2026-08-09T18:57:37+09:00 | Sync COMMIT_STATUS to tip after bootstrap push. |
-| `6b9f373` | 2026-08-09T18:57:28+09:00 | Refresh COMMIT_STATUS after bootstrap docs commit. |
 
 ## Staged in this commit
 
 ```
 M	docs/COMMIT_STATUS.md
-M	src/core/LayerOps.cpp
-M	src/core/LayerOps.h
-M	tests/test_buffer.cpp
+M	src/app/MainWindow.cpp
+M	src/app/MainWindow.h
 ```
 ## Other PC checklist
 

@@ -866,6 +866,8 @@ void MainWindow::showSubToolsDraw() {
                           this, &MainWindow::startEditSectionLine);
   m_subToolbar->addAction(QStringLiteral("속성"), this, &MainWindow::startAttributeEditTool);
   m_subToolbar->addAction(QStringLiteral("폴리곤 묶기"), this, &MainWindow::mergeFeaturePolygons);
+  m_subToolbar->addAction(QStringLiteral("구간 분리"), this, &MainWindow::clipOverlappingLayers);
+  m_subToolbar->addAction(QStringLiteral("폴리곤 나누기"), this, &MainWindow::startSplitPolygonTool);
   auto* closeAct = m_subToolbar->addAction(QStringLiteral("닫기"));
   connect(closeAct, &QAction::triggered, this, &MainWindow::hideSubTools);
   m_subToolbar->setVisible(true);
@@ -4650,6 +4652,25 @@ void MainWindow::onGeometryCaptured(const QgsGeometry& geom) {
       statusBar()->showMessage(QStringLiteral("빈 도형 (면≥3점, 선≥2점) — 이어서 그리세요"), 5000);
       return;
     }
+
+    if (m_isSplittingPolygon) {
+      m_isSplittingPolygon = false;
+      const QVector<QgsPointXY> pts = geom.asPolyline();
+      if (pts.size() < 2) {
+        statusBar()->showMessage(QStringLiteral("분할선은 2점 이상이어야 합니다."), 5000);
+        return;
+      }
+      QString err;
+      if (!LayerOps::splitPolygonWithLine(layer, pts, &err)) {
+        QMessageBox::warning(this, QStringLiteral("폴리곤 나누기 실패"), err);
+        return;
+      }
+      if (m_canvas) m_canvas->refresh();
+      statusBar()->showMessage(QStringLiteral("폴리곤을 성공적으로 나누었습니다."), 6000);
+      notify(Notice::Success, QStringLiteral("폴리곤 나누기"),
+             QStringLiteral("분할선을 기준으로 폴리곤을 나누었습니다."));
+      return;
+    }
     if (!layer->isEditable() && !layer->startEditing()) {
       QMessageBox::warning(this, QStringLiteral("편집"),
                            QStringLiteral("편집 모드 실패: %1").arg(layer->name()));
@@ -4935,6 +4956,122 @@ void MainWindow::mergeFeaturePolygons() {
   statusBar()->showMessage(QStringLiteral("스텁: 폴리곤 묶기"), 3000);
 #endif
 }
+
+void MainWindow::startSplitPolygonTool() {
+#if KA_HGIS_HAS_QGIS
+  QgsVectorLayer* cur = m_layerTree ? qobject_cast<QgsVectorLayer*>(m_layerTree->currentLayer()) : nullptr;
+  if (!cur || !cur->isValid() || cur->geometryType() != Qgis::GeometryType::Polygon) {
+    QMessageBox::information(this, QStringLiteral("폴리곤 나누기"),
+                             QStringLiteral("나눌 폴리곤 레이어를 좌측 레이어 목록에서 먼저 선택해 주세요."));
+    return;
+  }
+  m_isSplittingPolygon = true;
+  beginEdit(cur);
+  if (m_captureTool) {
+    m_captureTool->setMode(KaCaptureMapTool::Mode::Line);
+  }
+  statusBar()->showMessage(
+      QStringLiteral("폴리곤 나누기 모드 — 폴리곤을 가로지르는 선을 클릭하여 그리고 우클릭으로 분할."),
+      12000);
+#else
+  statusBar()->showMessage(QStringLiteral("스텁: 폴리곤 나누기"), 3000);
+#endif
+}
+
+void MainWindow::clipOverlappingLayers() {
+#if KA_HGIS_HAS_QGIS
+  QgsProject* proj = QgsProject::instance();
+  if (!proj) return;
+
+  QList<QgsVectorLayer*> allVecs;
+  QList<QgsVectorLayer*> polyVecs;
+  for (QgsMapLayer* l : proj->mapLayers()) {
+    if (auto* v = qobject_cast<QgsVectorLayer*>(l)) {
+      if (!v->isValid()) continue;
+      allVecs.append(v);
+      if (v->geometryType() == Qgis::GeometryType::Polygon) {
+        polyVecs.append(v);
+      }
+    }
+  }
+
+  if (allVecs.size() < 2 || polyVecs.isEmpty()) {
+    QMessageBox::information(this, QStringLiteral("구간 분리 (클립)"),
+                             QStringLiteral("구간을 분리하려면 최소 1개의 폴리곤(바운더리) 레이어와 대상 레이어가 필요합니다."));
+    return;
+  }
+
+  QDialog dlg(this);
+  dlg.setWindowTitle(QStringLiteral("겹치는 구간 분리 (클립)"));
+  dlg.resize(420, 200);
+  auto* layout = new QVBoxLayout(&dlg);
+
+  auto* infoLab = new QLabel(QStringLiteral("기준 바운더리 레이어와 겹치는 구간만 잘라내어 새 레이어로 분리합니다."), &dlg);
+  infoLab->setWordWrap(true);
+  layout->addWidget(infoLab);
+
+  auto* form = new QFormLayout();
+  auto* targetCombo = new QComboBox(&dlg);
+  auto* boundaryCombo = new QComboBox(&dlg);
+
+  QgsVectorLayer* currentLayer = m_layerTree ? qobject_cast<QgsVectorLayer*>(m_layerTree->currentLayer()) : nullptr;
+
+  int targetIdx = 0;
+  for (int i = 0; i < allVecs.size(); ++i) {
+    targetCombo->addItem(allVecs[i]->name(), QVariant::fromValue(static_cast<void*>(allVecs[i])));
+    if (currentLayer && allVecs[i] == currentLayer) targetIdx = i;
+  }
+  targetCombo->setCurrentIndex(targetIdx);
+
+  int boundaryIdx = 0;
+  for (int i = 0; i < polyVecs.size(); ++i) {
+    boundaryCombo->addItem(polyVecs[i]->name(), QVariant::fromValue(static_cast<void*>(polyVecs[i])));
+    const QString n = polyVecs[i]->name().toLower();
+    if (n.contains(QStringLiteral("바운더리")) || n.contains(QStringLiteral("구역")) || n.contains(QStringLiteral("허가"))) {
+      boundaryIdx = i;
+    }
+  }
+  boundaryCombo->setCurrentIndex(boundaryIdx);
+
+  form->addRow(QStringLiteral("자를 대상 레이어:"), targetCombo);
+  form->addRow(QStringLiteral("기준 바운더리:"), boundaryCombo);
+  layout->addLayout(form);
+
+  auto* btnBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+  btnBox->button(QDialogButtonBox::Ok)->setText(QStringLiteral("분리 실행"));
+  btnBox->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("취소"));
+  connect(btnBox, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+  connect(btnBox, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+  layout->addWidget(btnBox);
+
+  if (dlg.exec() != QDialog::Accepted) return;
+
+  auto* target = static_cast<QgsVectorLayer*>(targetCombo->currentData().value<void*>());
+  auto* boundary = static_cast<QgsVectorLayer*>(boundaryCombo->currentData().value<void*>());
+
+  if (!target || !boundary) return;
+  if (target == boundary) {
+    QMessageBox::warning(this, QStringLiteral("구간 분리"), QStringLiteral("대상 레이어와 기준 바운더리 레이어가 같을 수 없습니다."));
+    return;
+  }
+
+  QString err;
+  QgsVectorLayer* clipped = LayerOps::clipLayerByBoundary(target, boundary, proj, &err);
+  if (!clipped) {
+    QMessageBox::warning(this, QStringLiteral("구간 분리 실패"), err);
+    return;
+  }
+
+  if (m_canvas) m_canvas->refresh();
+  statusBar()->showMessage(QStringLiteral("겹치는 구간을 분리하여 「%1」 레이어를 생성했습니다.").arg(clipped->name()), 8000);
+  notify(Notice::Success, QStringLiteral("구간 분리 완료"),
+         QStringLiteral("「%1」 레이어가 성공적으로 생성되었습니다.").arg(clipped->name()),
+         QStringLiteral("기준: %1 | 대상: %2").arg(boundary->name(), target->name()));
+#else
+  statusBar()->showMessage(QStringLiteral("스텁: 구간 분리"), 3000);
+#endif
+}
+
 void MainWindow::saveEdits() {
 #if KA_HGIS_HAS_QGIS
   int n = 0;
