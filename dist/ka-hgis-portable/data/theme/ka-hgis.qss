@@ -41,8 +41,26 @@ QWidget#startRail QLabel {
   font-family: "Malgun Gothic", "Segoe UI";
 }
 QPushButton#startNewBtn, QPushButton#startOpenBtn {
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 700;
   font-family: "Malgun Gothic", "Segoe UI";
+  background: #FFFFFF;
+  border: 1px solid #D0D5DD;
+  border-bottom: 3px solid #B4BCC8;
+  border-radius: 12px;
+  color: #1F2328;
+  padding: 10px;
+}
+QPushButton#startNewBtn:hover, QPushButton#startOpenBtn:hover {
+  background: #FFFFFF;
+  border-color: #1E67C6;
+  border-bottom: 3px solid #144E99;
+  color: #1E67C6;
+}
+QPushButton#startNewBtn:pressed, QPushButton#startOpenBtn:pressed {
+  background: #EDF2F7;
+  border-bottom: 1px solid #B4BCC8;
+  margin-top: 2px;
 }
 QDialogButtonBox QPushButton {
   font-size: 13px;
@@ -62,23 +80,27 @@ QPushButton {
   min-height: 34px;
   padding: 8px 16px;
   border: 1px solid #D5D9DE;
+  border-bottom: 2px solid #BAC2CC;
   border-radius: 8px;
   background: #FFFFFF;
 }
-QPushButton:hover { background: #F2F3F5; border-color: #C3C8CF; }
-QPushButton:pressed { background: #E8F0FA; }
+QPushButton:hover { background: #F8F9FA; border-color: #C3C8CF; border-bottom: 2px solid #ACB5C0; }
+QPushButton:pressed { background: #E8F0FA; border-bottom: 1px solid #BAC2CC; margin-top: 1px; min-height: 33px; }
 QPushButton:checked {
   background: #E8F0FA;
   color: #124B94;
   border-color: #1E67C6;
+  border-bottom: 2px solid #17529E;
 }
 QPushButton:default, QPushButton#btnAdjustDone, QPushButton.primary, QPushButton#btnPrimary {
   background: #1E67C6;
   color: #FFFFFF;
   border: 1px solid #1E67C6;
+  border-bottom: 2px solid #144E99;
 }
 QPushButton:default:hover, QPushButton#btnAdjustDone:hover, QPushButton.primary:hover, QPushButton#btnPrimary:hover {
   background: #175AB0;
+  border-bottom: 2px solid #103E7A;
 }
 QPushButton:disabled {
   background: #E9EBEE;
@@ -228,17 +250,26 @@ QWidget#beginnerRibbon QToolButton {
   color: #1F2328;
   font-size: 11px;
   border: 1px solid #D5D9DE;
+  border-bottom: 2px solid #BAC2CC;
   border-radius: 8px;
   text-align: center;
 }
 QWidget#beginnerRibbon QToolButton:hover {
-  background: #F2F3F5;
-  border-color: #C3C8CF;
+  background: #F8FAFC;
+  border-color: #A0AAB5;
+  border-bottom: 2px solid #8E98A5;
+}
+QWidget#beginnerRibbon QToolButton:pressed {
+  background: #EEF2F6;
+  border-bottom: 1px solid #BAC2CC;
+  margin-top: 3px;
+  min-height: 57px;
 }
 QWidget#beginnerRibbon QToolButton:checked {
   background: #FFFFFF;
   color: #124B94;
   border: 1px solid #1E67C6;
+  border-bottom: 2px solid #124B94;
   border-radius: 8px;
 }
 QWidget#beginnerRibbon QToolButton::menu-button {
@@ -397,13 +428,20 @@ QHeaderView::section {
 
 /* ---- Cards / docks / splitter ---- */
 QFrame#mapCard, QFrame#layersCard, QFrame#filesCard,
-QFrame#filesInner, QFrame#layersInner,
 QFrame#itemInspector, QFrame#mapAdjustBar, QFrame#drawerCard,
 QFrame#studioLeftCol, QFrame#studioBottomBar,
 QFrame#terrainLayersCard, QFrame#terrainFilesCard {
-  background: #FBFCFD;
+  background: #FFFFFF;
   border: 1px solid #D5D9DE;
+  border-bottom: 2px solid #BAC2CC;
+  border-right: 1.5px solid #C5CDD7;
   border-radius: 10px;
+  color: #1F2328;
+}
+QFrame#filesInner, QFrame#layersInner {
+  background: #F8F9FA;
+  border: 1px solid #DFE2E6;
+  border-radius: 8px;
   color: #1F2328;
 }
 QFrame#studioLeftCol {
@@ -506,14 +544,16 @@ QSplitter#leftSplit::handle:hover {
 }
 QFrame#layersCard,
 QFrame#filesCard {
-  background: #FBFCFD;
+  background: #FFFFFF;
   border: 1px solid #D5D9DE;
+  border-bottom: 2px solid #BAC2CC;
+  border-right: 1.5px solid #C5CDD7;
   border-radius: 8px;
 }
 QFrame#layersInner,
 QFrame#filesInner {
-  background: #FFFFFF;
-  border: 1px solid #D5D9DE;
+  background: #F8F9FA;
+  border: 1px solid #DFE2E6;
   border-radius: 6px;
 }
 
@@ -522,17 +562,20 @@ QFrame#layersCard QToolButton, QFrame#filesCard QToolButton {
   font-size: 12px;
   padding: 4px 10px;
   border: 1px solid #D5D9DE;
+  border-bottom: 2px solid #BAC2CC;
   background: #FFFFFF;
   border-radius: 6px;
   color: #4C535B;
 }
 QFrame#layersCard QToolButton:hover, QFrame#filesCard QToolButton:hover {
-  background: #E9EBEE;
+  background: #F8FAFC;
   border-color: #C3C8CF;
+  border-bottom: 2px solid #ACB5C0;
   color: #1F2328;
 }
 QFrame#layersCard QToolButton:pressed, QFrame#filesCard QToolButton:pressed {
   background: #E8F0FA;
+  border-bottom: 1px solid #BAC2CC;
 }
 
 QDockWidget { border: 1px solid #D5D9DE; color: #1F2328; titlebar-close-icon: none; }

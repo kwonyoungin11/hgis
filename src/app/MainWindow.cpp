@@ -183,6 +183,16 @@
 #include <qgsproviderregistry.h>
 #include <qgsprovidersublayerdetails.h>
 #endif
+#include <QGraphicsDropShadowEffect>
+
+static void applyWidgetShadow(QWidget* w, int blur = 14, int yOffset = 3, int alpha = 35) {
+  if (!w) return;
+  auto* shadow = new QGraphicsDropShadowEffect(w);
+  shadow->setBlurRadius(blur);
+  shadow->setOffset(0, yOffset);
+  shadow->setColor(QColor(0, 0, 0, alpha));
+  w->setGraphicsEffect(shadow);
+}
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   setWindowTitle(QStringLiteral("필드고고학GIS"));
@@ -724,6 +734,7 @@ void MainWindow::buildMenus() {
   m_subToolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
   m_subToolbar->setMovable(false);
   m_subToolbar->setVisible(false);
+  applyWidgetShadow(m_subToolbar, 10, 2, 25);
   insertToolBarBreak(m_subToolbar);
 }
 
@@ -1213,6 +1224,7 @@ void MainWindow::buildUi() {
   auto* layersCard = new QFrame(central);
   layersCard->setObjectName(QStringLiteral("layersCard"));
   m_layersCard = layersCard;
+  applyWidgetShadow(layersCard, 14, 3, 30);
   auto* layersLay = new QVBoxLayout(layersCard);
   layersLay->setContentsMargins(6, 6, 6, 6);
   layersLay->setSpacing(6);
@@ -1303,6 +1315,7 @@ void MainWindow::buildUi() {
   auto* filesCard = new QFrame(central);
   filesCard->setObjectName(QStringLiteral("filesCard"));
   m_filesCard = filesCard;
+  applyWidgetShadow(filesCard, 14, 3, 30);
   auto* filesLay = new QVBoxLayout(filesCard);
   filesLay->setContentsMargins(6, 6, 6, 6);
   filesLay->setSpacing(6);
@@ -1363,7 +1376,6 @@ void MainWindow::buildUi() {
   connect(btnDesk, &QToolButton::clicked, this, [this]() {
     goFileBrowserRoot(resolvedDesktopPath());
   });
-
   auto* btnPick = new QToolButton(filesCard);
   btnPick->setText(QStringLiteral("폴더…"));
   btnPick->setToolTip(QStringLiteral("조사 데이터 폴더 직접 선택"));
@@ -1407,6 +1419,7 @@ void MainWindow::buildUi() {
 
   auto* mapCard = new QFrame(central);
   mapCard->setObjectName(QStringLiteral("mapCard"));
+  applyWidgetShadow(mapCard, 16, 4, 30);
   auto* mapLay = new QVBoxLayout(mapCard);
   mapLay->setContentsMargins(4, 4, 4, 4);
   mapLay->setSpacing(4);

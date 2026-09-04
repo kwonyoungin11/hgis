@@ -4,6 +4,7 @@
 
 #include <QAbstractItemView>
 #include <QDateTime>
+#include <QGraphicsDropShadowEffect>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -13,6 +14,15 @@
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QVBoxLayout>
+
+static void applyCardElevation(QWidget* w, int blur = 14, int yOffset = 3, int alpha = 35) {
+  if (!w) return;
+  auto* shadow = new QGraphicsDropShadowEffect(w);
+  shadow->setBlurRadius(blur);
+  shadow->setOffset(0, yOffset);
+  shadow->setColor(QColor(0, 0, 0, alpha));
+  w->setGraphicsEffect(shadow);
+}
 
 KaStartPage::KaStartPage(QWidget* parent) : QWidget(parent) {
   setObjectName(QStringLiteral("startPage"));
@@ -60,6 +70,8 @@ KaStartPage::KaStartPage(QWidget* parent) : QWidget(parent) {
   btnOpen->setMinimumSize(168, 80);
   connect(btnNew, &QPushButton::clicked, this, &KaStartPage::newSurveyRequested);
   connect(btnOpen, &QPushButton::clicked, this, &KaStartPage::openRequested);
+  applyCardElevation(btnNew, 14, 3, 40);
+  applyCardElevation(btnOpen, 14, 3, 40);
   actions->addWidget(btnNew);
   actions->addWidget(btnOpen);
   actions->addStretch(1);
@@ -77,6 +89,7 @@ KaStartPage::KaStartPage(QWidget* parent) : QWidget(parent) {
 
   m_recent = new QTableWidget(0, 3, main);
   m_recent->setObjectName(QStringLiteral("recentSurveyList"));
+  applyCardElevation(m_recent, 16, 4, 30);
   m_recent->setHorizontalHeaderLabels(
       {QStringLiteral("이름"), QStringLiteral("최근 열림"), QStringLiteral("위치")});
   m_recent->verticalHeader()->setVisible(false);

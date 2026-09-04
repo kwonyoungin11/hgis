@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-09-04 22:23:46 +09:00 |
+| Updated (local) | 2026-09-04 22:30:05 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `c600253` |
-| HEAD full | `c60025300334a4c99558a66661f73a6b07af5ea6` |
-| HEAD date | 2026-09-04 22:18:58 +0900 |
+| HEAD short | `7beb4b1` |
+| HEAD full | `7beb4b16b77071100124c7d4405a9a71f4c669b9` |
+| HEAD date | 2026-09-04 22:23:46 +0900 |
 | HEAD author | kwonypungin <kyi25@nate.com> |
-| HEAD subject | feat(app): 구간분리 생성 취소 및 선택 도형 Delete 삭제 후 Ctrl+Z 복원 지원 |
-| Total commits | 48 |
+| HEAD subject | chore: 최신 포터블 바이너리 및 커밋 상태 동기화 |
+| Total commits | 49 |
 | Upstream | `origin/main` |
-| Sync | ahead 10 of origin/main (push pending) |
+| Sync | up to date with origin/main |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (2 paths) |
+| Working tree dirty | **yes** (6 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** feat(app): 구간분리 생성 취소 및 선택 도형 Delete 삭제 후 Ctrl+Z 복원 지원 (`c600253` @ 2026-09-04 22:18:58 +0900)
-- **Remote sync at write time:** ahead 10 of origin/main (push pending)
-- **Uncommitted local changes at write time:** yes (2 paths)
+- **Recorded tip when this file was written:** chore: 최신 포터블 바이너리 및 커밋 상태 동기화 (`7beb4b1` @ 2026-09-04 22:23:46 +0900)
+- **Remote sync at write time:** up to date with origin/main
+- **Uncommitted local changes at write time:** yes (6 paths)
 
 ### Read this correctly
 
@@ -56,6 +56,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `7beb4b1` | 2026-09-04T22:23:46+09:00 | chore: 최신 포터블 바이너리 및 커밋 상태 동기화 |
 | `c600253` | 2026-09-04T22:18:58+09:00 | feat(app): 구간분리 생성 취소 및 선택 도형 Delete 삭제 후 Ctrl+Z 복원 지원 |
 | `bde6a19` | 2026-09-04T22:14:01+09:00 | feat(core): 구간분리 시 원본 도형 보존 및 교차 피처 독립 분리, 피처 복원 함수 구현 |
 | `b5a903e` | 2026-09-04T22:02:40+09:00 | feat(select): 다중 레이어 Shift 피처 선택 도구 및 2개 도형 선택 시 겹침 자동 분할 연동 |
@@ -85,13 +86,16 @@
 | `74abc32` | 2026-08-16T15:35:36+09:00 | Ship teal chrome, artifact digitize, snap, and studio layer-center. |
 | `ef06bf1` | 2026-08-16T12:37:19+09:00 | Refresh COMMIT_STATUS after chrome and folder-import ship. |
 | `e5c16ea` | 2026-08-16T12:37:07+09:00 | Ship flat chrome, layout grid/paper, and a fast PC folder import. |
-| `cf8c011` | 2026-08-15T23:43:28+09:00 | Refresh COMMIT_STATUS after theme ship; drop old no-MCP rule. |
 
 ## Staged in this commit
 
 ```
+M	data/theme/ka-hgis.qss
+M	dist/ka-hgis-portable/data/theme/ka-hgis.qss
 M	dist/ka-hgis-portable/ka-hgis.exe
 M	docs/COMMIT_STATUS.md
+M	src/app/KaStartPage.cpp
+M	src/app/MainWindow.cpp
 ```
 ## Other PC checklist
 
