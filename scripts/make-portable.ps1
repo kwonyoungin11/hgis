@@ -57,19 +57,19 @@ if (Test-Path (Join-Path $root "docs\user")) {
 }
 
 Write-Host "Copying QGIS prefix..."
-Invoke-Robo $qgis (Join-Path $out "apps\qgis-dev") @("python", "grass", "include", "lib", "doc", "server")
+Invoke-Robo $qgis (Join-Path $out "apps\qgis-dev") @("python", "grass", "include", "lib", "doc", "server", "bin")
 
-Write-Host "Copying Qt6..."
-Copy-Dlls (Join-Path $OSGEO "apps\Qt6\bin") (Join-Path $out "apps\Qt6\bin")
+# DLL은 실행 파일 폴더(루트)에 한 벌만 둔다. 예전에는 apps\*\bin 과 bin\ 에도
+# 같은 파일을 복사해 733 MB가 중복으로 쌓였다(2026-09-03 실측). start.bat 의
+# PATH가 루트를 맨 앞에 두므로 하위 bin 사본은 쓰이지 않는다.
+# 여기서 받는 것은 DLL이 아닌 것들 — Qt 플러그인, GDAL 데이터, PROJ 데이터.
+Write-Host "Copying Qt6 plugins..."
 Invoke-Robo (Join-Path $OSGEO "apps\Qt6\plugins") (Join-Path $out "apps\Qt6\plugins")
 
-Write-Host "Copying GDAL/PDAL/OSGeo bin..."
-Copy-Dlls (Join-Path $OSGEO "apps\gdal-dev\bin") (Join-Path $out "apps\gdal-dev\bin")
+Write-Host "Copying GDAL data..."
 if (Test-Path (Join-Path $OSGEO "apps\gdal-dev\share")) {
   Invoke-Robo (Join-Path $OSGEO "apps\gdal-dev\share") (Join-Path $out "apps\gdal-dev\share")
 }
-Copy-Dlls (Join-Path $OSGEO "apps\pdal-dev\bin") (Join-Path $out "apps\pdal-dev\bin")
-Copy-Dlls (Join-Path $OSGEO "bin") (Join-Path $out "bin")
 if (Test-Path (Join-Path $OSGEO "share\proj")) {
   Invoke-Robo (Join-Path $OSGEO "share\proj") (Join-Path $out "share\proj")
 }
@@ -87,6 +87,24 @@ Get-ChildItem (Join-Path $OSGEO "apps") -Directory -ErrorAction SilentlyContinue
   if (Test-Path $b) { Copy-Dlls $b $out }
 }
 
+# 조사에 쓰이지 않는 DLL은 루트에서 뺀다. 실행 중 로드된 모듈 목록과 대조해
+# "한 번도 로드되지 않고, 이 앱이 그 기능을 제공하지도 않는" 것만 골랐다
+# (2026-09-03 실측). Qt6WebEngineCore·libpq·libmysql은 실제로 로드되므로 남긴다.
+# Qt3D/Quick3D도 3D 지형 창이 열릴 때 쓰이므로 건드리지 않는다.
+$skipDlls = @(
+  "oraociicus.dll", "oci.dll",   # Oracle 클라이언트 — Oracle에 접속하지 않는다
+  "msodbcsql18.dll",             # SQL Server ODBC — 쓰지 않는다
+  "qgis_app.dll",                # QGIS 데스크톱 앱 라이브러리 — core/gui만 링크한다
+  "python312.dll",               # QGIS Python — prefix에서 python을 이미 뺐다
+  "Qt6Designer.dll", "Qt6DesignerComponents.dll", "Qt6QmlCompiler.dll"  # 개발 도구
+)
+$freed = 0
+foreach ($n in $skipDlls) {
+  $f = Join-Path $out $n
+  if (Test-Path $f) { $freed += (Get-Item $f).Length; Remove-Item $f -Force }
+}
+Write-Host ("Skipped unused DLLs: {0:N1} MB" -f ($freed / 1MB))
+
 $sys32 = Join-Path $env:WINDIR "System32"
 foreach ($vc in @(
     "vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll", "msvcp140_1.dll",
@@ -96,8 +114,7 @@ foreach ($vc in @(
   if (Test-Path $src) { Copy-Item $src $out -Force }
 }
 
-# Also keep qgis-dev\bin copies of qgis_*.dll for prefix-relative loads.
-Copy-Dlls $qgisBin (Join-Path $out "apps\qgis-dev\bin")
+# qgis-dev\bin 사본은 두지 않는다 — 루트 한 벌로 충분하다(위 주석 참고).
 
 $runPs1 = @'
 $ErrorActionPreference = "Stop"
@@ -152,8 +169,8 @@ $readmeKo = @"
 Visual Studio 설치도 필요 없습니다.
 
 실행:
-  start.bat     ← 이것을 더블클릭
-  또는 ka-hgis.exe
+  ka-hgis.exe   ← 이것을 더블클릭 (다른 PC·USB·한글 경로에서도)
+  start.bat     ← 예전 방식. 없어도 EXE만으로 됩니다.
 
 주의:
   - apps, bin, share 폴더를 지우면 실행되지 않습니다.

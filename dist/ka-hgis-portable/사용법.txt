@@ -4,8 +4,8 @@
 Visual Studio 설치도 필요 없습니다.
 
 실행:
-  start.bat     ← 이것을 더블클릭
-  또는 ka-hgis.exe
+  ka-hgis.exe   ← 이것을 더블클릭 (다른 PC·USB·한글 경로에서도)
+  start.bat     ← 예전 방식. 없어도 EXE만으로 됩니다.
 
 주의:
   - apps, bin, share 폴더를 지우면 실행되지 않습니다.

@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-09-02 17:57:23 +09:00 |
+| Updated (local) | 2026-09-04 17:11:57 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `cursor/pro-drawing-and-map-services` |
-| HEAD short | `83fe782` |
-| HEAD full | `83fe78272b735a335814c2c8871fb042cb74ff63` |
-| HEAD date | 2026-08-31 10:20:41 +0900 |
+| HEAD short | `4a5341d` |
+| HEAD full | `4a5341db6e037683d2ec103ad5efb753eb118da6` |
+| HEAD date | 2026-09-02 17:57:24 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | Ship user_sheet submit PDF, 4K/5186 satellite fill, and WMS zoom crash guard. |
-| Total commits | 39 |
+| HEAD subject | Ship align overlay viewport mapping, scan-ink overlay, paleo/soil maps, and trench field GIS. |
+| Total commits | 40 |
 | Upstream | `origin/cursor/pro-drawing-and-map-services` |
 | Sync | up to date with origin/cursor/pro-drawing-and-map-services |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (62 paths) |
+| Working tree dirty | **yes** (80 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** Ship user_sheet submit PDF, 4K/5186 satellite fill, and WMS zoom crash guard. (`83fe782` @ 2026-08-31 10:20:41 +0900)
+- **Recorded tip when this file was written:** Ship align overlay viewport mapping, scan-ink overlay, paleo/soil maps, and trench field GIS. (`4a5341d` @ 2026-09-02 17:57:24 +0900)
 - **Remote sync at write time:** up to date with origin/cursor/pro-drawing-and-map-services
-- **Uncommitted local changes at write time:** yes (62 paths)
+- **Uncommitted local changes at write time:** yes (80 paths)
 
 ### Read this correctly
 
@@ -56,6 +56,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `4a5341d` | 2026-09-02T17:57:24+09:00 | Ship align overlay viewport mapping, scan-ink overlay, paleo/soil maps, and trench field GIS. |
 | `83fe782` | 2026-08-31T10:20:41+09:00 | Ship user_sheet submit PDF, 4K/5186 satellite fill, and WMS zoom crash guard. |
 | `9592951` | 2026-08-30T18:33:14+09:00 | Widen geology, soil, and river downloads to 4x span so 1:10000 drawings stay covered. |
 | `d6db386` | 2026-08-30T12:41:15+09:00 | Refresh COMMIT_STATUS after Malgun Gothic and unlazy ship. |
@@ -85,71 +86,88 @@
 | `6b9f373` | 2026-08-09T18:57:28+09:00 | Refresh COMMIT_STATUS after bootstrap docs commit. |
 | `30c1a6d` | 2026-08-09T18:57:26+09:00 | Add bootstrap-dev-pc so a fresh clone can build and develop immediately. |
 | `31e51be` | 2026-08-09T18:54:02+09:00 | Sync COMMIT_STATUS to HEAD after push ledger update. |
-| `c1a3c12` | 2026-08-09T18:53:52+09:00 | Refresh COMMIT_STATUS ledger after feature commits. |
 
 ## Staged in this commit
 
 ```
+A	.cursor/agents/ka-codebase-scout.md
+A	.cursor/agents/ka-security-reviewer.md
+A	.cursor/agents/ka-shell-runner.md
+A	.cursor/hooks.json
+A	.cursor/hooks/after-file-edit.ps1
+A	.cursor/hooks/before-shell.ps1
+A	.cursor/hooks/lib/state.ps1
+A	.cursor/hooks/run.cmd
+A	.cursor/hooks/session-start.ps1
+A	.cursor/hooks/stop-auto.ps1
+A	.cursor/mcp.json
+A	.cursor/rules/auto-review-after-code.mdc
+A	.cursor/rules/cpp-qt-conventions.mdc
+M	.cursor/rules/grok-ka-hgis.mdc
+A	.cursor/rules/security-guidelines.mdc
+A	.cursor/settings.json
+A	.cursor/skills/auto-security-review/SKILL.md
+M	.gitignore
 M	.grok/NOW.md
-M	.grok/rules/41-drawing-studio.md
 M	CMakeLists.txt
 M	HANDOFF.md
-A	data/korea_dongs.json
 M	data/theme/ka-hgis.qss
 M	dist/ka-hgis-portable/README.txt
-A	dist/ka-hgis-portable/data/korea_dongs.json
 M	dist/ka-hgis-portable/data/theme/ka-hgis.qss
 M	dist/ka-hgis-portable/ka-hgis.exe
 M	"dist/ka-hgis-portable/\354\202\254\354\232\251\353\262\225.txt"
-M	docs/ERROR_REGRESSION.md
 M	docs/HANDOFF.md
-A	docs/ui/toolbar-button-candidates.html
+A	docs/ui-mockup-viewer.html
 M	scripts/make-portable.ps1
-M	scripts/publish-desktop.ps1
-A	scripts/verify-jeju-geology.ps1
-A	scripts/verify-portable-pack.ps1
 M	src/app/KaAlignMapTool.cpp
 M	src/app/KaApplication.cpp
+A	src/app/KaBeginnerRibbon.cpp
+A	src/app/KaBeginnerRibbon.h
 M	src/app/KaCaptureMapTool.cpp
 M	src/app/KaCaptureMapTool.h
-A	src/app/KaDemClassDialog.cpp
-A	src/app/KaDemClassDialog.h
+M	src/app/KaCoordPointMapTool.cpp
+M	src/app/KaCrashGuard.cpp
 M	src/app/KaDrawingStudio.cpp
 M	src/app/KaDrawingStudio.h
+A	src/app/KaFoundLocationMark.cpp
+A	src/app/KaFoundLocationMark.h
 M	src/app/KaIcons.cpp
-M	src/app/KaImageView.cpp
-M	src/app/KaImageView.h
-A	src/app/KaRegionLocator.cpp
-A	src/app/KaRegionLocator.h
+M	src/app/KaRegionLocator.cpp
+M	src/app/KaRegionLocator.h
+M	src/app/KaStatusBar.cpp
+A	src/app/KaTerrain3dLayoutStudio.cpp
+A	src/app/KaTerrain3dLayoutStudio.h
+A	src/app/KaTerrain3dStudio.cpp
+A	src/app/KaTerrain3dStudio.h
+A	src/app/KaTerrain3dView.cpp
+A	src/app/KaTerrain3dView.h
 M	src/app/KaTrenchDialog.cpp
 M	src/app/KaTrenchDialog.h
-M	src/app/KaTrenchMoveTool.cpp
-M	src/app/KaTrenchMoveTool.h
+A	src/app/KaVertexEditTool.cpp
+A	src/app/KaVertexEditTool.h
 M	src/app/MainWindow.cpp
 M	src/app/MainWindow.h
+M	src/app/ka-hgis.qss.inc.in
+M	src/core/DemAnalyzer.cpp
+M	src/core/DemAnalyzer.h
 M	src/core/GeologyMapService.cpp
 M	src/core/GeologyMapService.h
 M	src/core/GeorefService.cpp
-M	src/core/GeorefService.h
-A	src/core/KoreaRegionCatalog.cpp
-A	src/core/KoreaRegionCatalog.h
 M	src/core/LayerOps.cpp
 M	src/core/LayerOps.h
 M	src/core/LayoutService.cpp
 M	src/core/LayoutService.h
-A	src/core/PaleoLandformService.cpp
-A	src/core/PaleoLandformService.h
-M	src/core/RecentSurveys.cpp
-M	src/core/RecentSurveys.h
-M	src/core/RiverMapService.cpp
-M	src/core/SoilMapService.cpp
-M	src/core/SoilMapService.h
+A	src/core/Terrain3dLayoutService.cpp
+A	src/core/Terrain3dLayoutService.h
+A	src/core/Terrain3dService.cpp
+A	src/core/Terrain3dService.h
+A	src/core/TilePackService.cpp
+A	src/core/TilePackService.h
 M	src/core/TrenchGridGenerator.cpp
 M	src/core/TrenchGridGenerator.h
-M	tests/test_buffer.cpp
 M	tests/test_dem_trench.cpp
 M	tests/test_georef.cpp
-M	tests/test_recent.cpp
+A	tests/test_terrain_3d.cpp
 M	tests/test_theme.cpp
 M	tests/test_workflow.cpp
 ```

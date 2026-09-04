@@ -73,7 +73,7 @@ void KaCaptureMapTool::destroySnapMarker() {
   m_snapMark = nullptr;
 }
 
-void KaCaptureMapTool::updateSnapMarker(const QgsPointXY& mapPt, bool snapped) {
+void KaCaptureMapTool::updateSnapMarker(const QgsPointXY& mapPt, bool snapped, bool isIntersection) {
   QgsMapCanvas* c = canvas();
   if (!c || !m_snapEnabled || !snapped) {
     destroySnapMarker();
@@ -81,6 +81,14 @@ void KaCaptureMapTool::updateSnapMarker(const QgsPointXY& mapPt, bool snapped) {
   }
   if (!m_snapMark) {
     m_snapMark = new QgsVertexMarker(c);
+  }
+  if (isIntersection) {
+    m_snapMark->setIconType(QgsVertexMarker::ICON_X);
+    m_snapMark->setIconSize(16);
+    m_snapMark->setPenWidth(3);
+    m_snapMark->setColor(QColor(220, 20, 60)); // 선과 선이 만나는 교차점은 진한 적색 X로 명확히 표시
+    m_snapMark->setFillColor(QColor(255, 255, 255, 240));
+  } else {
     m_snapMark->setIconType(QgsVertexMarker::ICON_CIRCLE);
     m_snapMark->setIconSize(14);
     m_snapMark->setPenWidth(2);
@@ -110,6 +118,7 @@ int KaCaptureMapTool::indexOfSketchVertex(const QgsPointXY& pt) const {
 bool KaCaptureMapTool::mapPointFromEvent(QgsMapMouseEvent* e, QgsPointXY* out, bool* snappedOut) {
   if (!e || !out || !canvas()) return false;
   bool snapped = false;
+  bool isInter = false;
   try {
     *out = e->mapPoint();
   } catch (...) {
@@ -124,10 +133,12 @@ bool KaCaptureMapTool::mapPointFromEvent(QgsMapMouseEvent* e, QgsPointXY* out, b
     if (hit.isValid()) {
       *out = hit.point();
       snapped = true;
+      // QGIS PointLocator에서 교차점(intersection)에 스냅된 경우 hit.layer()는 null이다.
+      isInter = (hit.layer() == nullptr);
     }
   }
   if (std::isnan(out->x()) || std::isnan(out->y())) return false;
-  updateSnapMarker(*out, snapped);
+  updateSnapMarker(*out, snapped, isInter);
   if (snappedOut) *snappedOut = snapped;
   return true;
 }

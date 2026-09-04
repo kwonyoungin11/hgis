@@ -945,6 +945,31 @@ QgsRectangle LayoutService::extentForPaperScale(const QgsRectangle& currentExten
                       center.x() + groundWidth * 0.5, center.y() + groundHeight * 0.5);
 }
 
+QPointF LayoutService::layoutMapItemFromXy(const QgsRectangle& extent, const QRectF& mapRect,
+                                           double mapX, double mapY) {
+  if (!extent.isFinite() || !(extent.width() > 0.0) || !(extent.height() > 0.0)
+      || mapRect.width() < 1e-9 || mapRect.height() < 1e-9)
+    return QPointF();
+  return QPointF(mapRect.x() + (mapX - extent.xMinimum()) / extent.width() * mapRect.width(),
+                 mapRect.y() + (extent.yMaximum() - mapY) / extent.height() * mapRect.height());
+}
+
+QgsPointXY LayoutService::layoutMapXyFromItem(const QgsRectangle& extent, const QRectF& mapRect,
+                                              const QPointF& itemPt) {
+  if (!extent.isFinite() || !(extent.width() > 0.0) || !(extent.height() > 0.0)
+      || mapRect.width() < 1e-9 || mapRect.height() < 1e-9)
+    return QgsPointXY();
+  const double fx = (itemPt.x() - mapRect.x()) / mapRect.width();
+  const double fy = (itemPt.y() - mapRect.y()) / mapRect.height();
+  return QgsPointXY(extent.xMinimum() + fx * extent.width(),
+                    extent.yMaximum() - fy * extent.height());
+}
+
+bool LayoutService::layoutMapItemContains(const QPointF& itemPt, const QRectF& mapRect,
+                                          double marginMm) {
+  return mapRect.adjusted(-marginMm, -marginMm, marginMm, marginMm).contains(itemPt);
+}
+
 QgsRectangle LayoutService::zoomExtentAtAnchor(const QgsRectangle& extent, double fx, double fy,
                                                double zoomFactor) {
   if (!extent.isFinite() || !(extent.width() > 0.0) || !(extent.height() > 0.0) ||
@@ -1212,6 +1237,7 @@ int LayoutService::exportDrawingPdfs(QgsProject* project, const QString& outDir,
 bool LayoutService::sheetLegendOmitsLayerName(const QString& name) {
   const QString n = name.trimmed();
   if (n.contains(QStringLiteral("흙토람 그림"))) return true;
+  if (n == QStringLiteral("지질 음영")) return true;
   if (n == QStringLiteral("위성") || n.contains(QStringLiteral("VWorld 위성")) ||
       n.startsWith(QStringLiteral("Google 위성")))
     return true;

@@ -171,10 +171,10 @@ QToolBar#mainToolbar {
   padding: 4px 8px;
 }
 QToolBar#mainToolbar QToolButton {
-  min-width: 48px;
-  min-height: 46px;
+  min-width: 58px;
+  min-height: 58px;
   padding: 3px 5px;
-  font-size: 12px;
+  font-size: 11px;
   background: transparent;
   border: 2px solid transparent;
   border-radius: 0;
@@ -199,6 +199,92 @@ QToolBar#mainToolbar QToolButton:checked:hover {
   color: #124B94;
   border: 2px solid transparent;
   border-bottom: 2px solid #175AB0;
+}
+QWidget#beginnerRibbon {
+  background: transparent;
+}
+QFrame#ribbonGroup {
+  background: transparent;
+  border: none;
+  border-right: 1px solid #D5D9DE;
+}
+QLabel#ribbonGroupCaption {
+  color: #6E757D;
+  font-size: 11px;
+  font-weight: 600;
+  min-height: 18px;
+  max-height: 18px;
+  padding: 0 2px;
+  background: transparent;
+}
+QWidget#beginnerRibbon QToolButton {
+  min-width: 64px;
+  max-width: 64px;
+  min-height: 58px;
+  max-height: 58px;
+  margin: 2px 1px;
+  padding: 3px 1px;
+  background: #FFFFFF;
+  color: #1F2328;
+  font-size: 11px;
+  border: 1px solid #D5D9DE;
+  border-radius: 8px;
+  text-align: center;
+}
+QWidget#beginnerRibbon QToolButton:hover {
+  background: #F2F3F5;
+  border-color: #C3C8CF;
+}
+QWidget#beginnerRibbon QToolButton:checked {
+  background: #FFFFFF;
+  color: #124B94;
+  border: 1px solid #1E67C6;
+  border-radius: 8px;
+}
+QWidget#beginnerRibbon QToolButton::menu-button {
+  border: none;
+  background: transparent;
+  width: 0px;
+}
+QWidget#beginnerRibbon QToolButton::menu-arrow {
+  image: none;
+  width: 0px;
+  height: 0px;
+}
+QWidget#beginnerRibbon QToolButton::menu-indicator {
+  image: none;
+  width: 0px;
+  height: 0px;
+}
+QWidget#regionLocator {
+  min-height: 72px;
+  min-width: 230px;
+  background: transparent;
+  border: none;
+}
+QWidget#regionLocator QToolButton#regionChip {
+  min-width: 32px;
+  max-width: 38px;
+  min-height: 22px;
+  max-height: 22px;
+  margin: 1px;
+  padding: 0 2px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #1B3A6B;
+  background: #FFFFFF;
+  border: 1px solid #D5D9DE;
+  border-radius: 6px;
+}
+QWidget#regionLocator QToolButton#regionChip:hover {
+  background: #E8F1FC;
+  border-color: #1E67C6;
+}
+QWidget#regionLocator QToolButton#regionChip:checked {
+  background: #FFFFFF;
+  color: #124B94;
+  border: 1px solid #1E67C6;
+  border-radius: 8px;
 }
 QToolBar#studioToolRail {
   background: #FBFCFD;
@@ -234,19 +320,19 @@ QLineEdit:disabled, QComboBox:disabled, QAbstractSpinBox:disabled {
   background: #F2F3F5;
   color: #A5ABB3;
 }
-QLineEdit#locationSearch { min-height: 32px; min-width: 170px; background: #FFFFFF; border-radius: 16px; padding: 4px 14px; }
-QWidget#regionLocator { min-height: 56px; min-width: 360px; background: #F4F8FC; border: 1px solid #9DBBE8; border-radius: 10px; }
 QToolBar#mainToolbar QToolButton#regionChip {
-  min-width: 36px;
-  min-height: 24px;
-  max-height: 24px;
-  padding: 0 4px;
+  min-width: 32px;
+  max-width: 38px;
+  min-height: 22px;
+  max-height: 22px;
+  margin: 1px;
+  padding: 0 2px;
   font-size: 11px;
   font-weight: 700;
   color: #1B3A6B;
   background: #FFFFFF;
   border: 1px solid #D5D9DE;
-  border-radius: 8px;
+  border-radius: 6px;
 }
 QToolBar#mainToolbar QToolButton#regionChip:hover { background: #E8F1FC; border-color: #1E67C6; }
 QToolBar#mainToolbar QToolButton#regionChip:checked {
@@ -313,7 +399,8 @@ QHeaderView::section {
 QFrame#mapCard, QFrame#layersCard, QFrame#filesCard,
 QFrame#filesInner, QFrame#layersInner,
 QFrame#itemInspector, QFrame#mapAdjustBar, QFrame#drawerCard,
-QFrame#studioLeftCol, QFrame#studioBottomBar {
+QFrame#studioLeftCol, QFrame#studioBottomBar,
+QFrame#terrainLayersCard, QFrame#terrainFilesCard {
   background: #FBFCFD;
   border: 1px solid #D5D9DE;
   border-radius: 10px;
@@ -324,6 +411,10 @@ QFrame#studioLeftCol {
   border: none;
   border-right: 1px solid #D5D9DE;
   background: #F2F3F5;
+}
+QWidget#terrain3dPanel {
+  background: #F2F3F5;
+  border-right: 1px solid #D5D9DE;
 }
 QFrame#studioBottomBar {
   border-radius: 0px;
@@ -400,7 +491,31 @@ QTabBar::tab {
   margin: 0 2px;
 }
 QTabBar::tab:selected { color: #124B94; border-bottom: 2px solid #1E67C6; }
-QTabBar::tab:hover:!selected { color: #1F2328; background: #E9EBEE; }
+/* ---- Left Dock (레이어 위 / 파일함 아래 동시 노출) ---- */
+QSplitter#leftSplit {
+  background: transparent;
+}
+QSplitter#leftSplit::handle {
+  background: #D5D9DE;
+  height: 6px;
+  margin: 2px 12px;
+  border-radius: 3px;
+}
+QSplitter#leftSplit::handle:hover {
+  background: #1E67C6;
+}
+QFrame#layersCard,
+QFrame#filesCard {
+  background: #FBFCFD;
+  border: 1px solid #D5D9DE;
+  border-radius: 8px;
+}
+QFrame#layersInner,
+QFrame#filesInner {
+  background: #FFFFFF;
+  border: 1px solid #D5D9DE;
+  border-radius: 6px;
+}
 
 /* ---- Side panel buttons (레이어·파일함) ---- */
 QFrame#layersCard QToolButton, QFrame#filesCard QToolButton {
@@ -432,6 +547,14 @@ QSplitter::handle {
   width: 1px;
   height: 1px;
 }
+/* 왼쪽 패널 ↔ 지도 경계는 손으로 끌어야 한다. 1px 손잡이는 잡히지 않는다. */
+QSplitter#mainSplit::handle:horizontal {
+  background: #E6E9ED;
+  width: 7px;
+  border-left: 1px solid #D5D9DE;
+  border-right: 1px solid #D5D9DE;
+}
+QSplitter#mainSplit::handle:horizontal:hover { background: #9CB6D8; }
 
 QLabel { color: #1F2328; background: transparent; }
 QLabel#cardCaption { color: #6E757D; font-weight: 700; font-size: 12px; padding: 2px 2px 0 2px; }

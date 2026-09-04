@@ -1,0 +1,22 @@
+---
+description: ka-hgis 보안·불변식. 키 유출, 레이어 싹 지움, 강제 푸시 금지
+alwaysApply: true
+---
+
+# Security guidelines
+
+- VWorld 키는 `VworldSettings`만. 소스에 프로덕션 API 키를 넣지 않는다.
+- `.env`, `credentials.json`, 개인키, 토큰을 커밋하거나 채팅에 붙이지 않는다.
+- `loadSurveyLayers`에서 `removeAllMapLayers()` 금지. 도메인 레이어만 내리고 배경지도는 유지.
+- 업로드/내보내기 CRS는 **EPSG:5179**. 작업 CRS(5186/5187)와 섞지 않는다.
+- 커밋·리셋·force-push는 사용자가 말한 뒤에만. 훅이 `git push --force` / `git reset --hard`를 막는다.
+
+```cpp
+// BAD
+QgsProject::instance()->removeAllMapLayers();
+const char *key = "vworld-live-key";
+
+// GOOD
+// drop domain layers only; keep basemaps
+VworldSettings::apiKey();
+```

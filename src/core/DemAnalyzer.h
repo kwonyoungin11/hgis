@@ -27,6 +27,9 @@ struct RasterInfo {
 
 bool readFloatBand(const QString& tifPath, std::vector<float>* out, RasterInfo* info,
                    QString* errorOut);
+// 세계좌표 상자만 읽는다. maxEdge>1이면 긴 변을 그 픽셀 이하로 줄인다.
+bool readFloatWindow(const QString& tifPath, double xMin, double yMin, double xMax, double yMax,
+                     int maxEdge, std::vector<float>* out, RasterInfo* info, QString* errorOut);
 
 void hillshadeHorn(const std::vector<float>& z, const RasterInfo& info, const Options& opt,
                    std::vector<std::uint8_t>* outGray);

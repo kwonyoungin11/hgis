@@ -48,6 +48,15 @@ public:
   static bool applyFeaturePolyStyle(QgsVectorLayer* featurePoly);
   static bool applyDomainDrawStyle(QgsVectorLayer* layer, const QString& layerKey = {});
   static bool applyAreaM2Labels(QgsVectorLayer* layer);
+  static QString detectNameField(const QgsVectorLayer* layer);
+  static bool applyNameAttributeLabels(QgsVectorLayer* layer, const QString& fieldName = QString(),
+                                       double fontSizePt = 5.0, bool showArea = false);
+  static double labelFontSize(const QgsVectorLayer* layer, double defaultSize = 5.0);
+  static bool labelShowArea(const QgsVectorLayer* layer, bool defaultShow = false);
+  static QString currentLabelField(const QgsVectorLayer* layer);
+  // 외부에서 받은 SHP 파일(.cpg 없는 경우)의 한글 깨짐을 방지하기 위한 인코딩 준비 및 변경
+  static QString prepareShapefileEncoding(const QString& shpPath);
+  static bool setShapefileEncoding(QgsVectorLayer* layer, const QString& encoding);
   // Vector labeling only. Cadastral WMS/XYZ text is baked into tiles.
   static bool hasToggleableLabels(const QgsMapLayer* layer);
   static bool labelsVisible(const QgsMapLayer* layer);
@@ -79,6 +88,8 @@ public:
   static bool addVworldSatelliteMap(QgsProject* project, QgsMapCanvas* canvas, const QString& apiKey, QString* errorOut = nullptr);
   static void applyCanvasScreenDpi(QgsMapCanvas* canvas);
   static void refreshXyzBasemapTiles(QgsMapCanvas* canvas);
+  // XYZ/WMS 타일: 브라우저형 User-Agent. 입체지형 Google drape도 호출한다.
+  static void ensureTileNetworkIdentity();
   // Show / DevicePixelRatioChange: 4K·혼합 DPI에서 XYZ 타일을 다시 받는다.
   static bool canvasDisplayEventNeedsTileRefresh(int eventType);
 
@@ -101,6 +112,8 @@ public:
   // canvas has an extent; NASA GIBS color tiles as fallback. Never VWorld WMS.
   static bool addDemColorReliefMap(QgsProject* project, QgsMapCanvas* canvas,
                                    QString* errorOut = nullptr);
+  // Copernicus GLO-30 COG (/vsicurl). lat/lon in WGS84 degrees.
+  static QString copernicusCogUriForWgs84(double latDeg, double lonDeg);
 
   // 국토지리원 공개DEM(.img) / GeoTIFF. Single-band elevation + meter ramp.
   static bool addDemElevationRaster(QgsProject* project, QgsMapCanvas* canvas,
@@ -127,6 +140,8 @@ public:
   static QList<DemElevationClass> readDemElevationClasses(const QgsRasterLayer* layer);
   // Equal-interval step (m) so alluvial sites get 1–5 m classes, not one -2…1155 band.
   static double demElevationClassStep(double zMin, double zMax);
+  // Ensure a high-resolution shaded relief layer (Hillshade) is blended over the DEM (Multiply blend).
+  static QgsRasterLayer* ensureDemRelief(QgsProject* project, QgsRasterLayer* demLayer);
 
   // 흙토람(농진청) 토양도 신청으로 내려받은 SHP를 참조 지도로 불러온다.
   // crsOverrideAuthId가 비어 있지 않으면 레이어 좌표계를 그 값으로 지정한다
@@ -187,6 +202,10 @@ public:
                                  bool insertAtBottom = false);
   static void markSurveyLayer(QgsMapLayer* layer, const QString& layerKey);
   static void markReferenceLayer(QgsMapLayer* layer);
+  // 미리 받아 둔 MBTiles 타일팩을 참조 지도로 올린다. 원격 XYZ와 같은 자리에
+  // 쓰이지만 네트워크를 타지 않는다(TilePackService가 만든 파일).
+  static bool addTilePackBasemap(QgsProject* project, QgsMapCanvas* canvas, const QString& path,
+                                 const QString& name, QString* errorOut);
   // RGB GeoTIFF 용지 흰색을 투명으로. 이미 적용돼 있으면 그대로 둔다.
   static void knockOutRasterPaper(QgsRasterLayer* layer);
   static void knockOutProjectRasterPaper(QgsProject* project);
@@ -209,6 +228,9 @@ public:
                                                 QString* errorOut = nullptr);
   static void applyLegendCrsLabel(QgsMapLayer* layer);
   static bool undoCommittedFeature(QgsVectorLayer* layer, qint64 featureId, QString* errorOut = nullptr);
+  // Deletes every saved feature and writes GPKG. After this, ensureDomainLayer
+  // must reopen the same table empty — legend-only remove leaves the polygons.
+  static bool purgeCommittedFeatures(QgsVectorLayer* layer, QString* errorOut = nullptr);
   // Moves one vertex of a saved feature. Does not commit; caller writes GPKG.
   static bool moveFeatureVertex(QgsVectorLayer* layer, qint64 featureId, int vertex,
                                 double x, double y, QString* errorOut = nullptr);

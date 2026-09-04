@@ -46,6 +46,7 @@ private slots:
   void persistAlignedRaster_keepsSameLayerMapExtentNoRebuild();
   void persistAlignedRaster_jpegGetsMapExtentOn5187();
   void styleAlignedRasterOverlay_keepsInkDarkAfterPaperKnockout();
+  void styleAlignedRasterOverlay_colorGeotiffKeepsNaturalColors();
   void updateAlignOverlay_remapsDestFromMapOnEveryPaint();
 };
 
@@ -360,6 +361,39 @@ void TestGeoref::styleAlignedRasterOverlay_keepsInkDarkAfterPaperKnockout() {
   delete rl;
 }
 
+void TestGeoref::styleAlignedRasterOverlay_colorGeotiffKeepsNaturalColors() {
+  const QString dir = QDir::temp().filePath(QStringLiteral("ka_georef_air_")
+                                            + QString::number(QDateTime::currentMSecsSinceEpoch()));
+  QVERIFY(QDir().mkpath(dir));
+  const QString tif = dir + QStringLiteral("/aerial.tif");
+  QImage img(16, 12, QImage::Format_RGB32);
+  for (int y = 0; y < 12; ++y) {
+    for (int x = 0; x < 16; ++x)
+      img.setPixelColor(x, y, QColor(48 + x * 6, 92 + y * 5, 54 + ((x + y) % 7) * 4));
+  }
+  QVERIFY(img.save(tif, "TIFF"));
+  auto* rl = new QgsRasterLayer(tif, QStringLiteral("aerial"), QStringLiteral("gdal"));
+  QVERIFY2(rl->isValid(), qPrintable(rl->error().message()));
+  GeorefService::styleAlignedRasterOverlay(rl);
+  QCOMPARE(static_cast<int>(rl->blendMode()),
+           static_cast<int>(QPainter::CompositionMode_SourceOver));
+  QVERIFY(rl->brightnessFilter());
+  QVERIFY2(std::abs(rl->brightnessFilter()->contrast()) < 2,
+           "항공 GeoTIFF에 먹선 대비를 주면 색이 바뀜");
+  QVERIFY2(std::abs(rl->brightnessFilter()->brightness()) < 2,
+           "항공 GeoTIFF 밝기를 내리면 다른 색이 됨");
+  QVERIFY2(std::abs(rl->brightnessFilter()->gamma() - 1.0) < 0.05,
+           "항공 GeoTIFF 감마를 바꾸면 색이 바뀜");
+  if (rl->renderer() && rl->renderer()->rasterTransparency()) {
+    const auto list = rl->renderer()->rasterTransparency()->transparentThreeValuePixelList();
+    for (const auto& px : list) {
+      QVERIFY2(!(std::abs(px.red - 255.0) < 1e-6 && px.opacity < 0.5),
+               "항공사진 흰 픽셀을 투명이면 색이 빠짐");
+    }
+  }
+  delete rl;
+}
+
 void TestGeoref::updateAlignOverlay_remapsDestFromMapOnEveryPaint() {
   QFile f(QStringLiteral("src/app/MainWindow.cpp"));
   QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
@@ -375,8 +409,15 @@ void TestGeoref::updateAlignOverlay_remapsDestFromMapOnEveryPaint() {
            "화면 좌표 캐시는 줌하면 화살표가 지적에서 떨어짐");
   QVERIFY2(body.contains(QLatin1String("mapToPixel")),
            "QgsMapMouseEvent와 같은 mapToPixel을 써야 함");
-  QVERIFY2(body.contains(QLatin1String("viewport()->mapTo")),
-           "지도 뷰포트에서 오버레이로 옮겨야 함");
+  // m_alignOverlay는 m_mapSplitter의 자식이라 캔버스·그림뷰의 조상이 아니라
+  // 형제다. QWidget::mapTo는 대상이 조상일 때만 유효하고, 형제를 주면 Qt가
+  // "parent must be in parent hierarchy" 경고를 내고 최상위 창 좌표를 돌려줘
+  // 화살표가 스플리터 원점만큼 통째로 밀린다. 전역 좌표를 거쳐야 한다.
+  QVERIFY2(body.contains(QLatin1String("mapToGlobal")) &&
+               body.contains(QLatin1String("mapFromGlobal")),
+           "뷰포트→오버레이는 전역 좌표를 거쳐야 함(형제 위젯이라 mapTo는 못 씀)");
+  QVERIFY2(!body.contains(QLatin1String("mapTo(m_alignOverlay")),
+           "형제 위젯에 mapTo를 쓰면 화살표가 스플리터 원점만큼 밀린다");
   QVERIFY2(!body.contains(QLatin1String("mapFromScene")),
            "mapToPixel output is viewport pixels; extra scene mapping throws arrows");
   QVERIFY2(!body.contains(QLatin1String("devicePixelRatioF")),

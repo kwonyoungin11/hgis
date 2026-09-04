@@ -22,8 +22,10 @@ class QEvent;
 class QShowEvent;
 class QCloseEvent;
 class QTabWidget;
+class QFrame;
 class ChecklistEngine;
 class KaStatusBar;
+class KaBeginnerRibbon;
 #if KA_HGIS_HAS_QGIS
 class QgsMapCanvas;
 class QgsLayerTreeView;
@@ -41,9 +43,13 @@ class KaImageView;
 class KaAlignLinkOverlay;
 class KaDrawingStudio;
 class KaSectionDrawingStudio;
+class KaTerrain3dStudio;
+class KaTerrain3dLayoutStudio;
 class KaStartPage;
 class KaCoordPointMapTool;
 class KaMeasureMapTool;
+class KaVertexEditTool;
+class KaFoundLocationMark;
 class QSplitter;
 class QListWidget;
 class QTimer;
@@ -70,6 +76,8 @@ public:
   void runChecklistPublic() { runChecklist(); }
   int seedDemoFieldData();
   int lastChecklistErrorCount() const;
+  // 부팅 때 미뤄 둔 배경지도 로딩을 지금 끝낸다(자동 QA·스모크가 결정적으로 돌게).
+  void loadBootBasemaps();
 
 private slots:
   void newSurvey();
@@ -79,6 +87,7 @@ private slots:
   void downloadGeologyMap();
   void downloadRiverMap();
   void saveProject();
+  void saveProjectAs();
   void openProject();
   void startEditSurveyArea();
   void startEditFeaturePoly();
@@ -137,10 +146,14 @@ private slots:
   void addBasemapOsm();
   void addBasemapGoogle();
   void removeSelectedLayers();
+  void clearDrawnFeaturesOfCurrentLayer();
+  // 지금 화면 범위의 배경 타일을 MBTiles로 받아 두고 그 파일로 바꿔 쓴다.
+  // 그 뒤로는 네트워크를 타지 않아 팬·줌이 디스크 속도로 돈다.
+  void saveOfflineTilePack();
   void georefAssistant();
   void showSubToolsAlign();
   void showAbout();
-  void runLocationSearch();
+
   void configureVworldKey();
   void rebuildLayouts();
   void onFileBrowserActivated(QListWidgetItem* item);
@@ -167,7 +180,13 @@ private slots:
   void runSiteBuffer1000();
   void applySnapConfig();
   void openLayoutDesigner();
+  void placeTerrain3dOnSheet();
   void openSectionDesigner();
+  void openTerrain3dStudio();
+  void openTerrain3dLayout();
+  void applyTerrain3dSheetScale(int denominator);
+  void refreshTerrain3dDrapeAndSheet();
+  QString terrain3dSheetPngPath() const;
   void onViewTabCloseRequested(int index);
   void openRecentSurvey(const QString& path);
   void showHomePage();
@@ -190,14 +209,23 @@ private:
   QStringList selectedBrowserFiles() const;
   void loadSurveyLayers(const QString& gpkgOrStub);
   void ensureDefaultBasemaps();
+  // 주제도 아이콘의 눌림 상태를 범례에서 되읽는다. 레이어를 지우거나 체크를
+  // 끄면 아이콘도 꺼져야 한다(범례가 진실).
+  void syncThematicButtons();
+  // 조사구역 안 DEM 표고로 오르막 방위를 낸다(트렌치 장축 = 등고선 직교).
+  TrenchGridGenerator::SlopeAspect terrainAspectForArea(const QByteArray& areaWkb);
   void applyStartupMap();
   void ensureStartupViewReady();
   void scheduleMapDisplayRefresh();
   void bindMapDisplayScreen();
   void setWorkCrs(const QString& authId);
+  void searchLocation(const QString& query);
   void onLocationResults(const QVector<LocationHit>& hits);
   void onLocationFailed(const QString& message);
   void zoomToLocation(const LocationHit& hit);
+  // 검색으로 찾은 자리에 표식을 남긴다. 화면만 옮기면 어디를 찾았는지 모른다.
+  void markFoundLocation(const QgsPointXY& mapPt, const QString& title);
+  void clearFoundLocationMark();
   QJsonObject buildProjectState() const;
   QString rulesPath() const;
   QString vworldApiKeyOrPrompt();
@@ -240,7 +268,9 @@ private:
   KaStatusBar* m_status = nullptr;
   QLabel* m_workHint = nullptr;
   QListWidget* m_workList = nullptr;
-  QLineEdit* m_searchEdit = nullptr;
+  QSplitter* m_leftSplit = nullptr;
+  QFrame* m_layersCard = nullptr;
+  QFrame* m_filesCard = nullptr;
   QListWidget* m_fileBrowser = nullptr;
   QString m_browserPath;
   ChecklistEngine* m_checklist = nullptr;
@@ -303,6 +333,9 @@ private:
   QTimer* m_alignCursorTimer = nullptr;
   QgsMapToolPan* m_panTool = nullptr;
   QgsMapToolSelect* m_selectTool = nullptr;
+  KaVertexEditTool* m_vertexTool = nullptr;
+  KaFoundLocationMark* m_locationMark = nullptr;
+  QString m_locationMarkTitle;
   QgsVectorLayer* m_editLayer = nullptr;
   QgsLayerTreeMapCanvasBridge* m_bridge = nullptr;
   QgsMessageBar* m_messageBar = nullptr;
@@ -310,7 +343,10 @@ private:
   QComboBox* m_scaleCombo = nullptr;
   bool m_scaleUiGuard = false;
   bool m_extentClampGuard = false;
+  QSplitter* m_mainSplit = nullptr;
+  bool m_locationSearchBusy = false;
   bool m_startupViewApplied = false;
+  bool m_basemapBootPending = false;
   bool m_mapScreenBound = false;
   QTimer* m_displayRefresh = nullptr;
   QTimer* m_autosaveTimer = nullptr;
@@ -319,9 +355,12 @@ private:
   bool m_snapEnabled = true;
   KaDrawingStudio* m_drawingStudio = nullptr;
   KaSectionDrawingStudio* m_sectionStudio = nullptr;
+  KaTerrain3dStudio* m_terrain3dStudio = nullptr;
+  KaTerrain3dLayoutStudio* m_terrain3dLayoutStudio = nullptr;
   QTabWidget* m_viewTabs = nullptr;
   KaStartPage* m_startPage = nullptr;
   QWidget* m_mapPage = nullptr;
+  KaBeginnerRibbon* m_ribbon = nullptr;
   QVector<QPair<QString, qint64>> m_committedUndo;
 #endif
 };

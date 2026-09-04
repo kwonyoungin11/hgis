@@ -183,7 +183,9 @@ void KaCoordPointMapTool::activate() {
     QgsSnappingConfig cfg = proj->snappingConfig();
     cfg.setEnabled(true);
     cfg.setMode(Qgis::SnappingMode::AllLayers);
-    cfg.setTypeFlag(Qgis::SnappingType::Vertex);
+    cfg.setTypeFlag(Qgis::SnappingType::Vertex | Qgis::SnappingType::Segment);
+    cfg.setIntersectionSnapping(true);
+    cfg.setSelfSnapping(true);
     cfg.setTolerance(16.0);
     cfg.setUnits(Qgis::MapToolUnit::Pixels);
     proj->setSnappingConfig(cfg);

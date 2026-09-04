@@ -24,6 +24,16 @@ public:
   void setArea(const QByteArray& wkb, double areaM2);
   TrenchGridGenerator::Spec spec() const;
   bool autoFill() const;
+
+  // 조사 종류. 시굴 10% · 표본 2%는 매장유산 조사의 기준 비율이다.
+  enum class SurveyKind { Trial, Sample, Manual };
+  SurveyKind surveyKind() const;
+  double targetPct() const;  // Manual이면 0
+
+  // 지형(DEM) 사면 방위. valid하면 방위 칸을 그 값으로 잠근다.
+  void setTerrainAspect(const TrenchGridGenerator::SlopeAspect& aspect);
+  bool useTerrainAzimuth() const;
+
   QByteArray areaWkb() const { return m_areaWkb; }
   double areaM2() const { return m_areaM2; }
 
@@ -35,8 +45,13 @@ signals:
 
 private:
   void refreshPlan();
+  double effectiveAzimuth() const;
 
   QCheckBox* m_auto = nullptr;
+  QComboBox* m_kind = nullptr;
+  QCheckBox* m_terrain = nullptr;
+  QLabel* m_terrainInfo = nullptr;
+  TrenchGridGenerator::SlopeAspect m_aspect;
   QComboBox* m_size = nullptr;
   QDoubleSpinBox* m_balk = nullptr;
   QSpinBox* m_rows = nullptr;

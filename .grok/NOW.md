@@ -1,5 +1,175 @@
 # NOW — Grok resume (2026-08-22)
 
+## 지금 (2026-09-04 상단 리본 버튼 크기 및 칸 균일화 - 64x58px 고정)
+
+사용자: "ui크기와 칸을 전부 일정하게 하라" (스크린샷 media_1788488013660.png: 버튼마다 제각각인 가로 폭, DEM/토양도의 분할 화살표 칸으로 인한 격자 깨짐).
+원인:
+1. `KaBeginnerRibbon::applyTwoLine`에서 `setSizePolicy(Minimum, Preferred)` 및 `min-width: 58px`만 주고 `max-width`가 없어, 글자 수("사진·캐드 맞출까?", "제출(5179)")에 따라 버튼 가로 폭이 58px~82px로 제각각 늘어남.
+2. `btnDem`과 `btnSoil`에 `MenuButtonPopup`이 적용되어 우측에 회색 분할 화살표 칸(::menu-button)이 생겨 다른 단추들과 모양 및 크기가 불일치함.
+3. `addGroup`에서 그룹명 캡션에 `twoLine`을 적용하여 "배경 지도를 깔아볼까?"만 2줄(높이 32px)로 치솟아 버튼 기준선 높낮이가 어긋남.
+고침:
+1. `KaBeginnerRibbon::applyTwoLine`: 모든 버튼에 `setFixedSize(64, 58)` 및 `QSizePolicy::Fixed` 적용 -> 전 버튼 64×58px 절대 균일화.
+2. `twoLine`: 괄호 `(` 기준 분리("제출\n(5179)") 및 공백 분리 개선.
+3. `KaBeginnerRibbon::addGroup`: 그룹 캡션을 1줄 단일 라벨(`wordWrap=false`)로 통일하고 QSS에서 `min-height: 18px; max-height: 18px`로 수평선 일치.
+4. `MainWindow.cpp`: `m_btnDem`의 `MenuButtonPopup` 제거(일반 원클릭 단추화) 및 우클릭 시 컨텍스트 메뉴로 전환. `m_btnSoil`도 우클릭 메뉴 연결.
+5. `ka-hgis.qss`: `min-width: 64px; max-width: 64px; min-height: 58px; max-height: 58px; text-align: center; font-size: 11px;`, `menu-button`/`menu-arrow`/`menu-indicator` 너비 0 및 테두리 제거로 분할 여백 제거.
+검증: cmake 0 · theme_qss PASS · workflow tests PASS · smoke-quit 0 · publish 2,434,048 bytes (`dist\ka-hgis-portable\ka-hgis.exe`).
+필드: 실행 중인 기존 앱 닫고 바탕화면 아이콘 **고고학 전용 HGIS** 실행 -> 상단 리본 모든 단추 칸의 크기(64×58px)와 그룹 캡션 기준선이 오차 없이 일정한 것 확인. 커밋 금지.
+
+사용자: "바뀐게없는데?" (스크린샷 media_1788486547896.png: DEM 색상만 뜨고 지형 음영 미표시).
+근본 원인:
+1. `LayerOps::ensureDemRelief`에서 `project->addMapLayer(shade, true)` 호출 후, 트리에 재배치하기 위해 `shadeParent->removeChildNode(shadeNode)`를 호출함. QGIS의 `QgsLayerTreeRegistryBridge`가 트리 노드 제거를 감지하여 `QgsProject::removeMapLayers`를 트리거해 `shade` 레이어를 즉시 파괴(delete)해 버림 -> 레이어 트리에 `지형 음영`이 전혀 나타나지 않고 평면 색상 블록만 남는 원인.
+2. 기존에 저장된 프로젝트나 `qa_survey`를 열었을 때(`openSurveyGpkg`, `openProject`), 이미 DEM 레이어가 로드되어 있으면 `ensureDemRelief`가 연결되지 않았음.
+고침:
+1. `LayerOps::ensureDemRelief(project, demLayer)` 수정:
+   - `project->addMapLayer(shade, false)` (addToLegend=false)로 등록하여 루트 노드 자동 생성 및 bridge 삭제 트리거 원천 차단.
+   - `parent->insertLayer(demIdx, shade)`로 DEM 바로 위에 직접 안전하게 삽입(removeChildNode 호출 전면 제거).
+   - `CompositionMode_Multiply` 및 불투명도 0.55로 표고 색상 위에 3D 지형 그림자를 선명하게 자동 합성.
+   - `ka_hgis/omit_sheet_legend = true` 지정으로 도면 조판 범례에는 순수 표고(m) 구간만 깔끔하게 표시.
+2. `MainWindow::openSurveyGpkg` 및 `openProject`에서 기존 DEM 존재 시 `ensureDemRelief` 자동 연결.
+3. `MainWindow::toggleDemMap()`에서 DEM과 `지형 음영` 표시/숨김을 원클릭으로 완벽 동기화 및 상태바 안내 강화.
+4. 신규 단위 테스트 `demRelief_drapesMultiplyOverDem` 작성 및 통과 검증.
+검증: cmake 0 · ctest demRelief_drapesMultiplyOverDem PASS (exit code 0) · DEM 관련 전체 테스트 6종 통과 · smoke-quit 0 · publish 2,432,512 bytes (`dist\ka-hgis-portable\ka-hgis.exe`).
+필드: 실행 중인 기존 앱을 닫고 바탕화면 아이콘 **고고학 전용 HGIS** 실행 -> [수치표고] 버튼 클릭 또는 조사 열기 시, 계단식 평면 색상이 아닌 칼날 같은 3D 능선과 골짜기 음영이 DEM 고도 색상 위에 얹혀진 고정밀 입체 지형과 m 단위 표고 범례를 즉시 확인. 커밋 금지.
+
+
+## 지금 (2026-09-03 포터블 EXE 더블클릭)
+
+사용자: 폴더 안 실행파일을 어디서든 EXE로.
+고침: `applyBundledRuntime`이 EXE 옆 `apps/qgis-dev`를 UTF-8로 잡음. QT_PLUGIN_PATH도 UTF-8. start.bat 불필요.
+검증: cmake 0 · portableExe QTest 0 · smoke 0 · publish 2422272 → dist/바탕/L: `ka-hgis-portable\ka-hgis.exe`.
+필드: 포터블 폴더의 **ka-hgis.exe** 더블클릭. 커밋 금지.
+
+## 지금 (2026-09-03 입체지형 리본 삭제·포터블)
+
+사용자: 입체지형 포기삭제. UI 칸 라운드. 지역 겹침 금지. 바탕화면+L: 포터블(다른 PC).
+고침: 산출 리본에서 입체지형 뺌. 리본 단추·지역칩 라운드 테두리+간격. make-portable → 바탕 `ka-hgis-portable` + `L:\ka-hgis-portable`.
+검증: cmake 0 · theme_qss PASS · smoke 0 · verify-portable 0.
+필드: 옛 창 닫고 아이콘 또는 L:\ka-hgis-portable\start.bat. 커밋 금지.
+
+## 지금 (2026-09-03 입체지형 재출력 detach)
+
+리뷰: 두 번째 도면출력에서 뷰가 붙은 채 `replaceSheet`/`removeLayout` → 크래시.
+고침: `placeTerrain3dOnSheet`가 `buildSheet` 전에 `detachSheet` (단면 rebuild와 같음).
+검증: cmake 0 · terrain_3d_engine PASS · publish 2421760.
+필드: 옛 창 닫고 아이콘 → 입체지형 도면출력을 두 번. 커밋 금지.
+
+## 지금 (2026-09-03 Cursor 자동 규칙·훅·리뷰)
+
+사용자: create-rule/skill/subagent/hook. 해당 시 자동판단·자동작동. 코드 끝나면 훅 + /review(보안) 자동.
+만듦: `.cursor/rules` 3개, `auto-security-review` 스킬, agents 3, `.cursor/hooks.json` (afterFileEdit→pending, stop followup 보안리뷰, force-push/reset 차단).
+검증: 훅 스크립트 stdin JSON 스모크. cmake 해당 없음(규칙/훅만). 커밋 금지.
+
+## 지금 (2026-09-03 입체지형 조판 레이어·삭제·축척)
+
+사용자: 레이어창 없음. 조사지역이 입체에 보이나. 노란 막대. Delete/Ctrl+Z 안 됨. 축척 칩이 자를 그림에 맞춤.
+고침: 3D 조판 왼쪽 `layersCard`+레이어트리. `survey_area` 드레이프 맨 위. 더미 `t3d_extent` 투명+그림 Stretch. Delete/Ctrl+Z(메인창 Ctrl+Z는 조판으로 전달). 축척 칩 → 카메라 거리 → PNG 다시 → `replacePicture`.
+검증: cmake 0 · terrain_3d_engine PASS · theme_qss PASS · smoke 0 · publish 2421760.
+필드: 옛 창 닫고 아이콘 → 조사구역 그리고 입체지형 → 도면출력. 왼쪽 레이어, 노란 막대 없음, 범례 Delete, 축척 칩은 그림이 줌.
+커밋 금지.
+
+## 지금 (2026-09-03 입체지형 마우스·조판카드·레이어)
+
+사용자: 마우스 Y 반전. 3D 조판에도 무엇을넣을까/방위/도명. 범례는 넣기 전 숨김. 지질·토양·조사구역을 입체에도. 조판만 2D/3D 분리.
+고침: pitch `+ d.y()`. `KaTerrain3dLayoutStudio` 2D 카드. `ensureLegend`만 범례. 캔버스 레이어+지질/토양/survey_area 드레이프.
+검증: cmake 0 · terrain 28 PASS · theme_qss PASS · smoke 0 · publish 2405888.
+필드: 옛 창 닫고 아이콘. 커밋 금지.
+
+## 지금 (2026-09-03 입체지형 흰 용지·2D 조판)
+
+사용자: 배경 흰색. 2D 조판과 같은 구성. 어둡고 물결 잔상.
+고침: 렌더 clear #FFF. 위성은 약한 정점 음영(0.86+0.14). 높이 틴트 제거. `terrain3d_sheet`는 `standardSheetChrome`.
+검증: cmake 0 · terrain_3d_engine 24 PASS · theme_qss PASS · smoke 0 · publish 2381824.
+후속: 범례 z를 PNG 위로 (`legend->setZValue(pic+1)`).
+필드: 옛 창 닫고 아이콘 → 입체지형 → 화면을 입체로 → 도면출력. 커밋 금지.
+
+## 지금 (2026-09-03 입체지형 조판 분리)
+
+사용자: 입체 때 레이어·파일함 삭제. DEM열기/지도DEM/위성입히기/사진파일 삭제. 도면출력이 2D 조판과 겹침 → 3D 조판 따로(범례·방위·축척).
+고침: 입체지형 왼쪽 칸·수동 버튼 제거. `terrain3d_sheet` + `KaTerrain3dLayoutStudio`. `user_sheet`에 안 올림.
+검증: cmake 0 · terrain_3d_engine 21 PASS · theme_qss PASS · smoke 0 · publish 2378240.
+필드: 옛 창 닫고 아이콘 → 지도에서 위치 → 입체지형 → 화면을 입체로 → 도면출력. 커밋 금지.
+
+## 지금 (2026-09-03 조판 보기칸)
+
+사용자: 이칸(보기)을 삭제하라고. 마우스로 되는 거잖아.
+고침: 조판 `studioToolbar`/「보기」 리본 제거. 휠·드래그·열 때 `zoomPaperVisible`은 유지.
+필드: 옛 창 닫고 아이콘 → 도면만들기. 위 보기 칸 없어야 함. 커밋 금지.
+
+## 지금 (2026-09-03 검수칸·두 줄)
+
+사용자: 도면검수 칸 삭제. PDF는 범례창과 중복. 글자 가림 → 두 줄.
+고침: checkDock 제거. 조판 위 PDF·항목옮기기 중복 제거. 리본 `twoLine`.
+필드: 옛 창 닫고 아이콘. 커밋 금지.
+
+## 지금 (2026-09-03 초보자 리본)
+
+사용자: 기능은 두고 화면 전체를 초보자용으로. 조판도 기능 유지·말투만.
+고침: `KaBeginnerRibbon` 6그룹. 질문형 라벨. 그리기 둘째 줄. 파일함 끌어넣기 안내. 조판 보기/산출 리본 + PDF로 내보낼까?.
+필드: 옛 창 닫고 아이콘. 커밋 금지.
+
+## 지금 (2026-09-03 입체지형 = 현재 화면)
+
+사용자: DEM을 직접 넣는 게 아님. 지금 보이는 지도 화면을 고화질 입체로.
+고침: 탭 show → `tryAutoFill`이 캔버스 extent를 자름(로컬 DEM 또는 Copernicus). Google 3072.
+렌더: 바리센트릭 부호가 반대여서 삼각형이 전부 잘림 → 가중치 a0/a1/a2로 고침(위성 무늬가 보여야 함).
+후속: 캔버스 extent가 있으면 `loadDemPath`가 전체 도엽 `loadDem`으로 떨어지지 않음.
+필드: 옛 창 닫고 아이콘 → 지도에서 조사 위치로 줌 → **입체지형**. 커밋 금지.
+
+## 지금 (2026-09-03 입체지형 조판)
+
+사용자: 입체지형 도면출력도 조판으로.
+고침: PNG 저장 분기 제거. `placeTerrain3dOnSheet` → `user_sheet`에 `ka_terrain3d` 그림. 첫 조판 타이머가 DEM 범위를 덮지 않음(`m_holdTerrainExtent`). 그림은 조사 폴더 `입체지형_조판.png`.
+필드: 옛 창 닫고 아이콘 → 입체지형 → DEM → 도면출력 → 레이아웃 탭.
+커밋 금지.
+
+## 지금 (2026-09-03 입체지형 후속)
+
+후속: 타일 네트워크·네 꼭짓점·QFrame 카드 착륙. 리뷰 잔여: Google XYZ는 탭 소유, `addMapLayer` 안 함(지도·조판 누수 방지).
+필드: 옛 창 닫고 아이콘 → 입체지형 → DEM. 커밋 금지.
+
+## 지금 (2026-09-03 입체지형 작업공간)
+
+사용자: 3D에도 레이어·파일창. DEM 후 위성입히기 무반응. Google 고해상 자동. 도면출력은 입체지형 전용(범례·자·방향·CRS). 블렌더 기억 삭제. hgis 밖으로 나가지 말 것.
+원인: 위성은 지도 레이어만 캡처·타일 미완료면 아무 변화 없음. 2D 도면출력과 같은 버튼.
+고침: 탭 안 레이어창+파일함. DEM 열면 Google XYZ(범례 없이) 자동 입힘. 도면출력=입체지형 도면 PNG. `.cursor` 블렌더 규칙·MCP 제거.
+필드: 옛 창 닫고 아이콘 → 입체지형 → DEM → 위성이 입혀져야 함.
+커밋 금지.
+
+## 지금 (2026-09-03 입체지형 3D 탭)
+
+사용자: DEM 넣고 위성으로 3D, 전용 탭, 높이 입체, 축척자·방위가 같이 이미지 출력.
+원인: 지질 2.5D hillshade는 평면 음영. OSGeo `qgis_3d.lib` 없음. Qgs3D 금지.
+고침: `Terrain3dService` 투시 메시 + `KaTerrain3dStudio` **입체지형** 탭. DEM 참조(도메인/5179 아님). 위성은 프로젝트 레이어 오프스크린 또는 사진 파일. 저장 PNG에 축척자(m)+N.
+후속(리뷰): 축척자=줌 지상폭, N=yaw+격자북, 지도 DEM은 이름 우선·애매하면 안 고름.
+검증: cmake 0 · terrain_3d_engine PASS · smoke · publish.
+필드: 옛 창 닫고 아이콘 → **입체지형**.
+커밋 금지.
+
+## 지금 (2026-09-03 조판 좌표점)
+
+사용자: 조판에서 좌표점 지우기/취소 없음. 축척 바꾸면 점이 다른 곳으로 감. 자석 되나?
+원인: 콜아웃이 용지 mm에 고정. Ctrl+Z는 조각 하나만. 우클릭은 지도 조정 메뉴. 맵 밖 클릭도 점을 찍음. 자석은 메인캔버스 snapToMap(mm를 픽셀로).
+고침: 땅 XY 저장 후 축척·이동 때 다시 앉힘. 우클릭/Delete/Ctrl+Z=마지막 점. 맵 칸만. 조사 벡터 꼭짓점·선 자석. 지적 WMS는 자석 불가.
+검증: cmake 0 · layoutCoord QTest PASS · smoke 0 · publish 2270208.
+필드: 옛 창 닫고 아이콘 → 도면만들기 → 좌표점. 커밋 금지.
+
+## 지금 (2026-09-03 지운 면 재출현 / 도형수정 / 맞추기 색)
+
+사용자: 레이어에서 지운 폴리곤이 조사구역 만들 때 전부 다시 나옴. 도형수정 자석 안 붙음·근처 점 인식 안 됨. 선 우클릭에 점추가/점삭제 없음. 항공 GeoTIFF 맞추기 이동 시 색이 바뀜.
+원인: 그리기는 GPKG 즉시 커밋. 레이어만 빼면 표가 남고 `ensureDomainLayer`가 다시 연다. `KaVertexEditTool`은 `snapToMap` 없음·우클릭이 즉시 점삭제. `styleAlignedRasterOverlay`가 항공사진에도 Multiply+대비+흰 픽셀 투명을 줌.
+고침: `purgeCommittedFeatures` + 다시 열 때 `reloadData`. 자석·히트 20px. 선 우클릭 메뉴 점추가/점삭제. 흰 종이 스캔만 먹선, GeoTIFF 원색 SourceOver.
+검증: cmake 0 · georef_engine PASS · purge+vertex QTest PASS · smoke 0 · publish 2255360.
+후속: 도형수정 중 지도 우클릭 메뉴를 막아 점추가/점삭제가 가려지지 않게 함. cmake 0 · vertex QTest 0 · smoke 0 · publish 2255360.
+필드: 옛 창 닫고 아이콘. 커밋 금지. PR 없음(autopilot 해당 없음).
+
+## 지금 (2026-09-03 지질도 입체 2.5D)
+
+사용자: 바뀐 게 없음. 맞음 — 음영이 안 만들어져 예전 평면 지질도만 보임.
+고침: `지질 음영`을 지질 색 **위**에 Multiply 0.48. 로컬 DEM hillshade 없으면 Esri World_Hillshade XYZ(이름 지질 음영, 토글로 같이 숨김). 지질 색은 SourceOver. 산이 솟는 3D 아님.
+검증: cmake 0 · geologyRelief PASS · smoke 0 · publish 2202624.
+필드: 옛 창 닫고 아이콘 → 이미 있는 지질도를 끄고 다시. 그때 음영이 생김. 커밋 금지.
+
 ## 지금 (2026-09-02 맞추기 줌 화살표 + 먹선)
 
 줌 안 하면 번호·화살표 정상. 오른쪽 지적만 줌/팬하면 화면 좌표 캐시가 지적에서 떨어짐. 이동은 mapX/mapY라 사진은 맞음.

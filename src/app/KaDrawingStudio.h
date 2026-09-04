@@ -6,7 +6,9 @@
 #include <QSize>
 #include <QString>
 #include <QVector>
+#include <qgscoordinatereferencesystem.h>
 #include <qgspointxy.h>
+#include <qgsrectangle.h>
 
 class QAction;
 class QCheckBox;
@@ -53,6 +55,9 @@ public:
   static bool promptPaper(QWidget* parent, double* widthMm, double* heightMm);
   void resetPaper(double widthMm, double heightMm);
   void refreshMapFromProject();
+  // 입체지형 3D 그림을 맵 칸에 올리고, 축척·방위는 DEM 범위에 맞춘다.
+  void placeTerrain3dPicture(const QString& pngPath, const QgsRectangle& groundExtent,
+                             const QgsCoordinateReferenceSystem& crs);
   void importMapCoordCallouts(const QVector<QgsPointXY>& pts, const QVector<QString>& letters,
                               const QVector<QString>& texts, const QgsGeometry& frame);
   void applyImportedCoordCallouts();
@@ -65,6 +70,11 @@ public slots:
   void centerSurveyInMap();
   void centerOnMapCanvas();
   void beginPlaceCoordPoint();
+  void undoLastCoordCallout();
+  void endPlaceCoordPoint();
+  bool isPlacingCoordPoint() const;
+  void deleteSelectedItems();
+  void undoLastChange();
 
 private slots:
   void beginDrawMapFrame();
@@ -83,12 +93,11 @@ private slots:
   void applyOnScreenScale();
   void applyLegendSettings();
   void onLayoutSelectionChanged(QgsLayoutItem* item);
-  void deleteSelectedItems();
-  void undoLastChange();
   void syncScaleDecorations();
   void flushHeavyScaleSync();
   void focusGridSettings();
   void placeCoordCallout(const QPointF& layoutPt);
+  void relayoutCoordCallouts();
   void panLayoutMapTo(const QgsPointXY& center);
   void updateCoordFrame();
 
@@ -175,6 +184,9 @@ private:
   QString m_pendingScaleBarStyle;
   QStringList m_placeUndo;
   bool m_adjustingMap = false;
+  bool m_holdTerrainExtent = false;
+  QgsRectangle m_terrainGroundExtent;
+  QgsCoordinateReferenceSystem m_terrainCrs;
   bool m_paperFitPending = true;
   bool m_keepPaperCentered = true;
   bool m_mmbPanning = false;

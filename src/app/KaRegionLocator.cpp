@@ -1,7 +1,10 @@
 #include "KaRegionLocator.h"
 #include "core/KoreaRegionCatalog.h"
 
+#include <QAbstractButton>
 #include <QButtonGroup>
+#include <QEvent>
+#include <QKeyEvent>
 #include <QComboBox>
 #include <QFont>
 #include <QSignalBlocker>
@@ -16,16 +19,18 @@
 
 KaRegionLocator::KaRegionLocator(QWidget* parent) : QWidget(parent) {
   setObjectName(QStringLiteral("regionLocator"));
-  setMinimumWidth(360);
-  setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  setMinimumWidth(230);
+  setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
   setToolTip(QStringLiteral("시·도를 누르면 시·동·번지로 찾습니다"));
 
   auto* grid = new QGridLayout(this);
-  grid->setContentsMargins(6, 4, 6, 4);
-  grid->setHorizontalSpacing(4);
-  grid->setVerticalSpacing(3);
+  grid->setContentsMargins(1, 1, 1, 1);
+  grid->setHorizontalSpacing(2);
+  grid->setVerticalSpacing(2);
   m_group = new QButtonGroup(this);
-  m_group->setExclusive(true);
+  // 배타 그룹이면 한 번 누른 칩을 놓을 수가 없어 취소가 막힌다.
+  // 규칙 하나로 통일: 팝업 열림 == 칩 눌림. 같은 칩을 다시 누르면 닫고 해제.
+  m_group->setExclusive(false);
 
   const QStringList labels = {QStringLiteral("인천"), QStringLiteral("서울"), QStringLiteral("경기"),
                               QStringLiteral("강원"), QStringLiteral("충북"), QStringLiteral("경북"),
@@ -39,20 +44,50 @@ KaRegionLocator::KaRegionLocator(QWidget* parent) : QWidget(parent) {
     b->setText(labels.at(i));
     b->setCheckable(true);
     b->setToolButtonStyle(Qt::ToolButtonTextOnly);
-    b->setFixedHeight(24);
-    b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    b->setAutoRaise(false);
+    b->setFixedHeight(22);
+    b->setMinimumWidth(32);
+    b->setMaximumWidth(38);
+    b->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     b->setCursor(Qt::PointingHandCursor);
     m_group->addButton(b, i);
-    grid->addWidget(b, i / 9, i % 9);
+    grid->addWidget(b, i / 6, i % 6);
     const QString sido = KoreaRegionCatalog::canonicalSido(labels.at(i));
-    connect(b, &QToolButton::clicked, this, [this, sido]() { openAddressPopup(sido); });
+    connect(b, &QToolButton::clicked, this, [this, b, sido]() {
+      if (m_activeChip == b && m_popup && m_popup->isVisible()) {
+        closePanel();
+        return;
+      }
+      for (QAbstractButton* other : m_group->buttons())
+        if (other != b) other->setChecked(false);
+      b->setChecked(true);
+      m_activeChip = b;
+      openAddressPopup(sido);
+    });
   }
 }
 
-QSize KaRegionLocator::sizeHint() const { return QSize(420, 60); }
+QSize KaRegionLocator::sizeHint() const { return QSize(234, 74); }
 
-void KaRegionLocator::hidePanel() {
+void KaRegionLocator::closePanel() {
   if (m_popup) m_popup->hide();
+  if (m_activeChip) m_activeChip->setChecked(false);
+  m_activeChip = nullptr;
+}
+
+// Esc로 닫고, 팝업이 포커스를 잃어도(다른 창·지도를 누름) 닫는다.
+bool KaRegionLocator::eventFilter(QObject* watched, QEvent* event) {
+  if (m_popup && watched == m_popup) {
+    if (event->type() == QEvent::KeyPress) {
+      if (static_cast<QKeyEvent*>(event)->key() == Qt::Key_Escape) {
+        closePanel();
+        return true;
+      }
+    } else if (event->type() == QEvent::WindowDeactivate) {
+      closePanel();
+    }
+  }
+  return QWidget::eventFilter(watched, event);
 }
 
 void KaRegionLocator::openAddressPopup(const QString& sido) {
@@ -99,12 +134,30 @@ void KaRegionLocator::openAddressPopup(const QString& sido) {
     m_lot->setInputMethodHints(Qt::ImhNone);
     auto* go = new QPushButton(QStringLiteral("찾기"), m_popup);
     go->setDefault(true);
+    // 잘못 눌렀을 때 빠져나갈 길. Esc·바깥 클릭·같은 칩 다시 누르기와 같은 동작.
+    auto* cancel = new QPushButton(QStringLiteral("취소"), m_popup);
+    cancel->setObjectName(QStringLiteral("regionCancel"));
+    cancel->setAutoDefault(false);
     row->addWidget(m_city, 0);
     row->addWidget(m_dong, 1);
     row->addWidget(m_lot, 0);
     row->addWidget(go, 0);
-    col->addWidget(m_sidoLabel);
+    row->addWidget(cancel, 0);
+    auto* titleRow = new QHBoxLayout();
+    titleRow->setSpacing(6);
+    titleRow->addWidget(m_sidoLabel, 1);
+    auto* closeX = new QToolButton(m_popup);
+    closeX->setObjectName(QStringLiteral("regionClose"));
+    closeX->setText(QStringLiteral("✕"));
+    closeX->setToolTip(QStringLiteral("닫기 (Esc)"));
+    closeX->setCursor(Qt::PointingHandCursor);
+    closeX->setAutoRaise(true);
+    titleRow->addWidget(closeX, 0);
+    col->addLayout(titleRow);
     col->addLayout(row);
+    m_popup->installEventFilter(this);
+    connect(closeX, &QToolButton::clicked, this, &KaRegionLocator::closePanel);
+    connect(cancel, &QPushButton::clicked, this, &KaRegionLocator::closePanel);
     connect(go, &QPushButton::clicked, this, &KaRegionLocator::emitSearch);
     connect(m_lot, &QLineEdit::returnPressed, this, &KaRegionLocator::emitSearch);
     connect(m_dong->lineEdit(), &QLineEdit::returnPressed, this, &KaRegionLocator::emitSearch);
@@ -147,6 +200,6 @@ void KaRegionLocator::emitSearch() {
   const QString q = KoreaRegionCatalog::composeAddress(
       m_sido, city, dong, m_lot ? m_lot->text() : QString());
   if (q.isEmpty()) return;
-  hidePanel();
+  closePanel();
   emit searchRequested(q);
 }

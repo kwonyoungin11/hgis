@@ -64,6 +64,9 @@ std::vector<Cell> build(const Spec& spec) {
 
 namespace {
 
+// 가장자리에서 잘린 트렌치가 이보다 짧으면 조사에 쓸모가 없어 버린다.
+constexpr double kMinTrimLen = 4.0;
+
 OGRGeometry* geomFromWkb(const QByteArray& wkb) {
   if (wkb.isEmpty())
     return nullptr;
@@ -79,6 +82,21 @@ QByteArray wkbFromGeom(OGRGeometry* g) {
   out.resize(static_cast<int>(g->WkbSize()));
   g->exportToWkb(wkbNDR, reinterpret_cast<unsigned char*>(out.data()));
   return out;
+}
+
+// 폴리곤/멀티폴리곤의 모든 꼭짓점을 훑는다(교차 결과의 국소 좌표 범위를 잴 때).
+template <typename F>
+void forEachVertex(const OGRGeometry* g, F&& fn) {
+  if (!g) return;
+  const OGRwkbGeometryType t = wkbFlatten(g->getGeometryType());
+  if (t == wkbPolygon) {
+    const auto* poly = g->toPolygon();
+    for (const OGRLinearRing* ring : *poly)
+      for (const OGRPoint& pt : *ring) fn(pt.getX(), pt.getY());
+  } else if (t == wkbMultiPolygon || t == wkbGeometryCollection) {
+    const auto* coll = g->toGeometryCollection();
+    for (const OGRGeometry* part : *coll) forEachVertex(part, fn);
+  }
 }
 
 }  // namespace
@@ -225,22 +243,75 @@ std::vector<Cell> buildInArea(const Spec& spec, const QByteArray& areaWkb) {
         ring.addPoint(p0.first, p0.second);
         OGRPolygon poly;
         poly.addRing(&ring);
+        double keepV0 = v0;
+        double keepLen = len;
         if (centroidOk) {
           OGRPoint mid((p0.first + p2.first) * 0.5, (p0.second + p2.second) * 0.5);
           if (!area->Contains(&mid))
             continue;
         } else if (!area->Contains(&poly)) {
-          continue;
+          // 경계에 걸치면 통째로 버리지 않는다. 그러면 가장자리가 비어 배치가
+          // 고르지 않다. 폭 2 m는 그대로 두고 길이만 잘라 구역 안에 넣는다.
+          if (!area->Intersects(&poly))
+            continue;
+          OGRGeometry* inter = area->Intersection(&poly);
+          if (!inter || inter->IsEmpty()) {
+            if (inter) OGRGeometryFactory::destroyGeometry(inter);
+            continue;
+          }
+          double loV = 1e300, hiV = -1e300;
+          forEachVertex(inter, [&](double wx, double wy) {
+            const double lv = toLocal(wx, wy).second;
+            loV = std::min(loV, lv);
+            hiV = std::max(hiV, lv);
+          });
+          OGRGeometryFactory::destroyGeometry(inter);
+          loV = std::max(loV, v0);
+          hiV = std::min(hiV, v0 + len);
+          double cut = hiV - loV;
+          if (!(cut >= kMinTrimLen) || cut > len)
+            continue;
+          // 교차 상자는 모서리에서 조금 넘칠 수 있다. 들어갈 때까지 양끝을 줄인다.
+          bool fits = false;
+          for (int attempt = 0; attempt < 4 && cut >= kMinTrimLen; ++attempt) {
+            const auto q0 = world(u0, loV);
+            const auto q1 = world(u0 + w, loV);
+            const auto q2 = world(u0 + w, loV + cut);
+            const auto q3 = world(u0, loV + cut);
+            OGRLinearRing tr;
+            tr.addPoint(q0.first, q0.second);
+            tr.addPoint(q1.first, q1.second);
+            tr.addPoint(q2.first, q2.second);
+            tr.addPoint(q3.first, q3.second);
+            tr.addPoint(q0.first, q0.second);
+            OGRPolygon tp;
+            tp.addRing(&tr);
+            if (area->Contains(&tp)) {
+              fits = true;
+              break;
+            }
+            const double shrink = std::max(0.25, cut * 0.05);
+            loV += shrink * 0.5;
+            cut -= shrink;
+          }
+          if (!fits || cut < kMinTrimLen)
+            continue;
+          keepV0 = loV;
+          keepLen = cut;
         }
+        const auto k0 = world(u0, keepV0);
+        const auto k1 = world(u0 + w, keepV0);
+        const auto k2 = world(u0 + w, keepV0 + keepLen);
+        const auto k3 = world(u0, keepV0 + keepLen);
         Cell cell;
         cell.name = spec.namePrefix + QString::number(n++);
         cell.width = w;
-        cell.length = len;
-        cell.ring[0] = p0;
-        cell.ring[1] = p1;
-        cell.ring[2] = p2;
-        cell.ring[3] = p3;
-        cell.ring[4] = p0;
+        cell.length = keepLen;
+        cell.ring[0] = k0;
+        cell.ring[1] = k1;
+        cell.ring[2] = k2;
+        cell.ring[3] = k3;
+        cell.ring[4] = k0;
         got.push_back(cell);
       }
     }
@@ -254,7 +325,58 @@ std::vector<Cell> buildInArea(const Spec& spec, const QByteArray& areaWkb) {
   return out;
 }
 
-RatioFill buildForTargetRatio(const QByteArray& areaWkb, double targetPct, double width) {
+SlopeAspect upslopeAspect(const std::vector<ElevSample>& samples, double minSlopePct) {
+  SlopeAspect out;
+  if (samples.size() < 3)
+    return out;
+
+  // 표본에 z = a·x + b·y + c 평면을 최소제곱으로 맞춘다. 중심을 빼서 좌표가
+  // 큰 5186/5187 미터값이어도 정규방정식이 수치적으로 무너지지 않게 한다.
+  double mx = 0.0, my = 0.0, mz = 0.0;
+  for (const ElevSample& p : samples) {
+    mx += p.x;
+    my += p.y;
+    mz += p.z;
+  }
+  const double n = static_cast<double>(samples.size());
+  mx /= n;
+  my /= n;
+  mz /= n;
+
+  double sxx = 0.0, sxy = 0.0, syy = 0.0, sxz = 0.0, syz = 0.0;
+  for (const ElevSample& p : samples) {
+    const double dx = p.x - mx;
+    const double dy = p.y - my;
+    const double dz = p.z - mz;
+    sxx += dx * dx;
+    sxy += dx * dy;
+    syy += dy * dy;
+    sxz += dx * dz;
+    syz += dy * dz;
+  }
+  const double det = sxx * syy - sxy * sxy;
+  if (std::abs(det) < 1e-9)
+    return out;  // 표본이 한 줄로 서 있으면 기울기를 못 정한다.
+
+  const double a = (sxz * syy - syz * sxy) / det;  // dz/dx
+  const double b = (syz * sxx - sxz * sxy) / det;  // dz/dy
+
+  const double grad = std::hypot(a, b);
+  out.slopePct = grad * 100.0;
+  if (out.slopePct < minSlopePct)
+    return out;  // 평지 — 방향을 정할 근거가 없다.
+
+  // (a, b)는 오르막을 가리킨다. 방위는 북(+y) 기준 시계 방향이므로 atan2(동, 북).
+  double az = std::atan2(a, b) * 180.0 / M_PI;
+  if (az < 0.0)
+    az += 360.0;
+  out.azimuthDeg = az;
+  out.valid = true;
+  return out;
+}
+
+RatioFill buildForTargetRatio(const QByteArray& areaWkb, double targetPct, double width,
+                              double azimuthDeg) {
   RatioFill best;
   const double w = std::abs(width);
   if (areaWkb.isEmpty() || !(w > 0.0) || !(targetPct > 0.0))
@@ -271,7 +393,7 @@ RatioFill buildForTargetRatio(const QByteArray& areaWkb, double targetPct, doubl
 
   Spec s;
   s.trenchWidth = w;
-  s.azimuthDeg = 0.0;
+  s.azimuthDeg = azimuthDeg;
   s.namePrefix = targetPct <= 3.5 ? QStringLiteral("Sp-") : QStringLiteral("Tr-");
 
   double bestScore = 1e300;
@@ -293,6 +415,7 @@ RatioFill buildForTargetRatio(const QByteArray& areaWkb, double targetPct, doubl
         best.length = len;
         best.balk = balk;
         best.ratioPct = pct;
+        best.azimuthDeg = azimuthDeg;
       }
       if (bestScore < 0.12)
         return best;

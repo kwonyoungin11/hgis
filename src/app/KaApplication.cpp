@@ -19,6 +19,7 @@
 #include <QCoreApplication>
 #include <QToolBar>
 #include <QToolButton>
+#include <QLabel>
 #include <QDockWidget>
 #include <QAction>
 #include <QTreeView>
@@ -34,6 +35,7 @@
 #include <QPen>
 #include <QEventLoop>
 #include <QThread>
+#include <QTimer>
 #include <functional>
 #include <cstdlib>
 #include <QFileInfo>
@@ -57,6 +59,7 @@
 #include <qgsapplication.h>
 #include <qgsproviderregistry.h>
 #include <qgsnetworkaccessmanager.h>
+#include <QNetworkDiskCache>
 #include <QUrl>
 #include <qgssettings.h>
 #include <qgslayertreeview.h>
@@ -162,9 +165,11 @@ static void applyBundledRuntime() {
   const QString qtPlug = app.filePath(QStringLiteral("apps/Qt6/plugins"));
   if (QDir(qtPlug).exists()) {
     QCoreApplication::addLibraryPath(qtPlug);
-    if (qgetenv("QT_PLUGIN_PATH").isEmpty())
-      qputenv("QT_PLUGIN_PATH", QFile::encodeName(qtPlug));
+    qputenv("QT_PLUGIN_PATH", qtPlug.toUtf8());
   }
+  const QString qgisPlugDir = QDir(qgis).filePath(QStringLiteral("plugins"));
+  if (QDir(qgisPlugDir).exists())
+    qputenv("QGIS_PLUGIN_PATH", qgisPlugDir.toUtf8());
   const QString qgisPlug = QDir(qgis).filePath(QStringLiteral("qtplugins"));
   if (QDir(qgisPlug).exists())
     QCoreApplication::addLibraryPath(qgisPlug);
@@ -274,9 +279,14 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
       const QString t = btn->text().trimmed();
       if (!t.isEmpty()) toolbarTexts << t;
     }
+    for (auto* lab : tb->findChildren<QLabel*>()) {
+      if (!lab) continue;
+      const QString t = lab->text().trimmed();
+      if (!t.isEmpty()) toolbarTexts << t;
+    }
     const QStringList need = {
-      QStringLiteral("새조사"), QStringLiteral("열기"), QStringLiteral("저장"),
-      QStringLiteral("그리기"), QStringLiteral("배경"), QStringLiteral("도면만들기")
+      QStringLiteral("만들까?"), QStringLiteral("열까?"), QStringLiteral("저장"),
+      QStringLiteral("그려볼까?"), QStringLiteral("배경"), QStringLiteral("도면")
     };
     QStringList missing;
     for (const QString& n : need) {
@@ -442,13 +452,17 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
       for (auto* btn : tb->findChildren<QToolButton*>()) {
         if (btn && btn->text().contains(needle)) return true;
       }
+      for (auto* lab : tb->findChildren<QLabel*>()) {
+        if (lab && lab->text().contains(needle)) return true;
+      }
       return false;
     };
-    all = step(QStringLiteral("toolbar_new_action"), hasText(QStringLiteral("새조사"))) && all;
-    all = step(QStringLiteral("toolbar_draw_toggle"), hasText(QStringLiteral("그리기"))) && all;
+    all = step(QStringLiteral("toolbar_new_action"), hasText(QStringLiteral("만들까?"))) && all;
+    all = step(QStringLiteral("toolbar_draw_toggle"), hasText(QStringLiteral("그려볼까?"))) && all;
     all = step(QStringLiteral("toolbar_basemap_toggle"), hasText(QStringLiteral("배경"))) && all;
-    all = step(QStringLiteral("toolbar_submit_toggle"), hasText(QStringLiteral("도면만들기"))) && all;
-    all = step(QStringLiteral("toolbar_measure_tape"), hasText(QStringLiteral("줄자"))) && all;
+    all = step(QStringLiteral("toolbar_submit_toggle"), hasText(QStringLiteral("도면"))) && all;
+    all = step(QStringLiteral("toolbar_measure_tape"),
+               hasText(QStringLiteral("거리")) || hasText(QStringLiteral("재볼까?"))) && all;
     all = step(QStringLiteral("toolbar_dem"), hasText(QStringLiteral("DEM"))) && all;
     bool demClasses = false;
     if (auto* btnDem = w->findChild<QToolButton*>(QStringLiteral("btnDem"))) {
@@ -518,8 +532,8 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
     QCoreApplication::processEvents();
     dock = w->findChild<QDockWidget*>(QStringLiteral("checkDock"));
     const bool shown = dock && dock->isVisible();
-    all = step(QStringLiteral("checklist_dock_shows_on_run"), shown,
-               shown ? QStringLiteral("shown") : QStringLiteral("dock missing/hidden")) &&
+    all = step(QStringLiteral("checklist_dock_stays_away"), !shown,
+               !shown ? QStringLiteral("ok") : QStringLiteral("checkDock still open")) &&
           all;
 
     const int errBeforeSeed = w->lastChecklistErrorCount();
@@ -615,14 +629,20 @@ static QPixmap makeFieldSplashPixmap() {
   return pm;
 }
 
-static void holdSplash(QSplashScreen* splash, QCoreApplication* app, int ms) {
-  if (!splash || !app || ms <= 0) return;
-  QElapsedTimer hold;
-  hold.start();
-  while (hold.elapsed() < ms) {
-    app->processEvents(QEventLoop::AllEvents, 40);
-    QThread::msleep(20);
+// 저작권·제작처를 읽을 시간은 주되 이벤트 루프는 막지 않는다. 예전 구현은
+// msleep(20) 루프로 4.5초를 통째로 태워, 그 동안 배경지도 로딩도 첫 렌더도
+// 진행되지 못했다. 타이머로 걷으면 같은 시간이 실제 준비 작업에 쓰인다.
+static void holdSplashThenFinish(QSplashScreen* splash, QWidget* mainWindow, int ms) {
+  if (!splash) return;
+  if (ms <= 0) {
+    splash->finish(mainWindow);
+    splash->deleteLater();
+    return;
   }
+  QTimer::singleShot(ms, splash, [splash, mainWindow]() {
+    splash->finish(mainWindow);
+    splash->deleteLater();
+  });
 }
 
 int KaApplication::run(int argc, char** argv) {
@@ -709,6 +729,17 @@ int KaApplication::run(int argc, char** argv) {
   QgsApplication::setPkgDataPath(prefix);
   QgsApplication::initQgis();
   QgsNetworkAccessManager::instance()->setupDefaultProxyAndCache();
+  // 타일 디스크 캐시를 키운다. 기본 50 MB는 조사 한 곳을 오가는 것만으로 넘쳐서
+  // 같은 위성·지적 타일을 계속 다시 받는다. 설정 키(cache/size)는 이 QGIS
+  // 버전에서 먹지 않아 캐시 객체에 직접 건다.
+  if (auto* dc = qobject_cast<QNetworkDiskCache*>(QgsNetworkAccessManager::instance()->cache())) {
+    dc->setMaximumCacheSize(2LL * 1024 * 1024 * 1024);
+    KaCrashGuard::logLine(QStringLiteral("[boot] 타일 캐시 %1 MB — %2")
+                              .arg(dc->maximumCacheSize() / (1024 * 1024))
+                              .arg(dc->cacheDirectory()));
+  } else {
+    KaCrashGuard::logLine(QStringLiteral("[boot] 타일 캐시 없음 — 매번 다시 받는다"));
+  }
   QgsNetworkAccessManager::setRequestPreprocessor([](QNetworkRequest* req) {
     if (!req) return;
     req->setHeader(QNetworkRequest::UserAgentHeader,
@@ -744,10 +775,16 @@ int KaApplication::run(int argc, char** argv) {
     // QgsMapCanvas reads this; ParallelJob + provider_wms nested QEventLoop
     // → deleteLater ACCESS_VIOLATION on Windows (field dumps 2026-08-31).
     tileSettings.setValue(QStringLiteral("qgis/parallel_rendering"), false);
-    QgsApplication::setMaxThreads(1);
-    KaCrashGuard::logLine(QStringLiteral("[boot] 타일 재시도 한도 = %1")
-                              .arg(tileSettings.value(QStringLiteral("qgis/defaultTileMaxRetry"), 3)
-                                       .toInt()));
+    // 예전에는 여기서 setMaxThreads(1)을 불렀다. QGIS 문서가 "must be between 2
+    // and #cores"라고 못박은 범위 밖이고, 전역 QThreadPool을 작업자 1개로 묶어
+    // 렌더 작업·미리보기 작업·타일 내려받기가 전부 그 하나를 두고 줄을 선다.
+    // 화면을 끌 때 흰 화면이 났다가 뒤늦게 다음 지역이 튀어나오던 원인.
+    // 크래시를 막는 것은 위의 parallel_rendering=false이지 스레드 굶기기가 아니다.
+    QgsApplication::setMaxThreads(qBound(2, QThread::idealThreadCount() / 2, 4));
+    KaCrashGuard::logLine(
+        QStringLiteral("[boot] 타일 재시도 한도 = %1 · 렌더 스레드 = %2 · 병렬렌더 = 끔")
+            .arg(tileSettings.value(QStringLiteral("qgis/defaultTileMaxRetry"), 3).toInt())
+            .arg(QgsApplication::maxThreads()));
   }
 #endif
 
@@ -763,10 +800,10 @@ int KaApplication::run(int argc, char** argv) {
   if (splash) {
     splash->showMessage(QStringLiteral("준비 완료"), Qt::AlignBottom | Qt::AlignHCenter,
                         QColor(200, 206, 214));
-    // 저작권·제작처를 읽을 수 있게 잠시 유지한다. 자동 스모크는 기다리지 않는다.
-    holdSplash(splash, &app, 4500);
-    splash->finish(&w);
-    delete splash;
+    // 창은 0.8초면 준비된다(실측). 예전 4.5초는 시작 시간의 80%가 이 대기였다.
+    // 저작권·라이선스 전문은 도움말 → 정보에 있고 GPL 준수는 거기서 이뤄진다.
+    // 스플래시는 제작처를 알아볼 정도만 보이면 된다.
+    holdSplashThenFinish(splash, &w, 1800);
     splash = nullptr;
   }
   KaCrashGuard::logLine(QStringLiteral("[boot] 창 표시 %1 ms").arg(bootTimer.elapsed()));
@@ -792,6 +829,11 @@ int KaApplication::run(int argc, char** argv) {
   }
 
   int qaCode = 0;
+  if (qaPhase1 || smokeQuit) {
+    // 상호작용 실행에서는 배경지도를 이벤트 루프로 미뤄 창을 먼저 띄운다.
+    // 자동 QA·스모크는 그 전에 끝나 버리므로, 여기서 직접 끝내 검사 범위를 지킨다.
+    w.loadBootBasemaps();
+  }
   if (qaPhase1) {
     const QString out = QDir(QCoreApplication::applicationDirPath())
                             .filePath(QStringLiteral("../qa/phase1-e2e.json"));

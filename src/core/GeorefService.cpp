@@ -7,6 +7,7 @@
 #include <QStringConverter>
 #include <cmath>
 #include <algorithm>
+#include <memory>
 
 #include <qgsvectorlayer.h>
 #include <qgsrasterlayer.h>
@@ -25,6 +26,7 @@
 #include <qgsrastertransparency.h>
 #include <qgsrasterrenderer.h>
 #include <qgsbrightnesscontrastfilter.h>
+#include <qgsrasterblock.h>
 #include <qgsproject.h>
 #include <qgslayertree.h>
 #include <qgslayertreelayer.h>
@@ -306,7 +308,6 @@ bool applyWorldFileToRaster(QgsRasterLayer* layer, const Affine& a,
 bool persistAlignedRaster(QgsRasterLayer* layer, const Affine& a,
                           const QgsCoordinateReferenceSystem& crs, QString* errorOut) {
   if (!applyWorldFileToRaster(layer, a, crs, errorOut)) return false;
-  if (!looksUnreferencedRaster(layer)) return true;
   const QString src = layer->source();
   const QString name = layer->name();
   layer->setDataSource(src, name, QStringLiteral("gdal"), false);
@@ -506,9 +507,44 @@ bool isCadPath(const QString& path) {
   return low.endsWith(QLatin1String(".dxf")) || low.endsWith(QLatin1String(".dwg"));
 }
 
-void styleAlignedRasterOverlay(QgsRasterLayer* layer) {
-  if (!layer || !layer->isValid()) return;
-  // 흰 도화지만 빼고 먹선은 진하게. 0.82+넓은 흰색 허용은 스캔 선을 흐리게 만든다.
+bool looksLikePaperScan(const QgsRasterLayer* layer) {
+  if (!layer || !layer->isValid()) return false;
+  QgsRasterDataProvider* p = const_cast<QgsRasterLayer*>(layer)->dataProvider();
+  if (p && p->bandCount() >= 1) {
+    const int w = std::min(std::max(layer->width(), 1), 32);
+    const int h = std::min(std::max(layer->height(), 1), 32);
+    if (w >= 2 && h >= 2) {
+      std::unique_ptr<QgsRasterBlock> r(p->block(1, layer->extent(), w, h));
+      std::unique_ptr<QgsRasterBlock> g(
+          p->bandCount() >= 2 ? p->block(2, layer->extent(), w, h) : nullptr);
+      std::unique_ptr<QgsRasterBlock> b(
+          p->bandCount() >= 3 ? p->block(3, layer->extent(), w, h) : nullptr);
+      if (r && r->isValid()) {
+        int white = 0;
+        int n = 0;
+        for (int y = 0; y < h; ++y) {
+          for (int x = 0; x < w; ++x) {
+            if (r->isNoData(x, y)) continue;
+            const double rv = r->value(x, y);
+            const double gv = (g && g->isValid()) ? g->value(x, y) : rv;
+            const double bv = (b && b->isValid()) ? b->value(x, y) : rv;
+            ++n;
+            if (rv >= 236.0 && gv >= 236.0 && bv >= 236.0)
+              ++white;
+          }
+        }
+        if (n > 0) return (white * 100 / n) >= 42;
+      }
+    }
+  }
+  const QString src = layer->source().toLower();
+  if (src.contains(QLatin1String(".tif"))) return false;
+  return src.contains(QLatin1String(".jpg")) || src.contains(QLatin1String(".jpeg"))
+         || src.contains(QLatin1String(".png")) || src.contains(QLatin1String(".bmp"))
+         || src.contains(QLatin1String(".gif"));
+}
+
+void styleAlignedInkScan(QgsRasterLayer* layer) {
   layer->setOpacity(1.0);
   layer->setBlendMode(QPainter::CompositionMode_Multiply);
   layer->setResamplingStage(Qgis::RasterResamplingStage::Provider);
@@ -528,6 +564,32 @@ void styleAlignedRasterOverlay(QgsRasterLayer* layer) {
   rgb.append(QgsRasterTransparency::TransparentThreeValuePixel(255, 255, 255, 0.0, 8, 8, 8));
   tr->setTransparentThreeValuePixelList(rgb);
   rend->setRasterTransparency(tr);
+}
+
+void styleAlignedColorRaster(QgsRasterLayer* layer) {
+  // 항공 GeoTIFF 등은 먹선 필터를 쓰면 전혀 다른 색으로 이동한다.
+  layer->setOpacity(1.0);
+  layer->setBlendMode(QPainter::CompositionMode_SourceOver);
+  layer->setResamplingStage(Qgis::RasterResamplingStage::Provider);
+  if (QgsRasterDataProvider* p = layer->dataProvider()) {
+    p->setZoomedInResamplingMethod(Qgis::RasterResamplingMethod::Bilinear);
+    p->setZoomedOutResamplingMethod(Qgis::RasterResamplingMethod::Bilinear);
+  }
+  if (QgsBrightnessContrastFilter* bf = layer->brightnessFilter()) {
+    bf->setContrast(0);
+    bf->setBrightness(0);
+    bf->setGamma(1.0);
+  }
+  if (QgsRasterRenderer* rend = layer->renderer())
+    rend->setRasterTransparency(new QgsRasterTransparency());
+}
+
+void styleAlignedRasterOverlay(QgsRasterLayer* layer) {
+  if (!layer || !layer->isValid()) return;
+  if (looksLikePaperScan(layer))
+    styleAlignedInkScan(layer);
+  else
+    styleAlignedColorRaster(layer);
   layer->triggerRepaint();
 }
 

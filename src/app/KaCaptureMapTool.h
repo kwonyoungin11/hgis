@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <qgsmaptool.h>
 #include <qgsgeometry.h>
 #include <qgspointxy.h>
@@ -49,7 +49,7 @@ private:
   void cancel();
   void rebuildRubber(const QgsPointXY* cursorOrNull);
   void destroyRubber();
-  void updateSnapMarker(const QgsPointXY& mapPt, bool snapped);
+  void updateSnapMarker(const QgsPointXY& mapPt, bool snapped, bool isIntersection = false);
   void destroySnapMarker();
   bool mapPointFromEvent(QgsMapMouseEvent* e, QgsPointXY* out, bool* snapped = nullptr);
   bool nearPoint(const QgsPointXY& a, const QgsPointXY& b) const;

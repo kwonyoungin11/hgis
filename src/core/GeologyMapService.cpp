@@ -7,6 +7,7 @@
 #include <QRegularExpression>
 #include <QUrl>
 #include <algorithm>
+#include <cmath>
 
 #include <qgsblockingnetworkrequest.h>
 #include <qgscategorizedsymbolrenderer.h>
@@ -30,8 +31,14 @@
 #include <qgsvectorfilewriter.h>
 #include <qgsvectorlayer.h>
 #include <qgsvectorlayerlabeling.h>
+#include <qgshillshaderenderer.h>
+#include <qgslayertree.h>
+#include <qgslayertreegroup.h>
+#include <qgslayertreelayer.h>
+#include <qgsrasterdataprovider.h>
 
 #include <QNetworkRequest>
+#include <QPainter>
 
 namespace {
 
@@ -40,6 +47,7 @@ constexpr const char* kTypeName = "geoOpen:l_50k_geology_litho_latest";
 constexpr const char* kJejuTypeName = "geoOpen:l_jeju_50k_geology_litho_view";
 constexpr const char* kWmsRaster = "geoOpen:L_50K_Geology_Map";
 constexpr const char* kLayerTitle = "지질도(KIGAM 1:5만)";
+constexpr const char* kReliefTitle = "지질 음영";
 constexpr const char* kEraSrcField = "시대";
 constexpr const char* kEraField = "era_class";
 constexpr const char* kSymbolField = "기호";
@@ -80,7 +88,7 @@ constexpr const char* kEraUnknown = "시대미상";
 
 QgsSymbol* eraFillSymbol(const QColor& base) {
   QColor fill = base;
-  fill.setAlpha(150);
+  fill.setAlpha(220);
   auto fs = QgsFillSymbol::createSimple({
       {QStringLiteral("color"), fill.name(QColor::HexArgb)},
       {QStringLiteral("outline_color"), QColor(80, 80, 80, 130).name(QColor::HexArgb)},
@@ -334,6 +342,179 @@ bool GeologyMapService::applyGeologyStyle(QgsVectorLayer* layer,
   return true;
 }
 
+QString GeologyMapService::reliefLayerTitle() {
+  return QString::fromUtf8(kReliefTitle);
+}
+
+QgsMapLayer* GeologyMapService::existingGeologyLayer(QgsProject* project) {
+  if (!project) return nullptr;
+  const QString title = QString::fromUtf8(kLayerTitle);
+  QgsMapLayer* prefixed = nullptr;
+  for (QgsMapLayer* ml : project->mapLayers()) {
+    if (!ml) continue;
+    if (ml->name() == title) return ml;
+    if (!prefixed && ml->name().startsWith(title)) prefixed = ml;
+  }
+  return prefixed;
+}
+
+void GeologyMapService::drapeOnRelief(QgsMapLayer* layer) {
+  if (!layer) return;
+  // Colors stay SourceOver. Shading is the 지질 음영 overlay (Multiply on top).
+  if (auto* vl = qobject_cast<QgsVectorLayer*>(layer))
+    vl->setFeatureBlendMode(QPainter::CompositionMode_SourceOver);
+  layer->setBlendMode(QPainter::CompositionMode_SourceOver);
+  layer->triggerRepaint();
+}
+
+namespace {
+
+QgsMapLayer* findLayerNamed(QgsProject* project, const QString& title) {
+  if (!project) return nullptr;
+  for (QgsMapLayer* ml : project->mapLayers()) {
+    if (ml && ml->name() == title) return ml;
+  }
+  return nullptr;
+}
+
+bool elevationCoversGeology(QgsRasterLayer* elev, QgsMapLayer* geology) {
+  if (!elev || !elev->isValid()) return false;
+  if (!geology) return true;
+  QgsRectangle ge = geology->extent();
+  if (ge.isEmpty() || !ge.isFinite()) return true;
+  QgsRectangle ee = elev->extent();
+  if (ee.isEmpty() || !ee.isFinite()) return false;
+  if (elev->crs().isValid() && geology->crs().isValid() && elev->crs() != geology->crs()) {
+    try {
+      const QgsCoordinateTransform tr(geology->crs(), elev->crs(), QgsCoordinateTransformContext());
+      ge = tr.transformBoundingBox(ge);
+    } catch (...) {
+      return false;
+    }
+  }
+  return ee.intersects(ge);
+}
+
+QgsRasterLayer* findElevationRaster(QgsProject* project, QgsMapLayer* geology) {
+  if (!project) return nullptr;
+  QgsRasterLayer* named = nullptr;
+  QgsRasterLayer* anySingle = nullptr;
+  for (QgsMapLayer* ml : project->mapLayers()) {
+    auto* rl = qobject_cast<QgsRasterLayer*>(ml);
+    if (!rl || !rl->isValid() || rl->bandCount() != 1) continue;
+    if (rl->name() == QString::fromUtf8(kReliefTitle)) continue;
+    const QString p = rl->providerType().toLower();
+    if (p == QLatin1String("wms") || p == QLatin1String("xyz")) continue;
+    if (!elevationCoversGeology(rl, geology)) continue;
+    if (rl->name() == QLatin1String("DEM")) named = rl;
+    if (!anySingle) anySingle = rl;
+  }
+  return named ? named : anySingle;
+}
+
+void styleReliefOverlay(QgsMapLayer* shade) {
+  if (!shade) return;
+  shade->setBlendMode(QPainter::CompositionMode_Multiply);
+  shade->setOpacity(0.48);
+  shade->triggerRepaint();
+}
+
+void stackOver(QgsProject* project, QgsMapLayer* below, QgsMapLayer* over) {
+  if (!project || !below || !over) return;
+  QgsLayerTree* root = project->layerTreeRoot();
+  if (!root) return;
+  QgsLayerTreeLayer* belowN = root->findLayer(below->id());
+  QgsLayerTreeLayer* overN = root->findLayer(over->id());
+  if (!belowN || !overN) return;
+  auto* parent = qobject_cast<QgsLayerTreeGroup*>(belowN->parent());
+  if (!parent) parent = root;
+  auto* overParent = qobject_cast<QgsLayerTreeGroup*>(overN->parent());
+  if (!overParent) overParent = root;
+  overParent->removeChildNode(overN);
+  belowN = parent->findLayer(below->id());
+  const int belowIdx = belowN ? parent->children().indexOf(belowN) : -1;
+  parent->insertLayer(belowIdx < 0 ? 0 : belowIdx, over);
+}
+
+QgsRasterLayer* addHillshadeLayer(QgsProject* project, QgsRasterLayer* elev) {
+  if (!project || !elev) return nullptr;
+  auto* hs = new QgsRasterLayer(elev->source(), QString::fromUtf8(kReliefTitle),
+                                elev->providerType());
+  if (!hs->isValid()) {
+    delete hs;
+    return nullptr;
+  }
+  if (elev->crs().isValid()) hs->setCrs(elev->crs());
+  auto* rend = new QgsHillshadeRenderer(hs->dataProvider(), 1, 315.0, 45.0);
+  rend->setZFactor(hs->crs().isGeographic() ? 111120.0 : 3.5);
+  rend->setMultiDirectional(false);
+  hs->setRenderer(rend);
+  styleReliefOverlay(hs);
+  LayerOps::markReferenceLayer(hs);
+  hs->setCustomProperty(QStringLiteral("ka_hgis/omit_sheet_legend"), true);
+  LayerOps::applyThematicOverlayScaleRange(hs);
+  if (!project->addMapLayer(hs, true)) {
+    delete hs;
+    return nullptr;
+  }
+  LayerOps::placeInLegendGroup(project, hs, QStringLiteral("참조 지도"));
+  return hs;
+}
+
+QgsRasterLayer* addWorldHillshadeXyz(QgsProject* project) {
+  if (!project) return nullptr;
+  const QString uri = QStringLiteral(
+      "type=xyz&url=https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/"
+      "World_Hillshade/MapServer/tile/%7Bz%7D/%7By%7D/%7Bx%7D"
+      "&zmax=16&zmin=1&crs=EPSG:3857&tilePixelRatio=1");
+  auto* rl = new QgsRasterLayer(uri, QString::fromUtf8(kReliefTitle), QStringLiteral("wms"));
+  if (!rl->isValid()) {
+    delete rl;
+    return nullptr;
+  }
+  styleReliefOverlay(rl);
+  LayerOps::markReferenceLayer(rl);
+  rl->setCustomProperty(QStringLiteral("ka_hgis/omit_sheet_legend"), true);
+  LayerOps::applyThematicOverlayScaleRange(rl);
+  if (!project->addMapLayer(rl, true)) {
+    delete rl;
+    return nullptr;
+  }
+  LayerOps::placeInLegendGroup(project, rl, QStringLiteral("참조 지도"));
+  return rl;
+}
+
+}  // namespace
+
+bool GeologyMapService::ensureReliefUnderlay(QgsProject* project, QgsMapCanvas* canvas,
+                                             QgsMapLayer* geology, QString* errorOut) {
+  Q_UNUSED(canvas);
+  if (!project || !geology) {
+    if (errorOut) *errorOut = QStringLiteral("지질 레이어가 없습니다.");
+    return false;
+  }
+  drapeOnRelief(geology);
+  QgsMapLayer* shade = findLayerNamed(project, reliefLayerTitle());
+  if (shade && !shade->isValid()) {
+    project->removeMapLayer(shade->id());
+    shade = nullptr;
+  }
+  if (!shade) {
+    if (QgsRasterLayer* elev = findElevationRaster(project, geology))
+      shade = addHillshadeLayer(project, elev);
+  }
+  if (!shade)
+    shade = addWorldHillshadeXyz(project);
+  if (!shade) {
+    if (errorOut)
+      *errorOut = QStringLiteral("지형 음영을 만들지 못했습니다.");
+    return false;
+  }
+  styleReliefOverlay(shade);
+  stackOver(project, geology, shade);
+  return true;
+}
+
 bool GeologyMapService::lithoWfsCoversWgs84(const QgsRectangle& extentWgs84) {
   if (extentWgs84.isNull() || !extentWgs84.isFinite()) return false;
   // geoOpen:l_50k_geology_litho_latest WGS84BoundingBox (GetCapabilities 2026-08-31).
@@ -399,6 +580,7 @@ static QgsRasterLayer* addOfficialGeologyRaster(QgsProject* project, QgsMapCanva
   }
   LayerOps::placeInLegendGroup(project, rl, QStringLiteral("참조 지도"));
   LayerOps::applyThematicOverlayScaleRange(rl);
+  GeologyMapService::ensureReliefUnderlay(project, canvas, rl, nullptr);
   if (canvas) {
     const QString workAuth = project->crs().isValid() ? project->crs().authid()
                                                       : QStringLiteral("EPSG:5186");
@@ -561,12 +743,13 @@ QgsMapLayer* GeologyMapService::downloadAndAdd(QgsProject* project, QgsMapCanvas
   }
   LayerOps::placeInLegendGroup(project, layer, QStringLiteral("참조 지도"));
   LayerOps::applyThematicOverlayScaleRange(layer);
+  GeologyMapService::ensureReliefUnderlay(project, canvas, layer, nullptr);
   if (canvas) {
     const QString workAuth = project->crs().isValid() ? project->crs().authid()
                                                       : QStringLiteral("EPSG:5186");
     LayerOps::ensureOtfEnabled(project, canvas, workAuth);
     LayerOps::syncMapCanvas(project, canvas, false);
-    // refreshAllLayers()는 모든 레이어 캐시를 버려 배경 타일까지 다시 받는다.
+    // 전체 레이어 캐시 폐기는 배경 타일까지 다시 받는다.
     // isDrawing()이면 refresh도 건너뛴다(WMS deleteLater AV).
     LayerOps::refreshCanvasIfIdle(canvas);
   }

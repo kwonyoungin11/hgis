@@ -52,12 +52,14 @@
 #include <qgsbilinearrasterresampler.h>
 #include <qgsrasterresamplefilter.h>
 #include <qgsrasterdataprovider.h>
+#include <qgsvectordataprovider.h>
 #include <qgsrasterrenderer.h>
 #include <qgsrastertransparency.h>
 #include <qgssinglebandpseudocolorrenderer.h>
 #include <qgsrastershader.h>
 #include <qgscolorrampshader.h>
 #include <qgscolorramplegendnodesettings.h>
+#include <qgshillshaderenderer.h>
 #include <qgsrasterbandstats.h>
 #include <cpl_conv.h>
 #include <qgsnetworkaccessmanager.h>
@@ -216,10 +218,325 @@ bool LayerOps::applyDomainDrawStyle(QgsVectorLayer* layer, const QString& layerK
   layer->setCustomProperty(QStringLiteral("ka_hgis/style_width_mm"), strokeW);
   layer->setCustomProperty(QStringLiteral("ka_hgis/style_marker_mm"), markerSize);
   layer->setRenderer(new QgsSingleSymbolRenderer(sym));
-  if (gt == Qgis::GeometryType::Polygon)
+  const QString detectedField = detectNameField(layer);
+  if (!detectedField.isEmpty())
+    applyNameAttributeLabels(layer, detectedField, 5.0, false);
+  else if (gt == Qgis::GeometryType::Polygon)
     applyAreaM2Labels(layer);
   layer->triggerRepaint();
   return true;
+}
+
+QString LayerOps::detectNameField(const QgsVectorLayer* layer) {
+  if (!layer || !layer->isValid()) return {};
+  const QgsFields fds = layer->fields();
+  if (fds.isEmpty()) return {};
+
+  // 1. Cultural heritage & Archaeology (문화유적분포지도, 발굴/지표조사구역, 유적, 고고학)
+  const QStringList heritageCandidates = {
+    QStringLiteral("사업명"), QStringLiteral("유적명"), QStringLiteral("유적명칭"),
+    QStringLiteral("조사명"), QStringLiteral("보고서명"), QStringLiteral("소재지"),
+    QStringLiteral("yujuk_nm"), QStringLiteral("yujeok_nm"), QStringLiteral("site_name"),
+    QStringLiteral("hist_nm"), QStringLiteral("rem_nm"), QStringLiteral("명칭"),
+    QStringLiteral("name"), QStringLiteral("title")
+  };
+  for (const QString& c : heritageCandidates) {
+    int idx = fds.lookupField(c);
+    if (idx >= 0) return fds.at(idx).name();
+  }
+
+  // 2. Cadastral (연속지적도, 지적도, 토지)
+  const QStringList cadCandidates = {
+    QStringLiteral("jibun"), QStringLiteral("지번"), QStringLiteral("a2"),
+    QStringLiteral("a1"), QStringLiteral("pnu")
+  };
+  for (const QString& c : cadCandidates) {
+    int idx = fds.lookupField(c);
+    if (idx >= 0) return fds.at(idx).name();
+  }
+
+  // 3. Archaeology features (유구, 도면)
+  const QStringList featCandidates = {
+    QStringLiteral("feature_no"), QStringLiteral("유구번호"), QStringLiteral("유구명"),
+    QStringLiteral("호수"), QStringLiteral("kind_ko"), QStringLiteral("kind")
+  };
+  for (const QString& c : featCandidates) {
+    int idx = fds.lookupField(c);
+    if (idx >= 0) return fds.at(idx).name();
+  }
+
+  // 4. Digital topo / buildings / roads (수치지형도, 건물, 도로, 지명)
+  const QStringList topoCandidates = {
+    QStringLiteral("buld_nm"), QStringLiteral("건물명"), QStringLiteral("지명"),
+    QStringLiteral("road_nm"), QStringLiteral("도로명"), QStringLiteral("label"),
+    QStringLiteral("kor_nm")
+  };
+  for (const QString& c : topoCandidates) {
+    int idx = fds.lookupField(c);
+    if (idx >= 0) return fds.at(idx).name();
+  }
+
+  // 5. Scan string fields containing name-related keywords
+  for (int i = 0; i < fds.count(); ++i) {
+    const QgsField f = fds.at(i);
+    const QString n = f.name().toLower();
+    if (f.type() == QMetaType::QString || f.typeName().contains(QLatin1String("char"), Qt::CaseInsensitive) ||
+        f.typeName().contains(QLatin1String("string"), Qt::CaseInsensitive)) {
+      if (n.contains(QStringLiteral("명")) || n.contains(QLatin1String("name")) ||
+          n.contains(QLatin1String("title")) || n.contains(QLatin1String("label")) ||
+          n.contains(QStringLiteral("지번")) || n.contains(QLatin1String("jibun"))) {
+        return f.name();
+      }
+    }
+  }
+
+  // 6. First string field if available
+  for (int i = 0; i < fds.count(); ++i) {
+    const QgsField f = fds.at(i);
+    if (f.type() == QMetaType::QString)
+      return f.name();
+  }
+
+  return fds.at(0).name();
+}
+
+QString LayerOps::prepareShapefileEncoding(const QString& shpPath) {
+  QFileInfo fi(shpPath);
+  if (!fi.exists() || fi.suffix().compare(QLatin1String("shp"), Qt::CaseInsensitive) != 0)
+    return QString();
+
+  const QString dir = fi.absolutePath();
+  const QString base = fi.completeBaseName();
+  const QString cpgPath = QDir(dir).filePath(base + QStringLiteral(".cpg"));
+  const QString dbfPath = QDir(dir).filePath(base + QStringLiteral(".dbf"));
+
+  // 1. 이미 .cpg 파일이 존재하는 경우 해당 인코딩을 GDAL에 적용
+  if (QFile::exists(cpgPath)) {
+    QFile cpgFile(cpgPath);
+    if (cpgFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+      const QString content = QString::fromUtf8(cpgFile.readAll()).trimmed();
+      cpgFile.close();
+      if (!content.isEmpty()) {
+        const QString upper = content.toUpper();
+        if (upper.contains(QLatin1String("UTF-8")) || upper.contains(QLatin1String("UTF8"))) {
+          CPLSetConfigOption("SHAPE_ENCODING", "UTF-8");
+          return QStringLiteral("UTF-8");
+        }
+        if (upper.contains(QLatin1String("CP949")) || upper.contains(QLatin1String("949")) ||
+            upper.contains(QLatin1String("EUC-KR")) || upper.contains(QLatin1String("ANSI")) ||
+            upper.contains(QLatin1String("SYSTEM"))) {
+          CPLSetConfigOption("SHAPE_ENCODING", "CP949");
+          return QStringLiteral("CP949");
+        }
+        CPLSetConfigOption("SHAPE_ENCODING", content.toLatin1().constData());
+        return content;
+      }
+    }
+  }
+
+  // 2. .cpg 파일이 없는 경우: .dbf 앞부분(16KB)을 검사하여 UTF-8 vs CP949 자동 판별
+  QString detected = QStringLiteral("CP949"); // 한국 공공데이터·지적도·유적도 SHP 기본값
+  if (QFile::exists(dbfPath)) {
+    QFile dbfFile(dbfPath);
+    if (dbfFile.open(QIODevice::ReadOnly)) {
+      const QByteArray sample = dbfFile.read(32768);
+      dbfFile.close();
+
+      bool hasNonAscii = false;
+      bool validUtf8 = true;
+      int utf8MultiByteCount = 0;
+
+      const unsigned char* bytes = reinterpret_cast<const unsigned char*>(sample.constData());
+      const int len = sample.size();
+      for (int i = 0; i < len; ++i) {
+        const unsigned char c = bytes[i];
+        if (c > 127) {
+          hasNonAscii = true;
+          if ((c & 0xE0) == 0xC0 && c >= 0xC2) { // 2-byte UTF-8
+            if (i + 1 < len && (bytes[i + 1] & 0xC0) == 0x80) {
+              ++utf8MultiByteCount;
+              ++i;
+            } else {
+              validUtf8 = false;
+              break;
+            }
+          } else if ((c & 0xF0) == 0xE0) { // 3-byte UTF-8 (한글 완성형은 EA..ED)
+            if (i + 2 < len && (bytes[i + 1] & 0xC0) == 0x80 && (bytes[i + 2] & 0xC0) == 0x80) {
+              ++utf8MultiByteCount;
+              i += 2;
+            } else {
+              validUtf8 = false;
+              break;
+            }
+          } else if ((c & 0xF8) == 0xF0 && c <= 0xF4) { // 4-byte UTF-8
+            if (i + 3 < len && (bytes[i + 1] & 0xC0) == 0x80 && (bytes[i + 2] & 0xC0) == 0x80 &&
+                (bytes[i + 3] & 0xC0) == 0x80) {
+              ++utf8MultiByteCount;
+              i += 3;
+            } else {
+              validUtf8 = false;
+              break;
+            }
+          } else {
+            validUtf8 = false;
+            break;
+          }
+        }
+      }
+
+      // 비ASCII 바이트가 있고 온전한 UTF-8 멀티바이트가 충분히 존재할 때만 UTF-8
+      if (hasNonAscii && validUtf8 && utf8MultiByteCount >= 4) {
+        detected = QStringLiteral("UTF-8");
+      } else {
+        // CP949 바이트이거나 영문/숫자 헤더만 있는 경우: 한국 GIS 환경 관례상 CP949
+        detected = QStringLiteral("CP949");
+      }
+    }
+  }
+
+  // 3. .cpg 파일이 없으면 자동 생성하여 영구 보존 (다음번 및 타 GIS 소프트웨어 호환)
+  if (!QFile::exists(cpgPath)) {
+    QFile outCpg(cpgPath);
+    if (outCpg.open(QIODevice::WriteOnly | QIODevice::Text)) {
+      outCpg.write(detected.toUtf8() + "\n");
+      outCpg.close();
+    }
+  }
+
+  // 4. GDAL 드라이버 레벨에서 SHAPE_ENCODING 옵션 설정
+  CPLSetConfigOption("SHAPE_ENCODING", detected.toLatin1().constData());
+  return detected;
+}
+
+bool LayerOps::setShapefileEncoding(QgsVectorLayer* layer, const QString& encoding) {
+  if (!layer || !layer->isValid()) return false;
+  const QString src = layer->source().split(QLatin1Char('|')).first();
+  QFileInfo fi(src);
+  if (fi.exists() && fi.suffix().compare(QLatin1String("shp"), Qt::CaseInsensitive) == 0) {
+    const QString cpgPath = QDir(fi.absolutePath()).filePath(fi.completeBaseName() + QStringLiteral(".cpg"));
+    QFile cpgFile(cpgPath);
+    if (cpgFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+      cpgFile.write(encoding.toUtf8() + "\n");
+      cpgFile.close();
+    }
+  }
+  CPLSetConfigOption("SHAPE_ENCODING", encoding.toLatin1().constData());
+  layer->setProviderEncoding(encoding);
+  layer->reload();
+  layer->updateFields();
+  layer->triggerRepaint();
+  return true;
+}
+
+bool LayerOps::applyNameAttributeLabels(QgsVectorLayer* layer, const QString& fieldName,
+                                       double fontSizePt, bool showArea) {
+  if (!layer || !layer->isValid()) return false;
+
+  QString targetField = fieldName;
+  if (targetField.isEmpty())
+    targetField = detectNameField(layer);
+
+  if (fontSizePt <= 0.0)
+    fontSizePt = 5.0;
+
+  if (!targetField.isEmpty())
+    layer->setCustomProperty(QStringLiteral("ka_hgis/label_field"), targetField);
+  layer->setCustomProperty(QStringLiteral("ka_hgis/label_font_size"), fontSizePt);
+  layer->setCustomProperty(QStringLiteral("ka_hgis/label_show_area"), showArea);
+
+  QgsPalLayerSettings s;
+  s.drawLabels = true;
+
+  const bool isPolygon = (layer->geometryType() == Qgis::GeometryType::Polygon);
+  const bool hasField = !targetField.isEmpty() && layer->fields().indexOf(targetField) >= 0;
+
+  if (hasField && isPolygon && showArea) {
+    s.fieldName = QStringLiteral("coalesce(\"%1\", '') || '\\n(' || format_number(area($geometry), 1) || ' ㎡)'")
+                      .arg(targetField);
+    s.isExpression = true;
+  } else if (hasField) {
+    s.fieldName = QStringLiteral("\"%1\"").arg(targetField);
+    s.isExpression = true;
+  } else if (isPolygon && showArea) {
+    s.fieldName = QStringLiteral("format_number(area($geometry), 1) || ' ㎡'");
+    s.isExpression = true;
+  } else if (isPolygon) {
+    s.fieldName = QStringLiteral("format_number(area($geometry), 1) || ' ㎡'");
+    s.isExpression = true;
+  } else if (layer->fields().count() > 0) {
+    s.fieldName = QStringLiteral("\"%1\"").arg(layer->fields().at(0).name());
+    s.isExpression = true;
+  } else {
+    return false;
+  }
+
+  if (isPolygon) {
+    s.placement = Qgis::LabelPlacement::OverPoint;
+    s.setPolygonPlacementFlags(Qgis::LabelPolygonPlacementFlag::AllowPlacementInsideOfPolygon);
+  } else if (layer->geometryType() == Qgis::GeometryType::Line) {
+    s.placement = Qgis::LabelPlacement::Line;
+  } else {
+    s.placement = Qgis::LabelPlacement::AroundPoint;
+  }
+
+  QgsLabelObstacleSettings obs = s.obstacleSettings();
+  obs.setIsObstacle(false);
+  s.setObstacleSettings(obs);
+
+  QgsTextFormat fmt;
+  QFont font = fmt.font();
+  font.setFamily(QStringLiteral("Malgun Gothic"));
+  font.setPointSizeF(fontSizePt);
+  font.setBold(true);
+  fmt.setFont(font);
+  fmt.setSize(fontSizePt);
+  fmt.setSizeUnit(Qgis::RenderUnit::Points);
+  fmt.setColor(QColor(31, 35, 40));
+
+  QgsTextBufferSettings buf = fmt.buffer();
+  buf.setEnabled(true);
+  buf.setSize(0.8);
+  buf.setColor(QColor(255, 255, 255, 230));
+  fmt.setBuffer(buf);
+  s.setFormat(fmt);
+
+  layer->setLabeling(new QgsVectorLayerSimpleLabeling(s));
+  layer->setLabelsEnabled(true);
+  layer->triggerRepaint();
+  return true;
+}
+
+double LayerOps::labelFontSize(const QgsVectorLayer* layer, double defaultSize) {
+  if (!layer) return defaultSize;
+  const QVariant v = layer->customProperty(QStringLiteral("ka_hgis/label_font_size"));
+  if (v.isValid() && v.toDouble() > 0.0)
+    return v.toDouble();
+  if (layer->labeling()) {
+    const QgsPalLayerSettings s = layer->labeling()->settings();
+    if (s.format().size() > 0.0)
+      return s.format().size();
+  }
+  return defaultSize;
+}
+
+bool LayerOps::labelShowArea(const QgsVectorLayer* layer, bool defaultShow) {
+  if (!layer) return defaultShow;
+  const QVariant v = layer->customProperty(QStringLiteral("ka_hgis/label_show_area"));
+  if (v.isValid())
+    return v.toBool();
+  if (layer->labeling()) {
+    const QString expr = layer->labeling()->settings().fieldName;
+    if (expr.contains(QLatin1String("area($geometry)")))
+      return true;
+  }
+  return defaultShow;
+}
+
+QString LayerOps::currentLabelField(const QgsVectorLayer* layer) {
+  if (!layer) return {};
+  const QString f = layer->customProperty(QStringLiteral("ka_hgis/label_field")).toString();
+  if (!f.isEmpty()) return f;
+  return detectNameField(layer);
 }
 
 bool LayerOps::applyAreaM2Labels(QgsVectorLayer* layer) {
@@ -240,10 +557,10 @@ bool LayerOps::applyAreaM2Labels(QgsVectorLayer* layer) {
   QgsTextFormat fmt;
   QFont font = fmt.font();
   font.setFamily(QStringLiteral("Malgun Gothic"));
-  font.setPointSize(9);
+  font.setPointSize(5);
   font.setBold(true);
   fmt.setFont(font);
-  fmt.setSize(9);
+  fmt.setSize(5);
   fmt.setSizeUnit(Qgis::RenderUnit::Points);
   fmt.setColor(QColor(15, 23, 42));
   QgsTextBufferSettings buf = fmt.buffer();
@@ -264,7 +581,8 @@ bool LayerOps::hasToggleableLabels(const QgsMapLayer* layer) {
   if (!vl || !vl->isValid())
     return false;
   return vl->labeling() != nullptr || vl->labelsEnabled() ||
-         vl->geometryType() == Qgis::GeometryType::Polygon;
+         vl->geometryType() == Qgis::GeometryType::Polygon ||
+         vl->fields().count() > 0;
 }
 
 bool LayerOps::labelsVisible(const QgsMapLayer* layer) {
@@ -277,8 +595,13 @@ bool LayerOps::setLabelsVisible(QgsMapLayer* layer, bool on) {
   if (!vl || !vl->isValid())
     return false;
   if (on && !vl->labeling()) {
-    if (vl->geometryType() == Qgis::GeometryType::Polygon && applyAreaM2Labels(vl))
+    const QString nf = detectNameField(vl);
+    if (!nf.isEmpty()) {
+      applyNameAttributeLabels(vl, nf, 5.0, false);
       return true;
+    } else if (vl->geometryType() == Qgis::GeometryType::Polygon && applyAreaM2Labels(vl)) {
+      return true;
+    }
   }
   vl->setLabelsEnabled(on);
   vl->triggerRepaint();
@@ -556,7 +879,7 @@ static void applyKaNetworkHeaders(QNetworkRequest* req) {
     req->setUrl(fixed);
 }
 
-static void ensureTileNetworkIdentity() {
+void LayerOps::ensureTileNetworkIdentity() {
   static bool once = false;
   if (once) return;
   once = true;
@@ -815,10 +1138,15 @@ QStringList LayerOps::domainLayerKeys() {
 
 void LayerOps::removeSurveyDomainLayers(QgsProject* project) {
   if (!project) return;
+  const QStringList domainKeys = domainLayerKeys();
   QStringList ids;
   for (QgsMapLayer* l : project->mapLayers()) {
     if (!l) continue;
     if (isBasemapLayer(l)) continue;
+    const QString key = layerKeyOf(l);
+    // 도면 레이어(survey_area, feature_poly 등)만 제거하고, 외부에서 불러온 SHP/DXF 등 사용자 레이어는 온전히 유지한다.
+    if (!domainKeys.contains(key))
+      continue;
     if (auto* v = qobject_cast<QgsVectorLayer*>(l)) {
       if (v->isEditable())
         v->rollBack();
@@ -907,6 +1235,11 @@ QgsVectorLayer* LayerOps::ensureDomainLayer(QgsProject* project, const QString& 
     delete vl;
     return nullptr;
   }
+  // OGR/GPKG keeps a feature cache. A previous legend-only delete leaves the
+  // table; without reload, 「조사구역」 다시 만들기가 지운 면을 그대로 보여 준다.
+  if (QgsDataProvider* p = vl->dataProvider())
+    p->reloadData();
+  vl->updateExtents();
   vl->setName(titleKo);
   markSurveyLayer(vl, layerKey);
   applyLegendCrsLabel(vl);
@@ -1021,15 +1354,18 @@ QList<QgsMapLayer*> LayerOps::visibleLayersPaintOrder(QgsProject* project) {
 void LayerOps::applyCanvasScreenDpi(QgsMapCanvas* canvas) {
   if (!canvas) return;
   // FHD 100% → 4K 150–200% (DPR 1.0–2.0). PassThrough 배율 그대로 쓴다.
+  // 같은 값이라도 다시 쓰면 렌더 설정이 더러워져 캐시를 버리고 전체를 다시 그린다.
+  // 이 함수는 9곳에서 불리므로 값이 실제로 달라질 때만 손댄다.
   const qreal dpr = canvas->devicePixelRatioF();
-  if (dpr > 0.05)
+  if (dpr > 0.05 &&
+      !qFuzzyCompare(canvas->mapSettings().devicePixelRatio(), static_cast<float>(dpr)))
     canvas->mapSettings().setDevicePixelRatio(static_cast<float>(dpr));
   QWindow* wh = canvas->windowHandle();
   if (!wh && canvas->window())
     wh = canvas->window()->windowHandle();
   if (wh && wh->screen()) {
     const double dpi = wh->screen()->logicalDotsPerInch();
-    if (dpi > 10.0)
+    if (dpi > 10.0 && !qFuzzyCompare(canvas->mapSettings().outputDpi(), dpi))
       canvas->mapSettings().setOutputDpi(dpi);
   }
 }
@@ -1061,12 +1397,15 @@ void LayerOps::syncMapCanvas(QgsProject* project, QgsMapCanvas* canvas, bool zoo
   if (layersChanged)
     canvas->setLayers(visible);
   canvas->setCachingEnabled(true);
-  canvas->setRenderFlag(true);
+  // QgsMapCanvas::setRenderFlag(true)는 이미 켜져 있어도 refresh()를 강제한다.
+  // 여기가 레이어를 만질 때마다 불리므로 필요 없는 전체 렌더가 한 번씩 더 붙었다.
+  if (!canvas->renderFlag())
+    canvas->setRenderFlag(true);
   const bool wasFrozen = canvas->isFrozen();
   if (!wasFrozen)
     canvas->freeze(false);
-  canvas->setPreviewJobsEnabled(false);
   // XYZ + OTF(QgsRasterProjector) + parallel job: provider_wms deleteLater AV on Windows.
+  // 병렬 렌더만 끈다 — 미리보기까지 끄면 화면을 끄는 동안 지도가 비어 깜빡인다.
   canvas->setParallelRenderingEnabled(false);
 
   if (zoomKorea) {
@@ -1263,7 +1602,7 @@ static bool addXyzBasemap(QgsProject* project, QgsMapCanvas* canvas, const QStri
     if (errorOut) *errorOut = QStringLiteral("No project");
     return false;
   }
-  ensureTileNetworkIdentity();
+  LayerOps::ensureTileNetworkIdentity();
 
   {
     QStringList removeIds;
@@ -1332,7 +1671,7 @@ static bool addXyzBasemap(QgsProject* project, QgsMapCanvas* canvas, const QStri
 }
 
 bool LayerOps::addOsmBasemap(QgsProject* project, QgsMapCanvas* canvas, QString* errorOut) {
-  ensureTileNetworkIdentity();
+  LayerOps::ensureTileNetworkIdentity();
   const QStringList uris = {
       QStringLiteral(
           "type=xyz&url=https://tile.openstreetmap.org/%7Bz%7D/%7Bx%7D/%7By%7D.png&zmax=19&zmin=0&crs=EPSG:3857&tilePixelRatio=1"),
@@ -1414,8 +1753,11 @@ bool LayerOps::addVworldBaseMap(QgsProject* project, QgsMapCanvas* canvas, const
 void LayerOps::refreshXyzBasemapTiles(QgsMapCanvas* canvas) {
   if (!canvas) return;
   applyCanvasScreenDpi(canvas);
+  // 병렬 렌더만 끈다(WMS 중첩 이벤트 루프 AV 방지). 미리보기 작업은 끄지 않는다.
+  // 예전에는 여기서 setPreviewJobsEnabled(false)를 불렀는데, 이 함수가 11곳에서
+  // 불리는 탓에 화면이 뜨거나 배경지도를 올릴 때마다 미리보기가 다시 꺼졌다.
+  // 그러면 화면을 끄는 동안 캔버스에 보여줄 그림이 없어 지도가 꺼졌다 켜진다.
   canvas->setParallelRenderingEnabled(false);
-  canvas->setPreviewJobsEnabled(false);
   // Aborting an in-flight WMS job drops TileDownloadManager objects that
   // still finish and call deleteLater — ACCESS_VIOLATION on Windows.
   if (canvas->isDrawing())
@@ -1754,6 +2096,12 @@ static QString copernicusCogVsicurl(int latFloor, int lonFloor) {
   return QStringLiteral("/vsicurl/https://copernicus-dem-30m.s3.amazonaws.com/%1/%1.tif").arg(tile);
 }
 
+QString LayerOps::copernicusCogUriForWgs84(double latDeg, double lonDeg) {
+  const int latFloor = static_cast<int>(std::floor(latDeg));
+  const int lonFloor = static_cast<int>(std::floor(lonDeg));
+  return copernicusCogVsicurl(latFloor, lonFloor);
+}
+
 static bool tryAddCopernicusViewDem(QgsProject* project, QgsMapCanvas* canvas, QString* errorOut) {
   if (!project || !canvas) return false;
   QgsRectangle ext = canvas->extent();
@@ -1800,6 +2148,7 @@ static bool tryAddCopernicusViewDem(QgsProject* project, QgsMapCanvas* canvas, Q
     return false;
   }
   LayerOps::placeInLegendGroup(project, rl, QStringLiteral("참조 지도"));
+  LayerOps::ensureDemRelief(project, rl);
   return true;
 }
 
@@ -1909,16 +2258,29 @@ bool LayerOps::applyDemElevationStyle(QgsRasterLayer* layer, const QgsRectangle&
   double zMin = 0.0;
   double zMax = 200.0;
   if (classes.isEmpty()) {
-    // Sampled min/max only (200). Last Discrete class is +inf so peaks above
-    // the sample stay colored. sampleSize=0 would scan a whole /vsicurl COG.
-    QgsRasterBandStats st =
-        dp->bandStatistics(1, Qgis::RasterBandStatistic::Min | Qgis::RasterBandStatistic::Max,
-                           statsExtent, 200);
+    // Sampled min/max (25000) across statsExtent or whole raster if extent is narrow/missing.
+    // Last Discrete class is +inf so high peaks above the sample stay colored.
+    QgsRasterBandStats st;
+    if (!statsExtent.isEmpty() && statsExtent.isFinite()) {
+      st = dp->bandStatistics(1, Qgis::RasterBandStatistic::Min | Qgis::RasterBandStatistic::Max,
+                              statsExtent, 25000);
+    }
+    if (!std::isfinite(st.minimumValue) || !std::isfinite(st.maximumValue) ||
+        st.maximumValue <= st.minimumValue || (st.maximumValue - st.minimumValue < 150.0)) {
+      QgsRasterBandStats wholeSt =
+          dp->bandStatistics(1, Qgis::RasterBandStatistic::Min | Qgis::RasterBandStatistic::Max,
+                             QgsRectangle(), 25000);
+      if (std::isfinite(wholeSt.minimumValue) && std::isfinite(wholeSt.maximumValue) &&
+          wholeSt.maximumValue > wholeSt.minimumValue) {
+        st = wholeSt;
+      }
+    }
     zMin = st.minimumValue;
     zMax = st.maximumValue;
+    if (zMin < 0.0 && zMin > -10.0) zMin = 0.0;
     if (!std::isfinite(zMin) || !std::isfinite(zMax) || zMax <= zMin) {
       zMin = 0.0;
-      zMax = 200.0;
+      zMax = 300.0;
     }
     classes = buildDemElevationClasses(zMin, zMax, style.classCount, style.stepMeters);
   } else {
@@ -1973,6 +2335,42 @@ bool LayerOps::applyDemElevationStyle(QgsRasterLayer* layer, const QgsRectangle&
   return true;
 }
 
+bool LayerOps::addTilePackBasemap(QgsProject* project, QgsMapCanvas* canvas, const QString& path,
+                                  const QString& name, QString* errorOut) {
+  if (!project) {
+    if (errorOut) *errorOut = QStringLiteral("프로젝트가 없습니다.");
+    return false;
+  }
+  if (!QFileInfo::exists(path)) {
+    if (errorOut) *errorOut = QStringLiteral("타일팩 파일이 없습니다: %1").arg(path);
+    return false;
+  }
+  removeLayersNamed(project, name);
+  auto* rl = new QgsRasterLayer(path, name, QStringLiteral("gdal"));
+  if (!rl->isValid()) {
+    if (errorOut)
+      *errorOut = QStringLiteral("타일팩을 열 수 없습니다: %1").arg(rl->error().message());
+    delete rl;
+    return false;
+  }
+  markReferenceLayer(rl);
+  QgsMapLayer* added = project->addMapLayer(rl, true);
+  if (!added) {
+    if (errorOut) *errorOut = QStringLiteral("타일팩 레이어를 넣지 못했습니다.");
+    delete rl;
+    return false;
+  }
+  applyLegendCrsLabel(added);
+  if (QgsLayerTree* root = project->layerTreeRoot()) {
+    if (QgsLayerTreeLayer* node = root->findLayer(added->id()))
+      node->setItemVisibilityChecked(true);
+  }
+  pruneEmptyLegendGroups(project);
+  if (canvas)
+    refreshCanvasIfIdle(canvas);
+  return true;
+}
+
 bool LayerOps::addDemElevationRaster(QgsProject* project, QgsMapCanvas* canvas, const QString& path,
                                      QString* errorOut) {
   if (!project) {
@@ -2002,6 +2400,7 @@ bool LayerOps::addDemElevationRaster(QgsProject* project, QgsMapCanvas* canvas, 
     return false;
   }
   LayerOps::placeInLegendGroup(project, rl, QStringLiteral("참조 지도"));
+  LayerOps::ensureDemRelief(project, rl);
   if (canvas && !canvas->isDrawing()) {
     const QgsRectangle e = rl->extent();
     if (!rl->crs().isGeographic() && e.isFinite() && e.width() > 0 && e.width() < 20000.0 &&
@@ -2011,6 +2410,96 @@ bool LayerOps::addDemElevationRaster(QgsProject* project, QgsMapCanvas* canvas, 
       LayerOps::syncMapCanvas(project, canvas, false);
   }
   return true;
+}
+
+QgsRasterLayer* LayerOps::ensureDemRelief(QgsProject* project, QgsRasterLayer* demLayer) {
+  if (!project || !demLayer) return nullptr;
+  const QString reliefTitle = QStringLiteral("지형 음영");
+  QgsRasterLayer* shade = nullptr;
+  for (QgsMapLayer* ml : project->mapLayers()) {
+    if (ml && ml->name() == reliefTitle && ml->isValid()) {
+      shade = qobject_cast<QgsRasterLayer*>(ml);
+      if (shade) break;
+    }
+  }
+  if (!shade) {
+    const QString src = demLayer->source();
+    const bool isLocal = demLayer->providerType().compare(QLatin1String("gdal"), Qt::CaseInsensitive) == 0 &&
+                         !src.startsWith(QLatin1String("/vsicurl"), Qt::CaseInsensitive) &&
+                         QFile::exists(src);
+    if (isLocal) {
+      auto* hs = new QgsRasterLayer(src, reliefTitle, QStringLiteral("gdal"));
+      if (hs->isValid()) {
+        if (demLayer->crs().isValid()) hs->setCrs(demLayer->crs());
+        auto* rend = new QgsHillshadeRenderer(hs->dataProvider(), 1, 315.0, 45.0);
+        rend->setZFactor(hs->crs().isGeographic() ? 111120.0 : 3.0);
+        rend->setMultiDirectional(true);
+        hs->setRenderer(rend);
+        shade = hs;
+      } else {
+        delete hs;
+      }
+    }
+    if (!shade) {
+      ensureTileNetworkIdentity();
+      const QString uri = QStringLiteral(
+          "type=xyz&url=https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/"
+          "World_Hillshade/MapServer/tile/%7Bz%7D/%7By%7D/%7Bx%7D"
+          "&zmax=16&zmin=1&crs=EPSG:3857&tilePixelRatio=1");
+      auto* rl = new QgsRasterLayer(uri, reliefTitle, QStringLiteral("wms"));
+      if (rl->isValid()) {
+        rl->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:3857")));
+        shade = rl;
+      } else {
+        delete rl;
+      }
+    }
+    if (!shade && demLayer->bandCount() >= 1) {
+      auto* hs = new QgsRasterLayer(demLayer->source(), reliefTitle, demLayer->providerType());
+      if (hs->isValid()) {
+        if (demLayer->crs().isValid()) hs->setCrs(demLayer->crs());
+        auto* rend = new QgsHillshadeRenderer(hs->dataProvider(), 1, 315.0, 45.0);
+        rend->setZFactor(hs->crs().isGeographic() ? 111120.0 : 3.0);
+        rend->setMultiDirectional(true);
+        hs->setRenderer(rend);
+        shade = hs;
+      } else {
+        delete hs;
+      }
+    }
+    if (!shade) return nullptr;
+
+    shade->setBlendMode(QPainter::CompositionMode_Multiply);
+    shade->setOpacity(0.55);
+    shade->setCustomProperty(QStringLiteral("ka_hgis/omit_sheet_legend"), true);
+    LayerOps::markReferenceLayer(shade);
+    // addToLegend = false prevents adding to root then deleting, which would trigger
+    // QgsLayerTreeRegistryBridge and destroy the layer.
+    if (!project->addMapLayer(shade, false)) {
+      delete shade;
+      return nullptr;
+    }
+    QgsLayerTree* root = project->layerTreeRoot();
+    if (root) {
+      QgsLayerTreeLayer* demNode = root->findLayer(demLayer->id());
+      auto* parent = demNode ? qobject_cast<QgsLayerTreeGroup*>(demNode->parent()) : nullptr;
+      if (!parent) parent = root;
+      const int demIdx = demNode ? parent->children().indexOf(demNode) : 0;
+      parent->insertLayer(demIdx < 0 ? 0 : demIdx, shade);
+      if (QgsLayerTreeLayer* shadeNode = root->findLayer(shade->id())) {
+        shadeNode->setItemVisibilityChecked(true);
+      }
+    }
+  }
+
+  shade->setBlendMode(QPainter::CompositionMode_Multiply);
+  shade->setOpacity(0.55);
+  if (QgsLayerTree* root = project->layerTreeRoot()) {
+    if (QgsLayerTreeLayer* shadeNode = root->findLayer(shade->id()))
+      shadeNode->setItemVisibilityChecked(true);
+  }
+  shade->triggerRepaint();
+  return shade;
 }
 
 bool LayerOps::addDemColorReliefMap(QgsProject* project, QgsMapCanvas* canvas, QString* errorOut) {
@@ -2211,8 +2700,8 @@ bool LayerOps::isLayerVisible(QgsProject* project, const QString& name) {
 
 void LayerOps::refreshCanvasIfIdle(QgsMapCanvas* canvas) {
   if (!canvas || canvas->isDrawing()) return;
+  // 병렬 렌더만 끈다. 미리보기는 유지해야 팬·줌에서 지도가 안 꺼진다.
   canvas->setParallelRenderingEnabled(false);
-  canvas->setPreviewJobsEnabled(false);
   canvas->refresh();
 }
 
@@ -2470,7 +2959,8 @@ void LayerOps::zoomToKorea(QgsMapCanvas* canvas, const QString& epsgAuthId, bool
     ext = QgsRectangle(124.5, 33.0, 132.0, 39.5);
   }
   canvas->setExtent(extentFittedInside(ext, canvasViewAspect(canvas)));
-  canvas->setRenderFlag(true);
+  if (!canvas->renderFlag())
+    canvas->setRenderFlag(true);
   if (!refresh) return;
   canvas->freeze(false);
   refreshCanvasIfIdle(canvas);
@@ -2695,6 +3185,63 @@ bool LayerOps::undoCommittedFeature(QgsVectorLayer* layer, qint64 featureId, QSt
     layer->startEditing();
   layer->updateExtents();
   layer->triggerRepaint();
+  return true;
+}
+
+bool LayerOps::purgeCommittedFeatures(QgsVectorLayer* layer, QString* errorOut) {
+  if (!layer || !layer->isValid()) {
+    if (errorOut) *errorOut = QStringLiteral("레이어가 없습니다.");
+    return false;
+  }
+  if (isReferenceLayer(layer)) {
+    if (errorOut) *errorOut = QStringLiteral("참조 지도는 비울 수 없습니다.");
+    return false;
+  }
+  const QString src = layer->source().split(QLatin1Char('|')).first();
+  if (src.endsWith(QLatin1String(".shp"), Qt::CaseInsensitive)) {
+    if (errorOut) *errorOut = QStringLiteral("외부 SHP 파일은 물리적으로 도형을 비울 수 없습니다.");
+    return false;
+  }
+  const QString key = layerKeyOf(layer);
+  if (key.startsWith(QLatin1String("user:"))) {
+    if (errorOut) *errorOut = QStringLiteral("외부 추가 레이어의 원본 파일은 비울 수 없습니다.");
+    return false;
+  }
+  const QgsFeatureIds ids = layer->allFeatureIds();
+  if (ids.isEmpty()) {
+    if (QgsDataProvider* p = layer->dataProvider())
+      p->reloadData();
+    layer->updateExtents();
+    return true;
+  }
+  const bool startedHere = !layer->isEditable();
+  if (startedHere && !layer->startEditing()) {
+    if (errorOut) *errorOut = QStringLiteral("편집을 열 수 없습니다.");
+    return false;
+  }
+  if (!layer->deleteFeatures(ids)) {
+    if (errorOut) *errorOut = QStringLiteral("도형을 지우지 못했습니다.");
+    if (startedHere) layer->rollBack();
+    return false;
+  }
+  if (!layer->commitChanges()) {
+    if (errorOut) *errorOut = layer->commitErrors().join(QLatin1Char('\n'));
+    layer->rollBack();
+    return false;
+  }
+  if (QgsVectorDataProvider* p = layer->dataProvider()) {
+    if (layer->featureCount() > 0 && !p->deleteFeatures(layer->allFeatureIds())) {
+      if (errorOut) *errorOut = QStringLiteral("GPKG에서 도형을 지우지 못했습니다.");
+      return false;
+    }
+    p->reloadData();
+  }
+  layer->updateExtents();
+  layer->triggerRepaint();
+  if (layer->featureCount() > 0) {
+    if (errorOut) *errorOut = QStringLiteral("지운 뒤에도 도형이 남아 있습니다.");
+    return false;
+  }
   return true;
 }
 

@@ -157,6 +157,20 @@ void dPdf(QPainter& p) {
   p.drawLine(38, 20, 46, 20);
 }
 
+void dTerrain3d(QPainter& p) {
+  prep(p, 2.5);
+  QPolygonF ridge;
+  ridge << QPointF(10, 48) << QPointF(20, 30) << QPointF(28, 38) << QPointF(40, 14)
+        << QPointF(54, 44);
+  p.drawPolyline(ridge);
+  p.drawLine(QPointF(10, 50), QPointF(54, 50));
+  p.drawLine(QPointF(48, 10), QPointF(48, 22));
+  fillInk(p);
+  QPolygonF n;
+  n << QPointF(48, 8) << QPointF(44.5, 16) << QPointF(51.5, 16);
+  p.drawPolygon(n);
+}
+
 void dSection(QPainter& p) {
   prep(p, 2.6);
   p.drawRoundedRect(QRectF(12, 16, 40, 32), 3, 3);
@@ -580,7 +594,7 @@ QIcon icon(const QString& id) {
   QIcon ic;
   if (id == QLatin1String("new")) ic = bake(dDocPlus);
   else if (id == QLatin1String("open") || id == QLatin1String("import")) ic = bake(dFolder);
-  else if (id == QLatin1String("save")) ic = bake(dSave);
+  else if (id == QLatin1String("save") || id == QLatin1String("save_as")) ic = bake(dSave);
   else if (id == QLatin1String("layer")) ic = bake(dLayer);
   else if (id == QLatin1String("map") || id == QLatin1String("vworld_base") ||
            id == QLatin1String("vworld_hybrid") || id == QLatin1String("hybrid"))
@@ -599,6 +613,7 @@ QIcon icon(const QString& id) {
   else if (id == QLatin1String("export")) ic = bake(dExport);
   else if (id == QLatin1String("pdf")) ic = bake(dPdf);
   else if (id == QLatin1String("section") || id == QLatin1String("section_layout")) ic = bake(dSection);
+  else if (id == QLatin1String("terrain_3d") || id == QLatin1String("terrain3d")) ic = bake(dTerrain3d);
   else if (id == QLatin1String("crs")) ic = bake(dCrs);
   else if (id == QLatin1String("transform")) ic = bake(dTransform);
   else if (id == QLatin1String("upload")) ic = bake(dUpload);

@@ -438,10 +438,18 @@ bool KaAlignMapTool::saveAligned(QString* savedPath, QString* errorOut) {
   if (m_raster) {
     auto* rl = qobject_cast<QgsRasterLayer*>(m_layer.data());
     if (!rl) return false;
-    if (!GeorefService::applyWorldFileToRaster(rl, m_affine, workCrs(), errorOut))
+    if (!GeorefService::persistAlignedRaster(rl, m_affine, workCrs(), errorOut))
       return false;
     LayerOps::markReferenceLayer(rl);
     LayerOps::applyLegendCrsLabel(rl);
+    GeorefService::styleAlignedRasterOverlay(rl);
+    LayerOps::setAlignPending(rl, false);
+    if (QgsProject* proj = QgsProject::instance()) {
+      if (QgsLayerTree* root = proj->layerTreeRoot()) {
+        if (QgsLayerTreeLayer* n = root->findLayer(rl->id()))
+          n->setItemVisibilityChecked(true);
+      }
+    }
     if (savedPath) *savedPath = GeorefService::worldFilePathFor(rl->source());
     return true;
   }

@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include <gdal_priv.h>
+#include <cpl_conv.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -92,6 +93,107 @@ bool readFloatBand(const QString& tifPath, std::vector<float>* out, RasterInfo* 
   if (err != CE_None) {
     if (errorOut)
       *errorOut = QStringLiteral("DEM 읽기 실패");
+    return false;
+  }
+  return true;
+}
+
+bool readFloatWindow(const QString& tifPath, double xMin, double yMin, double xMax, double yMax,
+                     int maxEdge, std::vector<float>* out, RasterInfo* info, QString* errorOut) {
+  if (!out || !info) {
+    if (errorOut)
+      *errorOut = QStringLiteral("null buffer");
+    return false;
+  }
+  if (!(xMax > xMin) || !(yMax > yMin)) {
+    if (errorOut)
+      *errorOut = QStringLiteral("자를 범위가 없습니다.");
+    return false;
+  }
+  GDALAllRegister();
+  if (tifPath.contains(QLatin1String("vsicurl")) || tifPath.contains(QLatin1String("http")))
+    CPLSetConfigOption("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR");
+  GDALDataset* ds = static_cast<GDALDataset*>(GDALOpen(tifPath.toUtf8().constData(), GA_ReadOnly));
+  if (!ds) {
+    if (errorOut)
+      *errorOut = QStringLiteral("DEM을 열 수 없습니다.");
+    return false;
+  }
+  GDALRasterBand* band = ds->GetRasterBand(1);
+  if (!band) {
+    GDALClose(ds);
+    if (errorOut)
+      *errorOut = QStringLiteral("밴드가 없습니다.");
+    return false;
+  }
+  double gt[6] = {0, 1, 0, 0, 0, -1};
+  ds->GetGeoTransform(gt);
+  double inv[6] = {0, 1, 0, 0, 0, -1};
+  if (!GDALInvGeoTransform(gt, inv)) {
+    GDALClose(ds);
+    if (errorOut)
+      *errorOut = QStringLiteral("좌표 변환이 안됩니다.");
+    return false;
+  }
+  const int rw = ds->GetRasterXSize();
+  const int rh = ds->GetRasterYSize();
+  const double xs[4] = {xMin, xMax, xMin, xMax};
+  const double ys[4] = {yMin, yMin, yMax, yMax};
+  double minC = 1e300, maxC = -1e300, minR = 1e300, maxR = -1e300;
+  for (int i = 0; i < 4; ++i) {
+    double c = 0, r = 0;
+    GDALApplyGeoTransform(inv, xs[i], ys[i], &c, &r);
+    minC = std::min(minC, c);
+    maxC = std::max(maxC, c);
+    minR = std::min(minR, r);
+    maxR = std::max(maxR, r);
+  }
+  int x0 = std::max(0, static_cast<int>(std::floor(minC)));
+  int y0 = std::max(0, static_cast<int>(std::floor(minR)));
+  int x1 = std::min(rw, static_cast<int>(std::ceil(maxC)));
+  int y1 = std::min(rh, static_cast<int>(std::ceil(maxR)));
+  int winW = x1 - x0;
+  int winH = y1 - y0;
+  if (winW < 2 || winH < 2) {
+    GDALClose(ds);
+    if (errorOut)
+      *errorOut = QStringLiteral("화면 범위에 DEM이 없습니다.");
+    return false;
+  }
+  int outW = winW;
+  int outH = winH;
+  const int cap = maxEdge > 1 ? maxEdge : winW;
+  const int longEdge = std::max(winW, winH);
+  if (longEdge > cap) {
+    const double s = static_cast<double>(cap) / static_cast<double>(longEdge);
+    outW = std::max(2, static_cast<int>(std::lround(winW * s)));
+    outH = std::max(2, static_cast<int>(std::lround(winH * s)));
+  }
+  int hasNd = 0;
+  const double nd = band->GetNoDataValue(&hasNd);
+  info->hasNoData = hasNd != 0;
+  info->noData = static_cast<float>(nd);
+  info->width = outW;
+  info->height = outH;
+  if (const char* wkt = ds->GetProjectionRef())
+    info->projectionWkt = QString::fromUtf8(wkt);
+  double ox = 0, oy = 0;
+  GDALApplyGeoTransform(gt, x0, y0, &ox, &oy);
+  const double sx = static_cast<double>(winW) / static_cast<double>(outW);
+  const double sy = static_cast<double>(winH) / static_cast<double>(outH);
+  info->geotransform[0] = ox;
+  info->geotransform[1] = gt[1] * sx;
+  info->geotransform[2] = gt[2] * sy;
+  info->geotransform[3] = oy;
+  info->geotransform[4] = gt[4] * sx;
+  info->geotransform[5] = gt[5] * sy;
+  out->assign(static_cast<size_t>(outW) * static_cast<size_t>(outH), info->noData);
+  const CPLErr err = band->RasterIO(GF_Read, x0, y0, winW, winH, out->data(), outW, outH,
+                                    GDT_Float32, 0, 0);
+  GDALClose(ds);
+  if (err != CE_None) {
+    if (errorOut)
+      *errorOut = QStringLiteral("DEM 창 읽기 실패");
     return false;
   }
   return true;

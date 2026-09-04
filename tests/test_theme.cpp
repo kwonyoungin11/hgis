@@ -19,6 +19,7 @@ private slots:
   void noCheapSpinArrowBlock();
   void noCatchAllWidgetRules();
   void chromeFontIsFieldKorean();
+  void beginnerChrome_questionLabels();
 };
 
 void TestTheme::tokensMatchSpec() {
@@ -79,6 +80,10 @@ void TestTheme::requiredSelectorsPresent() {
       "QTableWidget",
       "QDialogButtonBox",
       "QWidget#startPage",
+      "QWidget#beginnerRibbon",
+      "QFrame#ribbonGroup",
+      "QLabel#ribbonGroupCaption",
+      "QWidget#regionLocator QToolButton#regionChip",
   };
   for (const char* sel : need) {
     QVERIFY2(qss.contains(QLatin1String(sel)), sel);
@@ -100,7 +105,7 @@ void TestTheme::toolbarCheckedIsUnderline() {
   const QRegularExpression solidPrimary(
       QStringLiteral(R"(QToolButton#btnPrimary\s*\{[^}]*background:\s*#1E67C6)"));
   QVERIFY2(!solidPrimary.match(qss).hasMatch(),
-           "새조사/열기/저장 must not be always-on solid blue");
+           "조사파일 단추는 항상 파란 면이면 안 됨");
 }
 
 void TestTheme::primaryToolbarIconsUseInk() {
@@ -139,6 +144,53 @@ void TestTheme::chromeFontIsFieldKorean() {
                     .match(qss)
                     .hasMatch(),
            "studio tool rail must not use 10px type");
+}
+
+void TestTheme::beginnerChrome_questionLabels() {
+  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
+  const QString main = QString::fromUtf8(mw.readAll());
+  QVERIFY2(main.contains(QLatin1String("beginnerRibbon")) ||
+               main.contains(QLatin1String("KaBeginnerRibbon")),
+           "메인에 초보자 리본");
+  QVERIFY2(main.contains(QString::fromUtf8("조사파일")), "조사파일 그룹");
+  QVERIFY2(main.contains(QString::fromUtf8("기록")), "기록 그룹");
+  QVERIFY2(main.contains(QString::fromUtf8("배경 지도를 깔아볼까?")), "배경 그룹");
+  QVERIFY2(main.contains(QString::fromUtf8("정합·분석")), "정합 그룹");
+  QVERIFY2(main.contains(QString::fromUtf8("산출")), "산출 그룹");
+  QVERIFY2(main.contains(QString::fromUtf8("찾기")), "찾기 그룹");
+  QVERIFY2(main.contains(QString::fromUtf8("만들까?")), "새조사 초보자 말");
+  QVERIFY2(main.contains(QString::fromUtf8("도면")) && main.contains(QString::fromUtf8("만들까?")),
+           "도면출력 초보자 말");
+  QVERIFY2(!main.contains(QLatin1String("addDockWidget(Qt::RightDockWidgetArea, checkDock)")),
+           "도면 검수 칸을 지도에 붙이지 않음");
+  QVERIFY2(main.contains(QString::fromUtf8("제출(5179)")), "제출은 5179");
+  QVERIFY2(main.contains(QString::fromUtf8("유구 면을 그려볼까?")), "그리기 둘째 줄");
+  QVERIFY2(main.contains(QString::fromUtf8("파일을 지도에 끌어 넣으면 레이어가 됩니다.")),
+           "파일함 끌어넣기 안내");
+  QVERIFY2(!main.contains(QLatin1String("addIcon(QStringLiteral(\"out\"), QStringLiteral(\"terrain_3d\")")),
+           "입체지형 리본 삭제");
+
+  QFile rb(QStringLiteral("src/app/KaBeginnerRibbon.cpp"));
+  QVERIFY2(rb.open(QIODevice::ReadOnly | QIODevice::Text), "KaBeginnerRibbon.cpp");
+  const QString ribbon = QString::fromUtf8(rb.readAll());
+  QVERIFY2(ribbon.contains(QLatin1String("ribbonGroupCaption")), "그룹 제목 라벨");
+  QVERIFY2(ribbon.contains(QLatin1String("twoLine")) || ribbon.contains(QStringLiteral("\\n")),
+           "리본 글자는 두 줄");
+
+  QFile ds(QStringLiteral("src/app/KaDrawingStudio.cpp"));
+  QVERIFY2(ds.open(QIODevice::ReadOnly | QIODevice::Text), "KaDrawingStudio.cpp");
+  const QString studio = QString::fromUtf8(ds.readAll());
+  QVERIFY2(studio.contains(QString::fromUtf8("PDF로 내보낼까?")), "조판 PDF 초보자 말");
+  QVERIFY2(studio.contains(QString::fromUtf8("무엇을 넣을까?")), "조판 오른쪽 안내");
+  QVERIFY2(!studio.contains(QLatin1String("studioToolbar")), "조판 위 보기 툴바 없음 — 휠·드래그");
+  QVERIFY2(!studio.contains(QString::fromUtf8("용지 전체를 볼까?")), "용지 맞춤 버튼 없음");
+  QVERIFY2(!studio.contains(QString::fromUtf8("화면을 움직여볼까?")), "화면 이동 버튼 없음");
+  QVERIFY2(!studio.contains(QLatin1String("addGroup(QStringLiteral(\"view\")")),
+           "보기 그룹 없음");
+  QVERIFY2(studio.contains(QLatin1String("savePdf")), "PDF 슬롯은 그대로");
+  QVERIFY2(!studio.contains(QLatin1String("addStudio(QStringLiteral(\"out\")")),
+           "위 리본 PDF는 범례창과 중복이라 뺌");
 }
 
 QTEST_GUILESS_MAIN(TestTheme)

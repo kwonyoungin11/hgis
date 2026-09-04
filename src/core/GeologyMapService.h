@@ -50,5 +50,12 @@ public:
   static bool applyGeologyStyle(QgsVectorLayer* layer,
                                 const QHash<QString, QColor>& officialColors = {});
 
+  // 지질 색 위에 음영 오버레이(2.5D). 산이 솟는 3D 렌더가 아님. 참조 지도.
+  static QString reliefLayerTitle();
+  static QgsMapLayer* existingGeologyLayer(QgsProject* project);
+  static void drapeOnRelief(QgsMapLayer* layer);
+  static bool ensureReliefUnderlay(QgsProject* project, QgsMapCanvas* canvas,
+                                   QgsMapLayer* geology, QString* errorOut = nullptr);
+
   static double maxSpanMeters() { return 80000.0; }
 };

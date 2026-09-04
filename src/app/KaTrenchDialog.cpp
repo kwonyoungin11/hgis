@@ -9,6 +9,7 @@
 #include <QLineEdit>
 #include <QLocale>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QSpinBox>
 
 KaTrenchDialog::KaTrenchDialog(QWidget* parent) : QDialog(parent) {
@@ -19,6 +20,29 @@ KaTrenchDialog::KaTrenchDialog(QWidget* parent) : QDialog(parent) {
 
   m_auto = new QCheckBox(QStringLiteral("지금 그린(또는 선택한) 조사구역에 자동 배치"), this);
   form->addRow(m_auto);
+
+  // 조사 종류가 목표 비율을 정한다. 길이·둑은 그 비율에 맞춰 자동으로 잡힌다.
+  m_kind = new QComboBox(this);
+  m_kind->addItem(QStringLiteral("시굴조사 — 전체 면적의 10%"),
+                  static_cast<int>(SurveyKind::Trial));
+  m_kind->addItem(QStringLiteral("표본조사 — 전체 면적의 2%"),
+                  static_cast<int>(SurveyKind::Sample));
+  m_kind->addItem(QStringLiteral("직접 지정 — 규격·둑을 내가 정함"),
+                  static_cast<int>(SurveyKind::Manual));
+  m_kind->setToolTip(QStringLiteral(
+      "시굴 10%·표본 2%는 매장유산 조사의 기준 비율입니다. 폭은 2 m로 고정하고 "
+      "길이와 둑 간격을 맞춰 구역 전체에 고르게 깝니다."));
+  form->addRow(QStringLiteral("조사 종류"), m_kind);
+
+  m_terrain = new QCheckBox(QStringLiteral("지형 사면 방향으로 넣기(등고선 직교)"), this);
+  m_terrain->setToolTip(QStringLiteral(
+      "트렌치 장축을 오르막 쪽으로 돌립니다. 등고선과 나란히 넣으면 같은 층만 "
+      "따라가 층서를 못 읽습니다. DEM을 올려야 씁니다."));
+  form->addRow(m_terrain);
+  m_terrainInfo = new QLabel(this);
+  m_terrainInfo->setWordWrap(true);
+  m_terrainInfo->setStyleSheet(QStringLiteral("color:#6E757D;"));
+  form->addRow(m_terrainInfo);
 
   m_size = new QComboBox(this);
   m_size->addItem(QStringLiteral("2 × 20 m"), 20);
@@ -100,6 +124,9 @@ KaTrenchDialog::KaTrenchDialog(QWidget* parent) : QDialog(parent) {
   connect(m_cols, QOverload<int>::of(&QSpinBox::valueChanged), this,
           [this](int) { refreshPlan(); });
   connect(m_auto, &QCheckBox::toggled, this, [this](bool) { refreshPlan(); });
+  connect(m_kind, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+          [this](int) { refreshPlan(); });
+  connect(m_terrain, &QCheckBox::toggled, this, [this](bool) { refreshPlan(); });
   refreshPlan();
 }
 
@@ -120,6 +147,44 @@ void KaTrenchDialog::setArea(const QByteArray& wkb, double areaM2) {
   refreshPlan();
 }
 
+KaTrenchDialog::SurveyKind KaTrenchDialog::surveyKind() const {
+  return static_cast<SurveyKind>(m_kind->currentData().toInt());
+}
+
+double KaTrenchDialog::targetPct() const {
+  switch (surveyKind()) {
+    case SurveyKind::Trial: return 10.0;
+    case SurveyKind::Sample: return 2.0;
+    case SurveyKind::Manual: break;
+  }
+  return 0.0;
+}
+
+bool KaTrenchDialog::useTerrainAzimuth() const {
+  return m_terrain->isChecked() && m_aspect.valid;
+}
+
+void KaTrenchDialog::setTerrainAspect(const TrenchGridGenerator::SlopeAspect& aspect) {
+  m_aspect = aspect;
+  m_terrain->setEnabled(aspect.valid);
+  if (!aspect.valid) {
+    m_terrain->setChecked(false);
+    m_terrainInfo->setText(QStringLiteral(
+        "지형 방향을 쓰려면 DEM을 올리세요. 평지이거나 DEM이 없으면 방위 칸 값으로 깝니다."));
+  } else {
+    // 사면이 있으면 기본으로 켠다 — 층서를 자르는 쪽이 조사 기본이다.
+    m_terrain->setChecked(true);
+    m_terrainInfo->setText(QStringLiteral("지형: 오르막 %1° · 경사 %2% — 트렌치 장축을 이 방향으로 넣습니다.")
+                               .arg(QLocale().toString(aspect.azimuthDeg, 'f', 0))
+                               .arg(QLocale().toString(aspect.slopePct, 'f', 1)));
+  }
+  refreshPlan();
+}
+
+double KaTrenchDialog::effectiveAzimuth() const {
+  return useTerrainAzimuth() ? m_aspect.azimuthDeg : m_az->value();
+}
+
 TrenchGridGenerator::Spec KaTrenchDialog::spec() const {
   TrenchGridGenerator::Spec sp;
   sp.trenchWidth = 2.0;
@@ -127,7 +192,7 @@ TrenchGridGenerator::Spec KaTrenchDialog::spec() const {
   sp.balkWidth = m_balk->value();
   sp.rows = m_rows->value();
   sp.cols = m_cols->value();
-  sp.azimuthDeg = m_az->value();
+  sp.azimuthDeg = effectiveAzimuth();
   sp.namePrefix = m_prefix->text().trimmed();
   if (sp.namePrefix.isEmpty())
     sp.namePrefix = QStringLiteral("Tr-");
@@ -140,8 +205,40 @@ bool KaTrenchDialog::autoFill() const {
 
 void KaTrenchDialog::refreshPlan() {
   const bool fill = autoFill();
+  const bool ratioMode = fill && surveyKind() != SurveyKind::Manual;
   m_rows->setEnabled(!fill);
   m_cols->setEnabled(!fill);
+  // 비율 모드에서는 길이·둑을 프로그램이 정한다. 값은 계산 결과를 되비춘다.
+  m_size->setEnabled(!ratioMode);
+  m_balk->setEnabled(!ratioMode);
+  m_az->setEnabled(!useTerrainAzimuth());
+  if (ratioMode) {
+    const double az = effectiveAzimuth();
+    const auto plan =
+        TrenchGridGenerator::buildForTargetRatio(m_areaWkb, targetPct(), 2.0, az);
+    if (plan.cells.empty()) {
+      m_ratio->setStyleSheet(QStringLiteral("color:#A33A2E;font-weight:700;"));
+      m_ratio->setText(QStringLiteral("이 구역에 2 m 트렌치가 들어가지 않습니다. 구역을 더 크게 그리거나 「직접 지정」으로 바꾸세요."));
+      return;
+    }
+    {
+      const QSignalBlocker b1(m_balk);
+      m_balk->setValue(plan.balk);
+    }
+    m_ratio->setStyleSheet(QStringLiteral("color:#2E7D4F;font-weight:700;"));
+    m_ratio->setText(
+        QStringLiteral("%1 · 트렌치 %2개 · 2 × %3 m · 둑 %4 m · 총 %5㎡ · 비율 %6% (목표 %7%) · 방위 %8°")
+            .arg(surveyKind() == SurveyKind::Trial ? QStringLiteral("시굴조사")
+                                                   : QStringLiteral("표본조사"))
+            .arg(plan.cells.size())
+            .arg(QLocale().toString(plan.length, 'f', 0))
+            .arg(QLocale().toString(plan.balk, 'f', 0))
+            .arg(QLocale().toString(TrenchGridGenerator::totalArea(plan.cells), 'f', 0))
+            .arg(QLocale().toString(plan.ratioPct, 'f', 1))
+            .arg(QLocale().toString(targetPct(), 'f', 0))
+            .arg(QLocale().toString(az, 'f', 0)));
+    return;
+  }
   if (!fill) {
     const TrenchGridGenerator::Spec sp = spec();
     const double t = sp.rows * sp.cols * sp.trenchWidth * sp.trenchLength;

@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "cmd.exe /d /c .cursor\\hooks\\run.cmd session-start",
+        "timeout": 15
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": "cmd.exe /d /c .cursor\\hooks\\run.cmd after-file-edit",
+        "timeout": 10
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "cmd.exe /d /c .cursor\\hooks\\run.cmd before-shell",
+        "timeout": 10
+      }
+    ],
+    "stop": [
+      {
+        "command": "cmd.exe /d /c .cursor\\hooks\\run.cmd stop-auto",
+        "timeout": 15,
+        "loop_limit": 3
+      }
+    ]
+  }
+}

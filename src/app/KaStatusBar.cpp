@@ -122,7 +122,7 @@ void KaStatusBar::refreshCrsText() {
   m_crsButton->setText(QStringLiteral("작업 %1").arg(work));
   m_crsButton->setToolTip(
       QStringLiteral("지금 그리는 좌표계는 %1입니다. 눌러서 바꿀 수 있습니다.").arg(m_workCrs));
-  m_uploadChip->setText(QStringLiteral("제출 %1").arg(upload));
+  m_uploadChip->setText(QStringLiteral("→ 제출 %1").arg(upload));
   m_uploadChip->setToolTip(
       QStringLiteral("제출용 파일은 작업 좌표계와 상관없이 항상 %1로 변환되어 나갑니다.")
           .arg(m_uploadCrs));

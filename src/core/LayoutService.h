@@ -7,6 +7,7 @@
 #include <QStringList>
 #include <qgsfeatureid.h>
 #include <qgsrectangle.h>
+#include <qgspointxy.h>
 class QgsProject;
 class QgsLayout;
 class QgsLayoutItemMap;
@@ -102,6 +103,14 @@ public:
   // zoomFactor > 1 이면 확대(범위가 좁아짐).
   static QgsRectangle zoomExtentAtAnchor(const QgsRectangle& extent, double fx, double fy,
                                          double zoomFactor);
+
+  // 조판 맵 칸(item mm) ↔ 지도 XY. 축척이 바뀌면 같은 땅점은 다른 용지 자리로 간다.
+  static QPointF layoutMapItemFromXy(const QgsRectangle& extent, const QRectF& mapRect,
+                                     double mapX, double mapY);
+  static QgsPointXY layoutMapXyFromItem(const QgsRectangle& extent, const QRectF& mapRect,
+                                        const QPointF& itemPt);
+  static bool layoutMapItemContains(const QPointF& itemPt, const QRectF& mapRect,
+                                    double marginMm = 0.5);
 
   // 지도 칸 아래 고정 띠: 왼쪽 축척자, 그 아래 축척 1:N, 오른쪽 CRS, 맨 오른쪽 방위.
   // 위성/지적 픽셀 위에 올리지 않는다. 도면만들기마다 이 기하를 다시 앉힌다.

@@ -46,11 +46,14 @@ add_library(ka_core STATIC
   src/core/MeasureOps.cpp
   src/core/DemAnalyzer.cpp
   src/core/TrenchGridGenerator.cpp
+  src/core/TilePackService.cpp
   src/core/SoilMapService.cpp
   src/core/PaleoLandformService.cpp
   src/core/GeologyMapService.cpp
   src/core/RiverMapService.cpp
   src/core/SectionLayoutService.cpp
+  src/core/Terrain3dService.cpp
+  src/core/Terrain3dLayoutService.cpp
   src/core/ChecklistEngine.h
   src/core/SurveyProjectFactory.h
   src/core/ExportService.h
@@ -68,11 +71,14 @@ add_library(ka_core STATIC
   src/core/MeasureOps.h
   src/core/DemAnalyzer.h
   src/core/TrenchGridGenerator.h
+  src/core/TilePackService.h
   src/core/SoilMapService.h
   src/core/PaleoLandformService.h
   src/core/GeologyMapService.h
   src/core/RiverMapService.h
   src/core/SectionLayoutService.h
+  src/core/Terrain3dService.h
+  src/core/Terrain3dLayoutService.h
 )
 target_include_directories(ka_core PUBLIC ${KA_INCLUDES})
 target_link_directories(ka_core PUBLIC ${KA_LIBDIRS})
@@ -85,6 +91,14 @@ target_compile_definitions(ka_core PUBLIC KA_HGIS_HAS_QGIS=1 "CORE_EXPORT=__decl
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
   "${CMAKE_SOURCE_DIR}/data/theme/ka-hgis.qss")
 file(READ "${CMAKE_SOURCE_DIR}/data/theme/ka-hgis.qss" KA_QSS_CONTENT)
+string(FIND "${KA_QSS_CONTENT}" "/* ---- View tabs" _split_pos)
+if(_split_pos GREATER 0)
+  string(SUBSTRING "${KA_QSS_CONTENT}" 0 ${_split_pos} KA_QSS_PART1)
+  string(SUBSTRING "${KA_QSS_CONTENT}" ${_split_pos} -1 KA_QSS_PART2)
+else()
+  set(KA_QSS_PART1 "${KA_QSS_CONTENT}")
+  set(KA_QSS_PART2 "")
+endif()
 configure_file(
   "${CMAKE_SOURCE_DIR}/src/app/ka-hgis.qss.inc.in"
   "${CMAKE_BINARY_DIR}/generated/ka-hgis.qss.inc"
@@ -95,6 +109,7 @@ add_executable(ka-hgis
   src/app/app.rc
   src/app/main.cpp
   src/app/MainWindow.cpp
+  src/app/KaBeginnerRibbon.cpp
   src/app/KaApplication.cpp
   src/app/KaTheme.cpp
   src/app/KaIcons.cpp
@@ -103,6 +118,9 @@ add_executable(ka-hgis
   src/app/KaLayoutWindow.cpp
   src/app/KaDrawingStudio.cpp
   src/app/KaSectionDrawingStudio.cpp
+  src/app/KaTerrain3dStudio.cpp
+  src/app/KaTerrain3dLayoutStudio.cpp
+  src/app/KaTerrain3dView.cpp
   src/app/KaAlignMapTool.cpp
   src/app/KaImageView.cpp
   src/app/KaStartPage.cpp
@@ -110,12 +128,15 @@ add_executable(ka-hgis
   src/app/KaMeasureMapTool.cpp
   src/app/KaCanvasGridOverlay.cpp
   src/app/KaTrenchMoveTool.cpp
+  src/app/KaVertexEditTool.cpp
+  src/app/KaFoundLocationMark.cpp
   src/app/KaTrenchDialog.cpp
   src/app/KaDemClassDialog.cpp
   src/app/KaStatusBar.cpp
   src/app/KaCrashGuard.cpp
   src/app/KaRegionLocator.cpp
   src/app/MainWindow.h
+  src/app/KaBeginnerRibbon.h
   src/app/KaApplication.h
   src/app/KaTheme.h
   src/app/KaIcons.h
@@ -124,6 +145,9 @@ add_executable(ka-hgis
   src/app/KaLayoutWindow.h
   src/app/KaDrawingStudio.h
   src/app/KaSectionDrawingStudio.h
+  src/app/KaTerrain3dStudio.h
+  src/app/KaTerrain3dLayoutStudio.h
+  src/app/KaTerrain3dView.h
   src/app/KaAlignMapTool.h
   src/app/KaImageView.h
   src/app/KaStartPage.h
@@ -131,6 +155,8 @@ add_executable(ka-hgis
   src/app/KaMeasureMapTool.h
   src/app/KaCanvasGridOverlay.h
   src/app/KaTrenchMoveTool.h
+  src/app/KaVertexEditTool.h
+  src/app/KaFoundLocationMark.h
   src/app/KaTrenchDialog.h
   src/app/KaDemClassDialog.h
   src/app/KaStatusBar.h
@@ -243,6 +269,16 @@ if(KA_HGIS_BUILD_TESTS)
   target_compile_definitions(ka_section_layout_tests PRIVATE ${KA_TEST_DEFS})
   add_test(NAME section_layout_engine COMMAND ka_section_layout_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+  add_executable(ka_terrain_3d_tests tests/test_terrain_3d.cpp)
+  target_link_libraries(ka_terrain_3d_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_terrain_3d_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_terrain_3d_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_terrain_3d_tests PRIVATE ${KA_TEST_DEFS})
+  if (MSVC)
+    target_compile_options(ka_terrain_3d_tests PRIVATE /utf-8)
+  endif()
+  add_test(NAME terrain_3d_engine COMMAND ka_terrain_3d_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
   add_executable(ka_section_studio_tests
     tests/test_section_studio.cpp
     src/app/KaSectionDrawingStudio.cpp
@@ -257,6 +293,7 @@ if(KA_HGIS_BUILD_TESTS)
   set_target_properties(ka_hgis_tests ka_workflow_tests ka_georef_tests ka_preset_tests
                         ka_buffer_tests ka_measure_tests ka_dem_trench_tests
                         ka_section_layout_tests ka_section_studio_tests
+                        ka_terrain_3d_tests
                         PROPERTIES WIN32_EXECUTABLE FALSE)
 
   add_executable(ka_theme_tests
@@ -292,7 +329,7 @@ if(KA_HGIS_BUILD_TESTS)
       "${OSGEO4W_ROOT}/bin"
     )
     string(JOIN "\\;" _ka_path_esc ${_ka_path})
-    set_tests_properties(checklist_engine workflow_engine georef_engine feature_presets buffer_ring measure_tape dem_trench_engine theme_qss recent_surveys section_layout_engine section_studio_engine PROPERTIES
+    set_tests_properties(checklist_engine workflow_engine georef_engine feature_presets buffer_ring measure_tape dem_trench_engine theme_qss recent_surveys section_layout_engine section_studio_engine terrain_3d_engine PROPERTIES
       ENVIRONMENT "PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
   endif()
 endif()

@@ -1,0 +1,23 @@
+---
+description: C++20/Qt6/QGIS 코딩 규칙. src와 tests를 열 때 적용
+globs: src/**/*.{cpp,h,hpp},tests/**/*.{cpp,h,hpp}
+alwaysApply: false
+---
+
+# C++ / Qt conventions
+
+- C++20, 주변 파일 스타일. UI 문자열은 `QStringLiteral` 한국어. 식별자는 영어.
+- 새 로직은 `src/core/*` 서비스. `MainWindow.cpp` / `LayerOps.cpp`에 기능을 더 쌓지 않는다.
+- QGIS: 레포 안 사용처를 먼저 보고, 없을 때만 `docs/vendor/qgis-manual-3.44/`.
+- 도메인 레이어는 `LayerOps::ensureDomainLayer`로만 범례에 올린다.
+- 디지타이즈: `startEditing` → `QgsFeature(fields)` + `setGeometry` → `addFeature` → `commit`. 그리는 중 속성 대화상자 없음.
+- GIS 오류를 빈 `catch`로 삼키지 않는다. 실패 테스트를 지워 통과시키지 않는다.
+
+```cpp
+// BAD
+try { layer->commitChanges(); } catch (...) {}
+
+// GOOD
+if (!layer->commitChanges())
+    throw std::runtime_error(layer->commitErrors().join('\n').toStdString());
+```

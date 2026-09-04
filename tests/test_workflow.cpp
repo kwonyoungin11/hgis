@@ -38,6 +38,8 @@
 #include <qgsrastershader.h>
 #include <qgscolorrampshader.h>
 #include <qgsrasterblock.h>
+#include <qgshillshaderenderer.h>
+#include <QPainter>
 
 #include <qgsapplication.h>
 #include <qgsproject.h>
@@ -54,6 +56,7 @@
 #include <qgscoordinatetransformcontext.h>
 #include <qgslayertreemodel.h>
 #include <qgslayertree.h>
+#include <qgslayertreegroup.h>
 #include <qgslayoutmanager.h>
 #include <qgsmapcanvas.h>
 #include <qgslayertreelayer.h>
@@ -87,6 +90,10 @@ private slots:
   void thematicOverlay_secondToggleHidesLayer();
   void mapTools_secondClickReturnsToPan();
   void geologyDownload_skipsBlockingWmsAndRefreshWhileDrawing();
+  void geologyRelief_drapesMultiplyOverHillshade();
+  void demRelief_drapesMultiplyOverDem();
+  void ensureDomainLayer_reopenAfterPurgeClearsDeletedPolygons();
+  void vertexEdit_snapsAndOffersAddDeleteOnLine();
   void riverLevelLegend_waterStyleAndNameLabels();
   void thematicMapsScaleRangeTo1in100000();
   void thematicDownloadMaxSpanFourTimesPrior();
@@ -171,11 +178,16 @@ private slots:
   void layoutOpensAsMainWindowTabNotSeparateWindow();
   void startupLoadsSatelliteAndCadastralWithoutToolbarIcons();
   void layoutCoordPointHasIconAndCallout();
+  void layoutCoordCallout_staysOnMapXyAfterScale();
+  void layoutCoordCallout_rejectsOutsideAndCanUndo();
   void layoutProfessionalSheet_frameGridTitleBlock();
   void drawingStudio_sheetOmitsCrossesAndBorderRuler();
   void layoutRasterDrawnInOnePass();
   void layoutWheelZoom_keepsPointUnderCursor();
   void singleInstanceGuardIsWiredIntoBoot();
+  void portableExe_setsPrefixFromExeDir();
+  void nameAttributeLabeling_5ptAndAreaCheck();
+  void intersectionSnappingAndSaveAsPreservesLayers();
 };
 
 static bool projectHasLayerNamedLike(QgsProject* proj, const QString& base) {
@@ -650,11 +662,15 @@ void TestWorkflow::mapTools_secondClickReturnsToPan() {
   };
   const QString sel = bodyOf(QStringLiteral("void MainWindow::startSelectTool"));
   QVERIFY2(!sel.isEmpty(), "startSelectTool");
-  QVERIFY2(sel.contains(QLatin1String("m_selectTool")) && sel.contains(QLatin1String("m_panTool")),
+  // 도형선택은 고르기만이 아니라 꼭짓점을 끌어 고치는 데까지 쓴다(m_vertexTool).
+  // QgsVertexTool은 qgis_app 안이라 링크가 안 돼 직접 만든 도구를 쓴다.
+  QVERIFY2(sel.contains(QLatin1String("m_vertexTool")) && sel.contains(QLatin1String("m_panTool")),
            "second 선택 click must return to pan");
-  QVERIFY2(sel.contains(QLatin1String("mapTool() == m_selectTool")) ||
-               sel.contains(QLatin1String("mapTool()==m_selectTool")),
+  QVERIFY2(sel.contains(QLatin1String("mapTool() == m_vertexTool")) ||
+               sel.contains(QLatin1String("mapTool()==m_vertexTool")),
            "선택 must detect the already-active tool");
+  QVERIFY2(sel.contains(QLatin1String("setLayer")),
+           "고칠 레이어를 도구에 넘겨야 꼭짓점을 잡는다");
   const QString meas = bodyOf(QStringLiteral("void MainWindow::startMeasureTool"));
   QVERIFY2(!meas.isEmpty(), "startMeasureTool");
   QVERIFY2(meas.contains(QLatin1String("m_panTool")),
@@ -699,6 +715,264 @@ void TestWorkflow::geologyDownload_skipsBlockingWmsAndRefreshWhileDrawing() {
                geoBody.contains(QLatin1String("toggleLayerVisibility")) ||
                geoBody.contains(QLatin1String("isLayerVisible")),
            "지질도 second click must hide the overlay like QGIS/ArcGIS");
+  QVERIFY2(geoBody.contains(QLatin1String("ensureReliefUnderlay")),
+           "이미 받아 둔 지질도를 다시 켤 때도 음영을 만들어야 함");
+}
+
+void TestWorkflow::geologyRelief_drapesMultiplyOverHillshade() {
+  QgsVectorLayer mem(QStringLiteral("MultiPolygon?crs=EPSG:5186"), QStringLiteral("georelief"),
+                     QStringLiteral("memory"));
+  QVERIFY(mem.isValid());
+  mem.dataProvider()->addAttributes(
+      {QgsField(QStringLiteral("시대"), QMetaType::Type::QString),
+       QgsField(QStringLiteral("지층"), QMetaType::Type::QString),
+       QgsField(QStringLiteral("기호"), QMetaType::Type::QString)});
+  mem.updateFields();
+  QgsFeature f(mem.fields());
+  f.setAttribute(0, QStringLiteral("현생누대 신생대 제4기"));
+  f.setAttribute(1, QStringLiteral("충적층"));
+  f.setAttribute(2, QStringLiteral("Qa"));
+  QVERIFY(mem.dataProvider()->addFeatures(QgsFeatureList() << f));
+  QVERIFY(GeologyMapService::applyGeologyStyle(&mem));
+  GeologyMapService::drapeOnRelief(&mem);
+  QCOMPARE(mem.blendMode(), QPainter::CompositionMode_SourceOver);
+  QCOMPARE(mem.featureBlendMode(), QPainter::CompositionMode_SourceOver);
+  auto* cat = dynamic_cast<QgsCategorizedSymbolRenderer*>(mem.renderer());
+  QVERIFY(cat);
+  QVERIFY(cat->categories().size() >= 1);
+  QVERIFY(LayoutService::sheetLegendOmitsLayerName(GeologyMapService::reliefLayerTitle()));
+
+  GDALAllRegister();
+  const QString path = QDir::temp().filePath(QStringLiteral("ka_hgis_geo_relief.tif"));
+  QFile::remove(path);
+  GDALDriver* drv = GetGDALDriverManager()->GetDriverByName("GTiff");
+  QVERIFY2(drv, "GTiff");
+  GDALDataset* ds = drv->Create(path.toUtf8().constData(), 16, 16, 1, GDT_Float32, nullptr);
+  QVERIFY2(ds, "create DEM tif");
+  double gt[6] = {200000.0, 10.0, 0.0, 450000.0, 0.0, -10.0};
+  ds->SetGeoTransform(gt);
+  OGRSpatialReference srs;
+  srs.SetFromUserInput("EPSG:5186");
+  char* wkt = nullptr;
+  srs.exportToWkt(&wkt);
+  if (wkt) {
+    ds->SetProjection(wkt);
+    CPLFree(wkt);
+  }
+  std::vector<float> z(16 * 16);
+  for (int y = 0; y < 16; ++y) {
+    for (int x = 0; x < 16; ++x)
+      z[static_cast<size_t>(y) * 16 + x] = 20.0f + float(x * y);
+  }
+  QVERIFY(ds->GetRasterBand(1)->RasterIO(GF_Write, 0, 0, 16, 16, z.data(), 16, 16, GDT_Float32, 0,
+                                         0) == CE_None);
+  GDALClose(ds);
+
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  auto* dem = new QgsRasterLayer(path, QStringLiteral("DEM"), QStringLiteral("gdal"));
+  QVERIFY2(dem->isValid(), "local DEM");
+  QVERIFY(proj.addMapLayer(dem, true));
+  auto* geo = mem.clone();
+  geo->setName(QStringLiteral("지질도(KIGAM 1:5만)"));
+  QVERIFY(proj.addMapLayer(geo, true));
+  QString err;
+  QVERIFY2(GeologyMapService::ensureReliefUnderlay(&proj, nullptr, geo, &err), qPrintable(err));
+  QgsMapLayer* shade = nullptr;
+  for (QgsMapLayer* ml : proj.mapLayers()) {
+    if (ml && ml->name() == GeologyMapService::reliefLayerTitle())
+      shade = ml;
+  }
+  QVERIFY2(shade, "지질 음영 레이어");
+  auto* hs = qobject_cast<QgsRasterLayer*>(shade);
+  QVERIFY(hs);
+  QVERIFY2(dynamic_cast<QgsHillshadeRenderer*>(hs->renderer()),
+           "DEM 색띠가 아니라 회색 음영이어야 지질 색이 산다");
+  QCOMPARE(hs->blendMode(), QPainter::CompositionMode_Multiply);
+  QVERIFY2(hs->opacity() > 0.34 && hs->opacity() < 0.71, "음영이 색 위에서 보여야 함");
+  QCOMPARE(geo->blendMode(), QPainter::CompositionMode_SourceOver);
+  QVERIFY2(proj.mapLayer(dem->id()) == dem, "기존 DEM 높이 범례는 유지");
+  if (QgsLayerTree* root = proj.layerTreeRoot()) {
+    QgsLayerTreeLayer* geoN = root->findLayer(geo->id());
+    QgsLayerTreeLayer* shN = root->findLayer(hs->id());
+    QVERIFY(geoN && shN);
+    auto* parent = qobject_cast<QgsLayerTreeGroup*>(geoN->parent());
+    if (!parent) parent = root;
+    QVERIFY2(parent->children().indexOf(shN) < parent->children().indexOf(geoN),
+             "음영이 지질 색보다 위에 있어야 능선이 보임");
+  }
+
+  QgsProject bare;
+  bare.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  auto* geoBare = mem.clone();
+  geoBare->setName(QStringLiteral("지질도(KIGAM 1:5만)"));
+  QVERIFY(bare.addMapLayer(geoBare, true));
+  QString bareErr;
+  QVERIFY2(GeologyMapService::ensureReliefUnderlay(&bare, nullptr, geoBare, &bareErr),
+           qPrintable(bareErr));
+  QgsMapLayer* xyzShade = nullptr;
+  for (QgsMapLayer* ml : bare.mapLayers()) {
+    QVERIFY2(!ml || ml->name() != QStringLiteral("지형맵"),
+             "지형맵 폴백은 두 번째 지질도 클릭에 남음");
+    if (ml && ml->name() == GeologyMapService::reliefLayerTitle())
+      xyzShade = ml;
+  }
+  QVERIFY2(xyzShade, "DEM 없어도 지질 음영이 있어야 화면에 변화가 있음");
+  QCOMPARE(xyzShade->blendMode(), QPainter::CompositionMode_Multiply);
+  QCOMPARE(geoBare->blendMode(), QPainter::CompositionMode_SourceOver);
+  QCOMPARE(GeologyMapService::existingGeologyLayer(&bare), geoBare);
+
+  QFile geoSrc(QStringLiteral("src/core/GeologyMapService.cpp"));
+  QVERIFY2(geoSrc.open(QIODevice::ReadOnly | QIODevice::Text), "GeologyMapService.cpp");
+  const QString body = QString::fromUtf8(geoSrc.readAll());
+  QVERIFY2(body.contains(QLatin1String("ensureReliefUnderlay")),
+           "지질도 받을 때 음영을 깔아야 함");
+  QVERIFY2(body.contains(QLatin1String("World_Hillshade")),
+           "로컬 DEM 없으면 세계 음영 타일이라도 깔아야 함");
+  QVERIFY2(!body.contains(QLatin1String("refreshAllLayers")),
+           "음영 추가가 지적 타일 캐시를 버리면 안 됨");
+  QVERIFY2(!body.contains(QLatin1String("addElevationHillshadeMap")),
+           "지형맵 XYZ는 지질 음영이 아님");
+  QVERIFY2(!body.contains(QString::fromUtf8("지형맵")),
+           "지형맵을 음영 자리에 넣으면 토글이 못 끔");
+}
+
+void TestWorkflow::demRelief_drapesMultiplyOverDem() {
+  GDALAllRegister();
+  const QString path = QDir::temp().filePath(QStringLiteral("ka_hgis_dem_relief_test.tif"));
+  QFile::remove(path);
+  GDALDriver* drv = GetGDALDriverManager()->GetDriverByName("GTiff");
+  QVERIFY2(drv, "GTiff");
+  GDALDataset* ds = drv->Create(path.toUtf8().constData(), 16, 16, 1, GDT_Float32, nullptr);
+  QVERIFY2(ds, "create DEM tif");
+  double gt[6] = {200000.0, 10.0, 0.0, 450000.0, 0.0, -10.0};
+  ds->SetGeoTransform(gt);
+  OGRSpatialReference srs;
+  srs.SetFromUserInput("EPSG:5186");
+  char* wkt = nullptr;
+  srs.exportToWkt(&wkt);
+  if (wkt) {
+    ds->SetProjection(wkt);
+    CPLFree(wkt);
+  }
+  std::vector<float> z(16 * 16);
+  for (int y = 0; y < 16; ++y) {
+    for (int x = 0; x < 16; ++x)
+      z[static_cast<size_t>(y) * 16 + x] = 50.0f + float(x * 5 + y * 10);
+  }
+  QVERIFY(ds->GetRasterBand(1)->RasterIO(GF_Write, 0, 0, 16, 16, z.data(), 16, 16, GDT_Float32, 0,
+                                         0) == CE_None);
+  GDALClose(ds);
+
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  auto* dem = new QgsRasterLayer(path, QStringLiteral("DEM"), QStringLiteral("gdal"));
+  QVERIFY2(dem->isValid(), "valid local DEM");
+  LayerOps::applyDemElevationStyle(dem);
+  QVERIFY(proj.addMapLayer(dem, true));
+  LayerOps::placeInLegendGroup(&proj, dem, QStringLiteral("참조 지도"));
+
+  QgsRasterLayer* shade = LayerOps::ensureDemRelief(&proj, dem);
+  QVERIFY2(shade != nullptr, "지형 음영이 생성되어야 함");
+  QVERIFY2(shade->isValid(), "지형 음영 레이어가 유효해야 함");
+  QCOMPARE(shade->name(), QStringLiteral("지형 음영"));
+  QCOMPARE(shade->blendMode(), QPainter::CompositionMode_Multiply);
+  QVERIFY2(shade->opacity() >= 0.50 && shade->opacity() <= 0.60, "음영 불투명도");
+
+  // QgsProject에서 삭제되지 않고 온전히 보존되어야 한다
+  QVERIFY2(proj.mapLayer(shade->id()) == shade, "지형 음영이 프로젝트에서 삭제되면 안 됨");
+  QVERIFY2(proj.mapLayer(dem->id()) == dem, "DEM 레이어도 유지되어야 함");
+
+  // 범례 트리에서 지형 음영이 DEM 바로 위에 쌓여 있어야 한다
+  if (QgsLayerTree* root = proj.layerTreeRoot()) {
+    QgsLayerTreeLayer* demNode = root->findLayer(dem->id());
+    QgsLayerTreeLayer* shadeNode = root->findLayer(shade->id());
+    QVERIFY2(demNode != nullptr, "DEM 노드 존재");
+    QVERIFY2(shadeNode != nullptr, "지형 음영 노드 존재");
+    QVERIFY2(shadeNode->itemVisibilityChecked(), "지형 음영이 켜져 있어야 함");
+    auto* parent = qobject_cast<QgsLayerTreeGroup*>(demNode->parent());
+    if (!parent) parent = root;
+    const int demIdx = parent->children().indexOf(demNode);
+    const int shadeIdx = parent->children().indexOf(shadeNode);
+    QVERIFY2(shadeIdx >= 0 && demIdx >= 0, "노드가 동일 부모 그룹에 위치");
+    QVERIFY2(shadeIdx < demIdx, "지형 음영이 DEM보다 위에 렌더링되도록 상위에 위치해야 함");
+  }
+
+  // 중복 호출 시 새 레이어를 만들지 않고 기존 레이어를 재사용해야 한다
+  QgsRasterLayer* shade2 = LayerOps::ensureDemRelief(&proj, dem);
+  QCOMPARE(shade2, shade);
+
+  QFile::remove(path);
+}
+
+void TestWorkflow::ensureDomainLayer_reopenAfterPurgeClearsDeletedPolygons() {
+  const QString dir = QDir::temp().filePath(QStringLiteral("ka_purge_%1")
+                                            .arg(QDateTime::currentMSecsSinceEpoch()));
+  QVERIFY(QDir().mkpath(dir));
+  QString err;
+  const QString gpkg =
+      SurveyProjectFactory::createNewSurvey(dir, QStringLiteral("퍼지재출현"), &err);
+  QVERIFY2(!gpkg.isEmpty(), qPrintable(err));
+
+  QgsProject proj;
+  QgsVectorLayer* vl =
+      LayerOps::ensureDomainLayer(&proj, gpkg, QStringLiteral("survey_area"),
+                                  QStringLiteral("조사구역"), &err);
+  QVERIFY2(vl, qPrintable(err));
+  QVERIFY(vl->startEditing());
+  QgsFeature f(vl->fields());
+  QgsPolylineXY ring;
+  ring << QgsPointXY(200000, 450000) << QgsPointXY(200080, 450000)
+       << QgsPointXY(200080, 450080) << QgsPointXY(200000, 450080)
+       << QgsPointXY(200000, 450000);
+  f.setGeometry(QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring));
+  QVERIFY(vl->addFeature(f));
+  QVERIFY(vl->commitChanges());
+  QVERIFY(vl->featureCount() >= 1);
+
+  QVERIFY2(LayerOps::purgeCommittedFeatures(vl, &err), qPrintable(err));
+  QCOMPARE(int(vl->featureCount()), 0);
+
+  const QString id = vl->id();
+  proj.removeMapLayer(id);
+  QgsVectorLayer* again =
+      LayerOps::ensureDomainLayer(&proj, gpkg, QStringLiteral("survey_area"),
+                                  QStringLiteral("조사구역"), &err);
+  QVERIFY2(again, qPrintable(err));
+  QCOMPARE(int(again->featureCount()), 0);
+}
+
+void TestWorkflow::vertexEdit_snapsAndOffersAddDeleteOnLine() {
+  QFile tool(QStringLiteral("src/app/KaVertexEditTool.cpp"));
+  QVERIFY2(tool.open(QIODevice::ReadOnly | QIODevice::Text), "KaVertexEditTool.cpp");
+  const QString src = QString::fromUtf8(tool.readAll());
+  QVERIFY2(src.contains(QLatin1String("snapToMap")),
+           "도형수정 점 이동에 자석이 없으면 근처 점이 안 붙음");
+  QVERIFY2(src.contains(QString::fromUtf8("점추가")),
+           "선 우클릭에 점추가가 있어야 함");
+  QVERIFY2(src.contains(QString::fromUtf8("점삭제")),
+           "선 우클릭에 점삭제가 있어야 함");
+  QVERIFY2(src.contains(QLatin1String("QMenu")),
+           "우클릭은 바로 지우지 말고 메뉴여야 함");
+  QVERIFY2(src.contains(QLatin1String("PreventContextMenu")),
+           "도형수정 중 지도 우클릭 메뉴가 점추가를 가리면 안 됨");
+  const int press = src.indexOf(QLatin1String("void KaVertexEditTool::canvasPressEvent"));
+  QVERIFY2(press >= 0, "canvasPressEvent");
+  const int pressEnd = src.indexOf(QLatin1String("void KaVertexEditTool::"), press + 10);
+  const QString pressBody = src.mid(press, pressEnd > press ? pressEnd - press : 1200);
+  QVERIFY2(!pressBody.contains(QLatin1String("deleteVertexAt(idx)")),
+           "우클릭에서 점을 바로 지우면 메뉴가 안 나옴");
+
+  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
+  const QString mwSrc = QString::fromUtf8(mw.readAll());
+  const int snap = mwSrc.indexOf(QLatin1String("void MainWindow::applySnapConfig"));
+  QVERIFY2(snap >= 0, "applySnapConfig");
+  const int snapEnd = mwSrc.indexOf(QLatin1String("void MainWindow::"), snap + 10);
+  const QString snapBody = mwSrc.mid(snap, snapEnd > snap ? snapEnd - snap : 800);
+  QVERIFY2(snapBody.contains(QLatin1String("m_vertexTool")) &&
+               snapBody.contains(QLatin1String("setSnapEnabled")),
+           "자석 설정이 도형수정 도구에 전달돼야 함");
 }
 
 void TestWorkflow::riverLevelLegend_waterStyleAndNameLabels() {
@@ -3325,6 +3599,61 @@ void TestWorkflow::layoutCoordPointHasIconAndCallout() {
   QVERIFY2(src.contains(QLatin1String("ka_coord_box_")), "label id");
 }
 
+void TestWorkflow::layoutCoordCallout_staysOnMapXyAfterScale() {
+  const QgsRectangle ext(200000.0, 450000.0, 200160.0, 450080.0);
+  const QRectF ir(10.0, 8.0, 160.0, 80.0);
+  const double mx = 200040.0;
+  const double my = 450060.0;
+  const QPointF p1 = LayoutService::layoutMapItemFromXy(ext, ir, mx, my);
+  const QgsPointXY back = LayoutService::layoutMapXyFromItem(ext, ir, p1);
+  QVERIFY2(qAbs(back.x() - mx) < 1e-6 && qAbs(back.y() - my) < 1e-6, "왕복이 같아야 함");
+  const QgsRectangle wide = LayoutService::extentForPaperScale(ext, 160.0, 2000.0);
+  QVERIFY2(wide.width() > ext.width() + 1.0, "축척을 키우면 범위가 넓어짐");
+  const QPointF p2 = LayoutService::layoutMapItemFromXy(wide, ir, mx, my);
+  QVERIFY2(qAbs(p1.x() - p2.x()) > 0.5 || qAbs(p1.y() - p2.y()) > 0.5,
+           "같은 땅점이 축척 뒤에도 같은 용지 자리에 있으면 화살표가 틀린 곳으로 감");
+  const QgsPointXY still = LayoutService::layoutMapXyFromItem(wide, ir, p2);
+  QVERIFY2(qAbs(still.x() - mx) < 1e-6 && qAbs(still.y() - my) < 1e-6,
+           "다시 앉힌 용지점은 같은 지도 XY여야 함");
+}
+
+void TestWorkflow::layoutCoordCallout_rejectsOutsideAndCanUndo() {
+  const QRectF ir(0.0, 0.0, 160.0, 80.0);
+  QVERIFY(LayoutService::layoutMapItemContains(QPointF(80.0, 40.0), ir));
+  QVERIFY2(!LayoutService::layoutMapItemContains(QPointF(-12.0, 40.0), ir),
+           "맵 밖 흰 용지 클릭은 좌표점이 아님");
+  QFile f(QStringLiteral("src/app/KaDrawingStudio.cpp"));
+  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "KaDrawingStudio.cpp");
+  const QString src = QString::fromUtf8(f.readAll());
+  QVERIFY2(src.contains(QLatin1String("undoLastCoordCallout")),
+           "마지막 좌표점을 지울 수 있어야 함");
+  QVERIFY2(src.contains(QLatin1String("relayoutCoordCallouts")),
+           "축척이 바뀌면 땅 XY에서 다시 앉혀야 함");
+  QVERIFY2(src.contains(QLatin1String("closestSegmentWithContext")),
+           "조판 자석은 꼭짓점만이 아니라 선에도 붙어야 함");
+  QVERIFY2(src.contains(QLatin1String("layoutMapItemContains")),
+           "맵 밖 클릭을 버려야 흰 용지에 K가 안 생김");
+  QVERIFY2(src.contains(QString::fromUtf8("마지막 점 지우기")),
+           "우클릭에 지우기가 있어야 함");
+}
+
+void TestWorkflow::portableExe_setsPrefixFromExeDir() {
+  QFile f(QStringLiteral("src/app/KaApplication.cpp"));
+  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "KaApplication.cpp");
+  const QString src = QString::fromUtf8(f.readAll());
+  QVERIFY2(src.contains(QLatin1String("applyBundledRuntime")),
+           "포터블 EXE가 자기 폴더에서 QGIS를 찾음");
+  QVERIFY2(src.contains(QLatin1String("apps/qgis-dev")), "포터블 폴더 구조");
+  QVERIFY2(src.contains(QLatin1String("kaExeDir")), "start.bat 없이 EXE 위치");
+  const int fn = src.indexOf(QLatin1String("static void applyBundledRuntime()"));
+  QVERIFY2(fn >= 0, "applyBundledRuntime");
+  const QString body = src.mid(fn, 2200);
+  QVERIFY2(body.contains(QLatin1String("QT_PLUGIN_PATH")) && body.contains(QLatin1String("toUtf8()")),
+           "한글 경로에서도 EXE만 눌러도 Qt 플러그인을 찾음");
+  QVERIFY2(!body.contains(QLatin1String("QFile::encodeName(qtPlug)")),
+           "포터블 QT_PLUGIN_PATH는 CP949 금지");
+}
+
 void TestWorkflow::singleInstanceGuardIsWiredIntoBoot() {
   // 중복 실행 가드는 정의만 있으면 효과가 없다. run()에서 실제로 불려야 한다.
   QFile f(QStringLiteral("src/app/KaApplication.cpp"));
@@ -3520,6 +3849,119 @@ void TestWorkflow::layoutRasterDrawnInOnePass() {
   QCOMPARE(built->renderContext().dpi(), 96.0);
 
   LayoutService::applySingleRasterPassRendering(nullptr);  // 널 안전
+}
+
+void TestWorkflow::nameAttributeLabeling_5ptAndAreaCheck() {
+  auto* vl = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186&field=id:integer&field=jibun:string&field=kind:string"),
+                                QStringLiteral("cadastral_sample"), QStringLiteral("memory"));
+  QVERIFY(vl->isValid());
+
+  // 1. detectNameField 검증: jibun 필드를 정확히 찾아낸다.
+  const QString detected = LayerOps::detectNameField(vl);
+  QCOMPARE(detected, QStringLiteral("jibun"));
+
+  // 2. 5.0 pt 기본 라벨 적용 (면적 미포함)
+  QVERIFY(LayerOps::applyNameAttributeLabels(vl, detected, 5.0, false));
+  QVERIFY(LayerOps::labelsVisible(vl));
+  QCOMPARE(LayerOps::currentLabelField(vl), QStringLiteral("jibun"));
+  QCOMPARE(LayerOps::labelFontSize(vl), 5.0);
+  QCOMPARE(LayerOps::labelShowArea(vl), false);
+
+  // 3. 면적 포함 및 8.0 pt로 크기 변경 적용
+  QVERIFY(LayerOps::applyNameAttributeLabels(vl, detected, 8.0, true));
+  QCOMPARE(LayerOps::labelFontSize(vl), 8.0);
+  QCOMPARE(LayerOps::labelShowArea(vl), true);
+
+  // 4. 라벨 끄기/켜기 토글
+  LayerOps::setLabelsVisible(vl, false);
+  QVERIFY(!LayerOps::labelsVisible(vl));
+  LayerOps::setLabelsVisible(vl, true);
+  QVERIFY(LayerOps::labelsVisible(vl));
+
+  delete vl;
+
+  // 5. 실제 수신된 한국어 SHP(CP949, .cpg 없음) 인코딩 자동 보정 검증
+  const QString sampleShp = QStringLiteral("C:/Users/kyi25/OneDrive/바탕 화면/안동시/발굴조사구역_260904142329633/발굴사업허가구역.shp");
+  if (QFile::exists(sampleShp)) {
+    const QString enc = LayerOps::prepareShapefileEncoding(sampleShp);
+    QCOMPARE(enc, QStringLiteral("CP949"));
+    auto* shpL = new QgsVectorLayer(sampleShp, QStringLiteral("허가구역"), QStringLiteral("ogr"));
+    QVERIFY(shpL->isValid());
+    const QString shpNameField = LayerOps::detectNameField(shpL);
+    QCOMPARE(shpNameField, QStringLiteral("사업명"));
+    for (const QgsField& f : shpL->fields()) {
+      QVERIFY2(!f.name().contains(QChar(0xFFFD)), "필드명에 깨짐 문자(\\uFFFD)가 없어야 한다");
+    }
+    delete shpL;
+  }
+}
+
+void TestWorkflow::intersectionSnappingAndSaveAsPreservesLayers() {
+  // 1. QgsSnappingConfig 교차점 스냅(Intersection Snapping) 설정 검증
+  QgsSnappingConfig cfg;
+  cfg.setEnabled(true);
+  cfg.setMode(Qgis::SnappingMode::AllLayers);
+  cfg.setTypeFlag(Qgis::SnappingType::Vertex | Qgis::SnappingType::Segment);
+  cfg.setIntersectionSnapping(true);
+  cfg.setSelfSnapping(true);
+  cfg.setTolerance(16.0);
+  cfg.setUnits(Qgis::MapToolUnit::Pixels);
+  QCOMPARE(cfg.intersectionSnapping(), true);
+  QCOMPARE(cfg.selfSnapping(), true);
+  QVERIFY(cfg.typeFlag().testFlag(Qgis::SnappingType::Vertex));
+  QVERIFY(cfg.typeFlag().testFlag(Qgis::SnappingType::Segment));
+
+  // 2. removeSurveyDomainLayers 호출 시 외부 사용자 SHP 레이어가 보존되는지 검증
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+
+  // (A) 도면 조사 레이어 (survey_area)
+  auto* domainLayer = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"), QStringLiteral("조사구역"), QStringLiteral("memory"));
+  QVERIFY(domainLayer->isValid());
+  LayerOps::markSurveyLayer(domainLayer, QStringLiteral("survey_area"));
+  proj.addMapLayer(domainLayer, true);
+
+  // (B) 사용자가 외부에서 불러온 SHP 레이어 (user:안동시_허가구역)
+  auto* userLayer = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"), QStringLiteral("안동시_허가구역"), QStringLiteral("memory"));
+  QVERIFY(userLayer->isValid());
+  LayerOps::markSurveyLayer(userLayer, QStringLiteral("user:안동시_허가구역"));
+  proj.addMapLayer(userLayer, true);
+
+  // (C) 참조 배경지도 레이어
+  auto* baseLayer = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"), QStringLiteral("참조배경"), QStringLiteral("memory"));
+  QVERIFY(baseLayer->isValid());
+  LayerOps::markReferenceLayer(baseLayer);
+  proj.addMapLayer(baseLayer, true);
+
+  const QString domainId = domainLayer->id();
+  const QString userId = userLayer->id();
+  const QString baseId = baseLayer->id();
+
+  // 조사 도면 레이어만 내리고 외부 사용자 레이어와 배경지도는 유지해야 함!
+  LayerOps::removeSurveyDomainLayers(&proj);
+
+  QCOMPARE(proj.mapLayers().size(), 2);
+  QVERIFY2(proj.mapLayer(userId) != nullptr, "사용자가 불러온 외부 SHP 레이어는 절대로 지워지지 않아야 한다!");
+  QVERIFY2(proj.mapLayer(baseId) != nullptr, "참조 배경지도는 유지되어야 한다!");
+  QVERIFY2(proj.mapLayer(domainId) == nullptr, "기존 도면 레이어만 정리되어야 한다!");
+
+  // 3. 프로젝트 저장 및 다른 이름으로 저장(.qgz) 동반 생성 시 외부 레이어 및 속성이 온전히 저장되는지 검증
+  const QString tempDir = QDir::tempPath() + QStringLiteral("/ka_hgis_saveas_test_") + QString::number(QDateTime::currentMSecsSinceEpoch());
+  QDir().mkpath(tempDir);
+  const QString targetQgz = tempDir + QStringLiteral("/안동_작업프로젝트.qgz");
+
+  proj.setFileName(targetQgz);
+  const bool writeOk = proj.write();
+  QVERIFY2(writeOk, "프로젝트(.qgz) 저장이 성공해야 한다");
+  QVERIFY(QFile::exists(targetQgz));
+
+  // 새 프로젝트 객체로 복원 테스트
+  QgsProject restoreProj;
+  const bool readOk = restoreProj.read(targetQgz);
+  QVERIFY2(readOk, "저장된 프로젝트(.qgz)를 다시 열 수 있어야 한다");
+  QVERIFY2(restoreProj.mapLayers().size() >= 2, "작업 중이던 레이어들이 프로젝트에 그대로 보존되어 있어야 한다!");
+
+  QDir(tempDir).removeRecursively();
 }
 
 #include "test_workflow.moc"

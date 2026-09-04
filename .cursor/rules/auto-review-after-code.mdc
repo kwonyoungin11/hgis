@@ -1,0 +1,22 @@
+---
+description: 제품 코드를 쓴 턴이 끝나면 묻지 말고 보안 리뷰를 한 번 자동 실행
+alwaysApply: true
+---
+
+# After product code — auto security review
+
+이 턴에 `src/`, `tests/`, `CMakeLists.txt`, `*.qss`를 썼으면:
+
+1. 사용자에게 `/review` 종류를 묻지 않는다. 기본은 **Security Review**.
+2. 최종 답변 전에 `Task` `subagent_type: "security-review"`를 **한 번** 띄운다.
+3. 프롬프트는 아래만 쓴다.
+
+```
+Full Repository Path: D:/hgis
+Diff: uncommitted changes
+Custom Instructions: Review this-turn product edits only. Do not fix findings.
+```
+
+4. 훅 `stop` follow-up이 같은 지시를 넣으면 **중복 실행하지 않는다**.
+5. 문서·규칙·훅·스킬만 고친 턴, 조사만 한 턴은 리뷰하지 않는다.
+6. 리뷰 결과를 고치거나 다시 돌리지 않는다. 표로만 보고한다.

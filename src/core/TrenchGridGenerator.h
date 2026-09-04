@@ -60,6 +60,24 @@ PickedArea pickAutoFillArea(const std::vector<SurveyPoly>& features,
 // rows/cols/origin of the spec are ignored.
 std::vector<Cell> buildInArea(const Spec& spec, const QByteArray& areaWkb);
 
+// 표고 표본 하나(작업 CRS 미터 + 표고 m).
+struct ElevSample {
+  double x = 0.0;
+  double y = 0.0;
+  double z = 0.0;
+};
+
+// 시굴 트렌치는 등고선에 직교, 즉 사면(오르막) 방향으로 넣어야 층서가 잘린다.
+// 등고선과 나란히 넣으면 같은 층만 따라가 층위를 못 읽는다.
+// 표본에 최소제곱 평면을 맞춰 오르막 방위를 낸다.
+struct SlopeAspect {
+  double azimuthDeg = 0.0;  // 오르막 방위(북 기준 시계 방향) = 트렌치 장축 방위
+  double slopePct = 0.0;    // 평균 경사(%)
+  bool valid = false;       // 표본 부족·평지면 false
+};
+// 경사가 minSlopePct보다 완만하면 방향에 의미가 없어 valid=false.
+SlopeAspect upslopeAspect(const std::vector<ElevSample>& samples, double minSlopePct = 0.5);
+
 // Width stays 2 m. Length and balk are searched so total trench area / survey
 // area ≈ targetPct (시굴 10, 표본 2). Cells stay inside the picked polygon.
 struct RatioFill {
@@ -68,8 +86,10 @@ struct RatioFill {
   double balk = 10.0;
   double ratioPct = 0.0;
   double areaM2 = 0.0;
+  double azimuthDeg = 0.0;
 };
-RatioFill buildForTargetRatio(const QByteArray& areaWkb, double targetPct, double width = 2.0);
+RatioFill buildForTargetRatio(const QByteArray& areaWkb, double targetPct, double width = 2.0,
+                              double azimuthDeg = 0.0);
 
 // Sum of trench areas (w × len per cell, square metres).
 double totalArea(const std::vector<Cell>& cells);

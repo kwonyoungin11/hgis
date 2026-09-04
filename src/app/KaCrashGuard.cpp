@@ -252,31 +252,54 @@ void KaCrashGuard::logLine(const QString& line) {
   static int repeat = 0;
   QMutexLocker lock(&mtx);
 
-  QFile f(logDirQ() + QStringLiteral("/session.log"));
-  // 4MB 넘으면 한 세대 물려 회전 — 경고 폭주가 디스크를 채우지 않게.
-  if (f.size() > 4 * 1024 * 1024) {
-    const QString oldPath = logDirQ() + QStringLiteral("/session.old.log");
-    QFile::remove(oldPath);
-    QFile::rename(f.fileName(), oldPath);
-  }
-  if (!f.open(QIODevice::Append | QIODevice::Text)) return;
-  QTextStream ts(&f);
-
   // 같은 줄이 연달아 오면(타일 서버 오류 폭주 등) 접어서 기록한다.
+  // 접히는 줄은 파일을 아예 건드리지 않는다 — 경고가 쏟아질 때 UI 스레드가
+  // 버릴 줄 하나마다 로그 파일을 여닫지 않게.
+  bool foldedNote = false;
   if (line == lastLine) {
     ++repeat;
-    if (repeat % 50 == 0)
-      ts << QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz"))
-         << QStringLiteral(" (직전 메시지 %1회 반복)\n").arg(repeat);
-    return;
+    if (repeat % 50 != 0) return;
+    foldedNote = true;
   }
-  if (repeat > 0) {
-    ts << QStringLiteral("  (직전 메시지 총 %1회 반복)\n").arg(repeat + 1);
-    repeat = 0;
+
+  // 핸들을 열어 둔다. 줄마다 open/close 하면 타일 오류 폭주 때 디스크 왕복이
+  // 그대로 UI 스레드 비용이 된다. 대신 줄마다 flush 해 충돌 직전 줄까지 남긴다.
+  static QFile logFile;
+  static int sinceSizeCheck = 0;
+  const QString path = logDirQ() + QStringLiteral("/session.log");
+  if (!logFile.isOpen()) {
+    logFile.setFileName(path);
+    if (!logFile.open(QIODevice::Append | QIODevice::Text)) return;
+    sinceSizeCheck = 0;
   }
-  lastLine = line;
-  ts << QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")) << ' '
-     << line << '\n';
+  // 4MB 넘으면 한 세대 물려 회전 — 경고 폭주가 디스크를 채우지 않게.
+  if (++sinceSizeCheck >= 200) {
+    sinceSizeCheck = 0;
+    if (logFile.size() > 4 * 1024 * 1024) {
+      logFile.close();
+      const QString oldPath = logDirQ() + QStringLiteral("/session.old.log");
+      QFile::remove(oldPath);
+      QFile::rename(path, oldPath);
+      logFile.setFileName(path);
+      if (!logFile.open(QIODevice::Append | QIODevice::Text)) return;
+    }
+  }
+
+  QTextStream ts(&logFile);
+  const QString stamp =
+      QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz"));
+  if (foldedNote) {
+    ts << stamp << QStringLiteral(" (직전 메시지 %1회 반복)\n").arg(repeat);
+  } else {
+    if (repeat > 0) {
+      ts << QStringLiteral("  (직전 메시지 총 %1회 반복)\n").arg(repeat + 1);
+      repeat = 0;
+    }
+    lastLine = line;
+    ts << stamp << ' ' << line << '\n';
+  }
+  ts.flush();
+  logFile.flush();
 }
 
 void KaCrashGuard::install() {
