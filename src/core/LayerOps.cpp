@@ -949,9 +949,11 @@ void LayerOps::placeInLegendGroup(QgsProject* project, QgsMapLayer* layer, const
   Q_UNUSED(insertAtBottom);
   if (!project || !layer) return;
   if (QgsLayerTree* root = project->layerTreeRoot()) {
-    if (QgsLayerTreeLayer* node = root->findLayer(layer->id()))
+    if (QgsLayerTreeLayer* node = root->findLayer(layer->id())) {
       node->setItemVisibilityChecked(true);
+    }
   }
+  ensureSatelliteAtBottom(project);
   pruneEmptyLegendGroups(project);
 }
 
@@ -1319,9 +1321,55 @@ QgsVectorLayer* LayerOps::createUserPolygonLayer(QgsProject* project, const QStr
   return vl;
 }
 
+void LayerOps::ensureSatelliteAtBottom(QgsProject* project) {
+  if (!project) return;
+  QgsLayerTree* root = project->layerTreeRoot();
+  if (!root) return;
+
+  QList<QgsMapLayer*> nonSat;
+  QList<QgsMapLayer*> sat;
+
+  for (QgsLayerTreeNode* child : root->children()) {
+    if (auto* lnode = qobject_cast<QgsLayerTreeLayer*>(child)) {
+      if (QgsMapLayer* l = lnode->layer()) {
+        const QString name = lnode->name().isEmpty() ? l->name() : lnode->name();
+        if (name.contains(QStringLiteral("위성"))) {
+          sat.append(l);
+        } else {
+          nonSat.append(l);
+        }
+      }
+    }
+  }
+
+  if (sat.isEmpty()) return;
+
+  bool needReorder = false;
+  bool seenSat = false;
+  for (QgsLayerTreeNode* child : root->children()) {
+    if (auto* lnode = qobject_cast<QgsLayerTreeLayer*>(child)) {
+      if (QgsMapLayer* l = lnode->layer()) {
+        const QString name = lnode->name().isEmpty() ? l->name() : lnode->name();
+        if (name.contains(QStringLiteral("위성"))) {
+          seenSat = true;
+        } else if (seenSat) {
+          needReorder = true;
+          break;
+        }
+      }
+    }
+  }
+
+  if (!needReorder) return;
+
+  const QList<QgsMapLayer*> newOrder = nonSat + sat;
+  root->reorderGroupLayers(newOrder);
+}
+
 QList<QgsMapLayer*> LayerOps::visibleLayersPaintOrder(QgsProject* project) {
   QList<QgsMapLayer*> visible;
   if (!project) return visible;
+  ensureSatelliteAtBottom(project);
   QgsLayerTree* root = project->layerTreeRoot();
   QList<QgsMapLayer*> ordered = root ? root->layerOrder() : QList<QgsMapLayer*>();
   if (ordered.isEmpty()) {
@@ -1348,6 +1396,18 @@ QList<QgsMapLayer*> LayerOps::visibleLayersPaintOrder(QgsProject* project) {
     for (QgsMapLayer* l : project->mapLayers())
       pushVisible(l);
   }
+
+  // 위성 레이어는 캔버스 렌더링 순서에서도 항상 가장 바닥(스택의 맨 끝)으로 배치
+  QList<QgsMapLayer*> sats;
+  for (int i = visible.size() - 1; i >= 0; --i) {
+    if (visible[i] && visible[i]->name().contains(QStringLiteral("위성"))) {
+      sats.prepend(visible.takeAt(i));
+    }
+  }
+  for (QgsMapLayer* sat : sats) {
+    visible.append(sat);
+  }
+
   return visible;
 }
 
@@ -1628,7 +1688,7 @@ static bool addXyzBasemap(QgsProject* project, QgsMapCanvas* canvas, const QStri
   }
   tuneBasemapLayer(rl, crispText);
   LayerOps::markReferenceLayer(rl);
-  QgsMapLayer* added = project->addMapLayer(rl, true);
+  QgsMapLayer* added = project->addMapLayer(rl, false);
   if (!added) {
     if (errorOut)
       *errorOut = QStringLiteral("Basemap 실패 (%1): addMapLayer rejected").arg(name);
@@ -1637,9 +1697,12 @@ static bool addXyzBasemap(QgsProject* project, QgsMapCanvas* canvas, const QStri
   }
   LayerOps::applyLegendCrsLabel(added);
   if (QgsLayerTree* root = project->layerTreeRoot()) {
-    if (QgsLayerTreeLayer* node = root->findLayer(added->id()))
+    QgsLayerTreeLayer* node = root->addLayer(added);
+    if (node) {
       node->setItemVisibilityChecked(true);
+    }
   }
+  LayerOps::ensureSatelliteAtBottom(project);
   LayerOps::pruneEmptyLegendGroups(project);
   if (project->mapLayer(added->id()) == nullptr) {
     if (errorOut)

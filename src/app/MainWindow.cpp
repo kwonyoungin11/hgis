@@ -1185,9 +1185,11 @@ void MainWindow::buildUi() {
       updateAlignOverlay();
   });
   connect(QgsProject::instance(), &QgsProject::layersAdded, this, [this](const QList<QgsMapLayer*>&) {
+    LayerOps::ensureSatelliteAtBottom(QgsProject::instance());
     QTimer::singleShot(0, this, [this]() { refreshMapCanvasNow(); syncThematicButtons(); });
   });
   connect(QgsProject::instance(), &QgsProject::layersRemoved, this, [this](const QStringList&) {
+    LayerOps::ensureSatelliteAtBottom(QgsProject::instance());
     QTimer::singleShot(0, this, [this]() { refreshMapCanvasNow(); syncThematicButtons(); });
   });
   // 레이어의 체크를 끄고 켜는 것도 아이콘에 그대로 따라와야 한다.
@@ -2111,9 +2113,7 @@ void MainWindow::ensureDefaultBasemaps() {
   for (QgsMapLayer* l : proj->mapLayers()) {
     if (!l) continue;
     const QString n = l->name();
-    if (n.contains(QStringLiteral("VWorld")) && n.contains(QStringLiteral("위성")))
-      hasSat = true;
-    else if (n == QLatin1String("위성"))
+    if (n.contains(QStringLiteral("위성")))
       hasSat = true;
     if (n.contains(QStringLiteral("VWorld")) && n.contains(QStringLiteral("지적")))
       hasCad = true;
@@ -2129,6 +2129,7 @@ void MainWindow::ensureDefaultBasemaps() {
     hasSat = LayerOps::addVworldSatelliteMap(proj, nullptr, key, &satErr);
   if (!hasCad && !key.isEmpty())
     hasCad = LayerOps::addVworldCadastralMap(proj, nullptr, key, &cadErr);
+  LayerOps::ensureSatelliteAtBottom(proj);
   if (hasSat && hasCad)
     statusBar()->showMessage(QStringLiteral("위성과 지적도를 올려 두었습니다."), 5000);
   else if (hasSat && !hasCad)
@@ -3933,6 +3934,7 @@ QgsVectorLayer* MainWindow::ensureDomainLayerForEdit(const QString& layerKey, co
 
 void MainWindow::onLayerTreeRowsMoved() {
   if (!m_canvas) return;
+  LayerOps::ensureSatelliteAtBottom(QgsProject::instance());
   LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
   LayerOps::refreshCanvasIfIdle(m_canvas);
 }
@@ -3949,9 +3951,17 @@ void MainWindow::moveSelectedLayer(int dir) {
   if (idx < 0) return;
   const int dest = idx + dir;
   if (dest < 0 || dest >= parent->children().size()) return;
-  if (!parent->takeChild(node)) return;
-  parent->insertChildNode(dest, node);
-  onLayerTreeRowsMoved();
+  QList<QgsMapLayer*> order;
+  for (QgsLayerTreeNode* child : parent->children()) {
+    if (auto* ln = qobject_cast<QgsLayerTreeLayer*>(child)) {
+      if (ln->layer()) order.append(ln->layer());
+    }
+  }
+  if (idx < order.size() && dest < order.size()) {
+    order.move(idx, dest);
+    parent->reorderGroupLayers(order);
+    onLayerTreeRowsMoved();
+  }
 #else
   Q_UNUSED(dir);
 #endif

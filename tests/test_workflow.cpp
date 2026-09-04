@@ -134,6 +134,7 @@ private slots:
   void vworldSatAndCadastralLiveKey();
   void ensureOtf_projectAndCanvasDestinationCrs5186();
   void syncMapCanvas_surveyLayersAboveReferenceBasemap();
+  void satelliteAlwaysAtBottomInLegendAndCanvas();
   void xyzBasemap_layerCrsForced3857();
   void suggestCadastralScale_clampsWhenTooZoomedOut();
   void prepareFieldBasemapPack_rejectsEmptyKey();
@@ -2376,6 +2377,55 @@ void TestWorkflow::syncMapCanvas_surveyLayersAboveReferenceBasemap() {
   QVERIFY2(iSurvey < iBase, "survey domain layer must paint above reference basemap");
 }
 
+void TestWorkflow::satelliteAlwaysAtBottomInLegendAndCanvas() {
+  QgsProject proj;
+  QVERIFY(LayerOps::ensureOtfEnabled(&proj, nullptr, QStringLiteral("EPSG:5186")));
+
+  auto* sat = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                 QStringLiteral("VWorld 위성"), QStringLiteral("memory"));
+  auto* cad = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                 QStringLiteral("지적"), QStringLiteral("memory"));
+  auto* survey = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                    QStringLiteral("조사구역"), QStringLiteral("memory"));
+  auto* shp = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                 QStringLiteral("발굴구역"), QStringLiteral("memory"));
+
+  LayerOps::markReferenceLayer(sat);
+  LayerOps::markReferenceLayer(cad);
+  LayerOps::markSurveyLayer(survey, QStringLiteral("survey_area"));
+  LayerOps::markReferenceLayer(shp);
+
+  // 위성을 먼저 넣든 나중에 넣든 항상 최하단이어야 함
+  proj.addMapLayer(sat);
+  proj.addMapLayer(cad);
+  proj.addMapLayer(survey);
+  proj.addMapLayer(shp);
+
+  LayerOps::ensureSatelliteAtBottom(&proj);
+
+  QgsLayerTree* root = proj.layerTreeRoot();
+  QVERIFY(root);
+  const auto children = root->children();
+  QVERIFY(!children.isEmpty());
+  auto* lastNode = qobject_cast<QgsLayerTreeLayer*>(children.last());
+  QVERIFY(lastNode);
+  QVERIFY(lastNode->layer());
+  QCOMPARE(lastNode->layer(), sat);
+  QVERIFY(lastNode->layer()->name().contains(QStringLiteral("위성")));
+
+  // 캔버스 페인트 순서에서도 위성이 맨 끝(가장 바닥)이어야 함
+  const QList<QgsMapLayer*> paintOrder = LayerOps::visibleLayersPaintOrder(&proj);
+  QVERIFY(!paintOrder.isEmpty());
+  QCOMPARE(paintOrder.last(), sat);
+  const int iSurvey = paintOrder.indexOf(survey);
+  const int iShp = paintOrder.indexOf(shp);
+  const int iCad = paintOrder.indexOf(cad);
+  const int iSat = paintOrder.indexOf(sat);
+  QVERIFY(iSurvey >= 0 && iSurvey < iSat);
+  QVERIFY(iShp >= 0 && iShp < iSat);
+  QVERIFY(iCad >= 0 && iCad < iSat);
+}
+
 void TestWorkflow::xyzBasemap_layerCrsForced3857() {
   QgsProject proj;
   QVERIFY(LayerOps::ensureOtfEnabled(&proj, nullptr, QStringLiteral("EPSG:5186")));
@@ -3515,9 +3565,9 @@ void TestWorkflow::newSurvey_removesUserLayersKeepsXyzBasemap() {
   auto* ring = new QgsVectorLayer(QStringLiteral("LineString?crs=EPSG:5187"),
                                   QStringLiteral("주변 500m"), QStringLiteral("memory"));
   QVERIFY(easy->isValid() && namedCad->isValid() && ring->isValid());
-  LayerOps::markSurveyLayer(easy, QStringLiteral("user:쉽게그리기"));
-  LayerOps::markSurveyLayer(namedCad, QStringLiteral("user:지적경계"));
-  LayerOps::markSurveyLayer(ring, QStringLiteral("user:buffer_ring_500"));
+  LayerOps::markSurveyLayer(easy, QStringLiteral("survey_area"));
+  LayerOps::markSurveyLayer(namedCad, QStringLiteral("feature_poly"));
+  LayerOps::markSurveyLayer(ring, QStringLiteral("feature_line"));
   QVERIFY(easy->startEditing());
   proj.addMapLayer(easy);
   proj.addMapLayer(namedCad);

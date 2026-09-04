@@ -174,6 +174,7 @@ public:
   static void zoomToKorea(QgsMapCanvas* canvas, const QString& epsgAuthId, bool refresh = true);
   static void syncMapCanvas(QgsProject* project, QgsMapCanvas* canvas, bool zoomKorea = true);
   static QList<QgsMapLayer*> visibleLayersPaintOrder(QgsProject* project);
+  static void ensureSatelliteAtBottom(QgsProject* project);
   static bool zoomToLayerMax(QgsMapCanvas* canvas, QgsMapLayer* layer);
   static bool isolateAndZoomToLayer(QgsProject* project, QgsMapCanvas* canvas, QgsMapLayer* layer,
                                     bool keepReference = true);
