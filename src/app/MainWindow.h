@@ -49,6 +49,7 @@ class KaStartPage;
 class KaCoordPointMapTool;
 class KaMeasureMapTool;
 class KaVertexEditTool;
+class KaFeatureSelectTool;
 class KaFoundLocationMark;
 class QSplitter;
 class QListWidget;
@@ -336,6 +337,7 @@ private:
   QgsMapToolPan* m_panTool = nullptr;
   QgsMapToolSelect* m_selectTool = nullptr;
   KaVertexEditTool* m_vertexTool = nullptr;
+  KaFeatureSelectTool* m_featureSelectTool = nullptr;
   KaFoundLocationMark* m_locationMark = nullptr;
   QString m_locationMarkTitle;
   QgsVectorLayer* m_editLayer = nullptr;

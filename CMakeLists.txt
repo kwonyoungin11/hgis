@@ -129,6 +129,7 @@ add_executable(ka-hgis
   src/app/KaCanvasGridOverlay.cpp
   src/app/KaTrenchMoveTool.cpp
   src/app/KaVertexEditTool.cpp
+  src/app/KaFeatureSelectTool.cpp
   src/app/KaFoundLocationMark.cpp
   src/app/KaTrenchDialog.cpp
   src/app/KaDemClassDialog.cpp
@@ -156,6 +157,7 @@ add_executable(ka-hgis
   src/app/KaCanvasGridOverlay.h
   src/app/KaTrenchMoveTool.h
   src/app/KaVertexEditTool.h
+  src/app/KaFeatureSelectTool.h
   src/app/KaFoundLocationMark.h
   src/app/KaTrenchDialog.h
   src/app/KaDemClassDialog.h

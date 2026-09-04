@@ -18,6 +18,7 @@
 #include "KaCanvasGridOverlay.h"
 #include "KaTrenchMoveTool.h"
 #include "KaVertexEditTool.h"
+#include "KaFeatureSelectTool.h"
 #include "KaFoundLocationMark.h"
 #include "KaStatusBar.h"
 #include "KaBeginnerRibbon.h"
@@ -2672,36 +2673,32 @@ void MainWindow::startSelectTool() {
     stopCaptureTool();
   if (m_actMeasure)
     m_actMeasure->setChecked(false);
-  applySnapConfig();
-  // 도형선택은 고르기만이 아니라 꼭짓점을 끌어 고치는 데까지 쓴다.
-  // QGIS의 QgsVertexTool은 qgis_app 안에 있어 링크할 수 없어 직접 만든 도구다.
-  if (!m_vertexTool) {
-    m_vertexTool = new KaVertexEditTool(m_canvas);
-    m_vertexTool->setParent(this);
-    connect(m_vertexTool, &KaVertexEditTool::statusMessage, this,
-            [this](const QString& t) { statusBar()->showMessage(t, 6000); });
+
+  if (!m_featureSelectTool) {
+    m_featureSelectTool = new KaFeatureSelectTool(m_canvas);
+    m_featureSelectTool->setParent(this);
+    connect(m_featureSelectTool, &KaFeatureSelectTool::statusMessage, this,
+            [this](const QString& t) { statusBar()->showMessage(t, 8000); });
+    connect(m_featureSelectTool, &KaFeatureSelectTool::selectionChanged, this,
+            [this](int count) {
+              if (count == 2) {
+                notify(Notice::Info, QStringLiteral("도형 2개 선택됨"),
+                       QStringLiteral("상단의 [폴리곤 나누기]를 누르면 겹치는 구간을 자동으로 분할합니다."));
+              }
+            });
   }
-  if (m_canvas->mapTool() == m_vertexTool) {
+
+  if (m_canvas->mapTool() == m_featureSelectTool) {
     if (m_panTool) m_canvas->setMapTool(m_panTool);
-    statusBar()->showMessage(QStringLiteral("선택 종료"), 3000);
+    statusBar()->showMessage(QStringLiteral("도형 선택 종료"), 3000);
     return;
   }
-  QgsVectorLayer* target = m_layerTree
-                               ? qobject_cast<QgsVectorLayer*>(m_layerTree->currentLayer())
-                               : nullptr;
-  if (!target)
-    target = LayerOps::findByLayerKey(QgsProject::instance(), QStringLiteral("survey_area"));
-  if (!target) {
-    statusBar()->showMessage(
-        QStringLiteral("고칠 레이어를 레이어 목록에서 먼저 고르세요."), 6000);
-    return;
-  }
-  m_canvas->setCurrentLayer(target);
-  m_vertexTool->setLayer(target);
-  m_canvas->setMapTool(m_vertexTool);
+
+  m_canvas->setMapTool(m_featureSelectTool);
   m_canvas->setFocus(Qt::OtherFocusReason);
   statusBar()->showMessage(
-      QStringLiteral("%1 — 도형을 클릭한 뒤 꼭짓점을 끌어 고치세요").arg(target->name()), 0);
+      QStringLiteral("도형선택 모드 — 지도에서 도형 클릭(Shift=추가선택). 2개 선택 후 [폴리곤 나누기]로 겹침 분할."),
+      10000);
 #endif
 }
 
@@ -4959,10 +4956,28 @@ void MainWindow::mergeFeaturePolygons() {
 
 void MainWindow::startSplitPolygonTool() {
 #if KA_HGIS_HAS_QGIS
+  auto selected = KaFeatureSelectTool::allSelectedFeatures(m_canvas);
+  if (selected.size() == 2) {
+    auto* l1 = selected[0].layer.data();
+    auto* l2 = selected[1].layer.data();
+    if (l1 && l2) {
+      QString err;
+      if (!LayerOps::splitTwoOverlappingFeatures(l1, selected[0].fid, l2, selected[1].fid, &err)) {
+        QMessageBox::warning(this, QStringLiteral("폴리곤 겹침 분할 실패"), err);
+        return;
+      }
+      if (m_canvas) m_canvas->refresh();
+      statusBar()->showMessage(QStringLiteral("선택한 두 도형의 겹치는 구간을 자동으로 분할했습니다!"), 8000);
+      notify(Notice::Success, QStringLiteral("폴리곤 겹침 분할 완료"),
+             QStringLiteral("선택된 두 도형의 겹치는 구간을 기준으로 분할되었습니다."));
+      return;
+    }
+  }
+
   QgsVectorLayer* cur = m_layerTree ? qobject_cast<QgsVectorLayer*>(m_layerTree->currentLayer()) : nullptr;
   if (!cur || !cur->isValid() || cur->geometryType() != Qgis::GeometryType::Polygon) {
     QMessageBox::information(this, QStringLiteral("폴리곤 나누기"),
-                             QStringLiteral("나눌 폴리곤 레이어를 좌측 레이어 목록에서 먼저 선택해 주세요."));
+                             QStringLiteral("도형 2개를 Shift+클릭으로 선택하거나, 나눌 폴리곤 레이어를 좌측 목록에서 선택해 주세요."));
     return;
   }
   m_isSplittingPolygon = true;
@@ -4971,7 +4986,7 @@ void MainWindow::startSplitPolygonTool() {
     m_captureTool->setMode(KaCaptureMapTool::Mode::Line);
   }
   statusBar()->showMessage(
-      QStringLiteral("폴리곤 나누기 모드 — 폴리곤을 가로지르는 선을 클릭하여 그리고 우클릭으로 분할."),
+      QStringLiteral("폴리곤 나누기 모드 — 폴리곤을 가로지르는 선을 클릭하여 그리고 우클릭으로 분할 (또는 Shift로 2개 도형 선택 후 실행)."),
       12000);
 #else
   statusBar()->showMessage(QStringLiteral("스텁: 폴리곤 나누기"), 3000);
