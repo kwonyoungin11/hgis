@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-09-04 22:02:40 +09:00 |
+| Updated (local) | 2026-09-04 22:14:02 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `77fccd7` |
-| HEAD full | `77fccd7ee066a0112511973af9f9552616c19e19` |
-| HEAD date | 2026-09-04 21:57:11 +0900 |
+| HEAD short | `b5a903e` |
+| HEAD full | `b5a903e51cb50533090ec2dd1183b690130f5e2a` |
+| HEAD date | 2026-09-04 22:02:40 +0900 |
 | HEAD author | kwonypungin <kyi25@nate.com> |
-| HEAD subject | feat(core): 선택된 두 도형 간 겹치는 구간 자동 분할(splitTwoOverlappingFeatures) 구현 |
-| Total commits | 45 |
+| HEAD subject | feat(select): 다중 레이어 Shift 피처 선택 도구 및 2개 도형 선택 시 겹침 자동 분할 연동 |
+| Total commits | 46 |
 | Upstream | `origin/main` |
-| Sync | ahead 7 of origin/main (push pending) |
+| Sync | ahead 8 of origin/main (push pending) |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (7 paths) |
+| Working tree dirty | **yes** (5 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** feat(core): 선택된 두 도형 간 겹치는 구간 자동 분할(splitTwoOverlappingFeatures) 구현 (`77fccd7` @ 2026-09-04 21:57:11 +0900)
-- **Remote sync at write time:** ahead 7 of origin/main (push pending)
-- **Uncommitted local changes at write time:** yes (7 paths)
+- **Recorded tip when this file was written:** feat(select): 다중 레이어 Shift 피처 선택 도구 및 2개 도형 선택 시 겹침 자동 분할 연동 (`b5a903e` @ 2026-09-04 22:02:40 +0900)
+- **Remote sync at write time:** ahead 8 of origin/main (push pending)
+- **Uncommitted local changes at write time:** yes (5 paths)
 
 ### Read this correctly
 
@@ -56,6 +56,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `b5a903e` | 2026-09-04T22:02:40+09:00 | feat(select): 다중 레이어 Shift 피처 선택 도구 및 2개 도형 선택 시 겹침 자동 분할 연동 |
 | `77fccd7` | 2026-09-04T21:57:11+09:00 | feat(core): 선택된 두 도형 간 겹치는 구간 자동 분할(splitTwoOverlappingFeatures) 구현 |
 | `d41d825` | 2026-09-04T21:46:34+09:00 | feat(ui): 그리기 툴바에 겹치는 구간 분리(클립) 및 폴리곤 나누기 기능 연동 |
 | `72cb771` | 2026-09-04T21:39:40+09:00 | feat(core): 레이어 클립(구간 분리) 및 폴리곤 분할(Split) 코어 연산 추가 |
@@ -85,17 +86,13 @@
 | `cf8c011` | 2026-08-15T23:43:28+09:00 | Refresh COMMIT_STATUS after theme ship; drop old no-MCP rule. |
 | `bc50839` | 2026-08-15T23:42:38+09:00 | Ship sky-blue theme, studio chrome, and digitize wiring. |
 | `17ac917` | 2026-08-15T15:31:08+09:00 | Save resume handoff so reconnect/clone can continue field HGIS work. |
-| `f4c1901` | 2026-08-15T15:29:21+09:00 | Sync COMMIT_STATUS to tip after field HGIS push. |
 
 ## Staged in this commit
 
 ```
-M	CMakeLists.txt
-M	docs/COMMIT_STATUS.md
-A	src/app/KaFeatureSelectTool.cpp
-A	src/app/KaFeatureSelectTool.h
-M	src/app/MainWindow.cpp
-M	src/app/MainWindow.h
+M	src/core/LayerOps.cpp
+M	src/core/LayerOps.h
+M	tests/test_buffer.cpp
 ```
 ## Other PC checklist
 

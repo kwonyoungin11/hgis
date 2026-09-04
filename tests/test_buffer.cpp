@@ -256,22 +256,33 @@ void TestBuffer::splitTwoOverlappingFeatures_splitsTargetPolygon() {
   qint64 roadFid = actualRf.id();
 
   QString err;
-  bool ok = LayerOps::splitTwoOverlappingFeatures(bnd, bndFid, road, roadFid, &err);
+  qint64 createdFid = -1;
+  QgsVectorLayer* outLayer = nullptr;
+  bool ok = LayerOps::splitTwoOverlappingFeatures(bnd, bndFid, road, roadFid, &createdFid, &outLayer, &err);
   QVERIFY2(ok, qPrintable(err));
+  QCOMPARE(outLayer, road);
+  QVERIFY(createdFid >= 0);
 
-  // 대상 road 레이어의 피처가 2개로 분할되었어야 함 (바운더리 안쪽과 바깥쪽)
+  // 대상 road 레이어의 원본 피처(10000 면적)는 그대로 보존되고, 교차 피처(5000 면적)가 추가되어 총 2개여야 함
   QCOMPARE(int(road->featureCount()), 2);
 
-  double totalArea = 0.0;
-  QgsFeatureIterator it = road->getFeatures();
-  QgsFeature pf;
-  while (it.nextFeature(pf)) {
-    QVERIFY(pf.hasGeometry());
-    const double a = pf.geometry().area();
-    QVERIFY2(std::abs(a - 5000.0) < 1.0, qPrintable(QStringLiteral("분할 조각 면적 오류: %1").arg(a)));
-    totalArea += a;
-  }
-  QVERIFY2(std::abs(totalArea - 10000.0) < 1.0, qPrintable(QStringLiteral("총 면적 합 오류: %1").arg(totalArea)));
+  // 원본 피처 확인: 면적이 10000 그대로 보존되어야 함
+  QgsFeature origCheck = road->getFeature(roadFid);
+  QVERIFY(origCheck.isValid());
+  QVERIFY2(std::abs(origCheck.geometry().area() - 10000.0) < 1.0, "원본 도형 면적이 훼손되지 않고 보존되어야 함");
+
+  // 새로 추가된 교차 피처 확인: 면적이 5000이어야 함
+  QgsFeature newCheck = road->getFeature(createdFid);
+  QVERIFY(newCheck.isValid());
+  QVERIFY2(std::abs(newCheck.geometry().area() - 5000.0) < 1.0, "새로 분리된 교차 도형 면적이 5000이어야 함");
+
+  // Undo(새 피처 삭제) 테스트
+  QVERIFY(LayerOps::undoCommittedFeature(road, createdFid, &err));
+  QCOMPARE(int(road->featureCount()), 1);
+
+  // 피처 복원(restoreDeletedFeature) 테스트
+  QVERIFY(LayerOps::restoreDeletedFeature(road, newCheck, &err));
+  QCOMPARE(int(road->featureCount()), 2);
 
   delete bnd;
   delete road;

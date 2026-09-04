@@ -11,6 +11,7 @@ class QgsMapLayer;
 class QgsMapCanvas;
 class QgsRectangle;
 class QgsPointXY;
+class QgsFeature;
 class QgsLayerTreeGroup;
 
 class LayerOps {
@@ -80,7 +81,10 @@ public:
                                    QString* errorOut = nullptr);
   static bool splitTwoOverlappingFeatures(QgsVectorLayer* layer1, qint64 fid1,
                                           QgsVectorLayer* layer2, qint64 fid2,
+                                          qint64* outCreatedFid = nullptr,
+                                          QgsVectorLayer** outTargetLayer = nullptr,
                                           QString* errorOut = nullptr);
+  static bool restoreDeletedFeature(QgsVectorLayer* layer, const QgsFeature& feat, QString* errorOut = nullptr);
 
   struct FieldBasemapPackResult {
     bool satelliteOk = false;

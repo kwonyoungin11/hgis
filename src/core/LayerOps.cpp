@@ -1069,7 +1069,12 @@ bool LayerOps::splitPolygonWithLine(QgsVectorLayer* layer,
 
 bool LayerOps::splitTwoOverlappingFeatures(QgsVectorLayer* layer1, qint64 fid1,
                                           QgsVectorLayer* layer2, qint64 fid2,
+                                          qint64* outCreatedFid,
+                                          QgsVectorLayer** outTargetLayer,
                                           QString* errorOut) {
+  if (outCreatedFid) *outCreatedFid = -1;
+  if (outTargetLayer) *outTargetLayer = nullptr;
+
   if (!layer1 || !layer1->isValid() || !layer2 || !layer2->isValid()) {
     if (errorOut) *errorOut = QStringLiteral("유효하지 않은 레이어입니다.");
     return false;
@@ -1142,14 +1147,8 @@ bool LayerOps::splitTwoOverlappingFeatures(QgsVectorLayer* layer1, qint64 fid1,
   if (!targetGeom.isGeosValid()) targetGeom = targetGeom.makeValid();
 
   QgsGeometry targetInter = targetGeom.intersection(cutterGeom);
-  QgsGeometry targetDiff = targetGeom.difference(cutterGeom);
-
   if (targetInter.isEmpty()) {
     if (errorOut) *errorOut = QStringLiteral("대상 도형의 교차 영역이 비어 있습니다.");
-    return false;
-  }
-  if (targetDiff.isEmpty()) {
-    if (errorOut) *errorOut = QStringLiteral("대상 도형이 다른 도형 안에 완전히 포함되어 있어 추가 분할할 영역이 없습니다.");
     return false;
   }
 
@@ -1159,12 +1158,9 @@ bool LayerOps::splitTwoOverlappingFeatures(QgsVectorLayer* layer1, qint64 fid1,
     return false;
   }
 
-  if (!targetLayer->changeGeometry(targetFeat.id(), targetDiff)) {
-    if (errorOut) *errorOut = QStringLiteral("기존 피처 지오메트리 업데이트 실패");
-    if (startedHere) targetLayer->rollBack();
-    return false;
-  }
+  const QgsFeatureIds beforeIds = targetLayer->allFeatureIds();
 
+  // 원본 도형(targetFeat)은 원형 그대로 100% 보존하고, 겹치는 교차 영역만 새 피처로 추가합니다.
   QgsFeature newF(targetLayer->fields());
   newF.setAttributes(targetFeat.attributes());
   newF.setGeometry(targetInter);
@@ -1179,6 +1175,20 @@ bool LayerOps::splitTwoOverlappingFeatures(QgsVectorLayer* layer1, qint64 fid1,
     targetLayer->rollBack();
     return false;
   }
+
+  qint64 addedId = -1;
+  const QgsFeatureIds afterIds = targetLayer->allFeatureIds();
+  for (QgsFeatureId id : afterIds) {
+    if (!beforeIds.contains(id)) {
+      addedId = static_cast<qint64>(id);
+      break;
+    }
+  }
+  if (addedId < 0 && newF.id() >= 0)
+    addedId = static_cast<qint64>(newF.id());
+
+  if (outCreatedFid) *outCreatedFid = addedId;
+  if (outTargetLayer) *outTargetLayer = targetLayer;
 
   targetLayer->triggerRepaint();
   return true;
@@ -3551,6 +3561,40 @@ bool LayerOps::undoCommittedFeature(QgsVectorLayer* layer, qint64 featureId, QSt
   }
   if (!layer->deleteFeature(fid)) {
     if (errorOut) *errorOut = QStringLiteral("도형을 지우지 못했습니다.");
+    if (startedHere) layer->rollBack();
+    return false;
+  }
+  if (!layer->commitChanges(false)) {
+    if (errorOut) *errorOut = layer->commitErrors().join(QLatin1Char('\n'));
+    layer->rollBack();
+    return false;
+  }
+  if (QgsDataProvider* p = layer->dataProvider())
+    p->reloadData();
+  if (startedHere)
+    layer->startEditing();
+  layer->updateExtents();
+  layer->triggerRepaint();
+  return true;
+}
+
+bool LayerOps::restoreDeletedFeature(QgsVectorLayer* layer, const QgsFeature& feat, QString* errorOut) {
+  if (!layer || !layer->isValid()) {
+    if (errorOut) *errorOut = QStringLiteral("레이어가 없습니다.");
+    return false;
+  }
+  if (isReferenceLayer(layer)) {
+    if (errorOut) *errorOut = QStringLiteral("참조 지도는 복원할 수 없습니다.");
+    return false;
+  }
+  const bool startedHere = !layer->isEditable();
+  if (startedHere && !layer->startEditing()) {
+    if (errorOut) *errorOut = QStringLiteral("편집 모드를 시작할 수 없습니다.");
+    return false;
+  }
+  QgsFeature f = feat;
+  if (!layer->addFeature(f)) {
+    if (errorOut) *errorOut = QStringLiteral("도형 복원에 실패했습니다.");
     if (startedHere) layer->rollBack();
     return false;
   }
