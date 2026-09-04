@@ -209,6 +209,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   undoAct->setShortcutContext(Qt::WindowShortcut);
   connect(undoAct, &QAction::triggered, this, &MainWindow::undoLastAction);
   addAction(undoAct);
+  auto* delAct = new QAction(QStringLiteral("선택 도형 삭제"), this);
+  delAct->setShortcut(QKeySequence::Delete);
+  delAct->setShortcutContext(Qt::WindowShortcut);
+  connect(delAct, &QAction::triggered, this, &MainWindow::deleteSelectedFeatures);
+  addAction(delAct);
   auto* fullAct = new QAction(QStringLiteral("전체 화면"), this);
   fullAct->setShortcut(Qt::Key_F11);
   fullAct->setShortcutContext(Qt::WindowShortcut);
@@ -2071,6 +2076,7 @@ void MainWindow::newSurvey() {
   stopCaptureTool();
   m_editLayer = nullptr;
   m_committedUndo.clear();
+  m_undoActions.clear();
   LayerOps::removeSurveyDomainLayers(QgsProject::instance());
   refreshLayerEmptyState();
 #endif
@@ -3287,6 +3293,44 @@ void MainWindow::undoLastAction() {
     statusBar()->showMessage(m_alignTool->statusText(), 4000);
     return;
   }
+
+  while (!m_undoActions.isEmpty()) {
+    const auto act = m_undoActions.takeLast();
+    if (act.type == KaUndoAction::LayerAdded) {
+      if (QgsProject::instance()->mapLayer(act.layerId)) {
+        QgsProject::instance()->removeMapLayer(act.layerId);
+        if (m_canvas) m_canvas->refresh();
+        refreshWorkPanel();
+        statusBar()->showMessage(QStringLiteral("구간 분리(클립) 레이어 생성을 되돌렸습니다."), 5000);
+        return;
+      }
+    } else if (act.type == KaUndoAction::FeatureAdded) {
+      auto* vl = qobject_cast<QgsVectorLayer*>(QgsProject::instance()->mapLayer(act.layerId));
+      QString err;
+      if (LayerOps::undoCommittedFeature(vl, act.featureId, &err)) {
+        const QString key = LayerOps::layerKeyOf(vl);
+        if (key.startsWith(QLatin1String("user_poly")) && vl->featureCount() <= 0) {
+          if (m_editLayer == vl) m_editLayer = nullptr;
+          QgsProject::instance()->removeMapLayer(vl->id());
+          vl = nullptr;
+        }
+        if (m_canvas) LayerOps::refreshCanvasIfIdle(m_canvas);
+        refreshWorkPanel();
+        statusBar()->showMessage(QStringLiteral("추가되었던 도형 생성을 되돌렸습니다."), 5000);
+        return;
+      }
+    } else if (act.type == KaUndoAction::FeatureDeleted) {
+      auto* vl = qobject_cast<QgsVectorLayer*>(QgsProject::instance()->mapLayer(act.layerId));
+      QString err;
+      if (LayerOps::restoreDeletedFeature(vl, act.featureData, &err)) {
+        if (m_canvas) LayerOps::refreshCanvasIfIdle(m_canvas);
+        refreshWorkPanel();
+        statusBar()->showMessage(QStringLiteral("잘못 지운 도형을 원래대로 복원했습니다."), 5000);
+        return;
+      }
+    }
+  }
+
   while (!m_committedUndo.isEmpty()) {
     const auto rec = m_committedUndo.takeLast();
     auto* vl = qobject_cast<QgsVectorLayer*>(QgsProject::instance()->mapLayer(rec.first));
@@ -3307,6 +3351,61 @@ void MainWindow::undoLastAction() {
   }
 #endif
   statusBar()->showMessage(QStringLiteral("되돌릴 것이 없습니다."), 4000);
+}
+
+void MainWindow::deleteSelectedFeatures() {
+#if KA_HGIS_HAS_QGIS
+  auto* focus = QApplication::focusWidget();
+  if (qobject_cast<QLineEdit*>(focus) || qobject_cast<QAbstractSpinBox*>(focus) ||
+      qobject_cast<QTextEdit*>(focus) || qobject_cast<QPlainTextEdit*>(focus))
+    return;
+
+  auto selected = KaFeatureSelectTool::allSelectedFeatures(m_canvas);
+  if (selected.isEmpty()) return;
+
+  int deletedCount = 0;
+  for (const auto& sel : selected) {
+    auto* vl = sel.layer.data();
+    if (!vl || !vl->isValid() || LayerOps::isReferenceLayer(vl)) continue;
+
+    QgsFeature existing = vl->getFeature(sel.fid);
+    if (!existing.isValid()) continue;
+
+    const bool startedHere = !vl->isEditable();
+    if (startedHere && !vl->startEditing()) continue;
+
+    if (vl->deleteFeature(sel.fid)) {
+      if (vl->commitChanges(false)) {
+        KaUndoAction act;
+        act.type = KaUndoAction::FeatureDeleted;
+        act.layerId = vl->id();
+        act.featureId = sel.fid;
+        act.featureData = existing;
+        act.description = QStringLiteral("도형 삭제");
+        m_undoActions.append(act);
+        deletedCount++;
+      } else {
+        vl->rollBack();
+      }
+    } else {
+      if (startedHere) vl->rollBack();
+    }
+  }
+
+  if (deletedCount > 0) {
+    if (m_canvas) {
+      for (QgsMapLayer* ml : m_canvas->layers()) {
+        if (auto* vl = qobject_cast<QgsVectorLayer*>(ml)) {
+          if (vl->selectedFeatureCount() > 0)
+            vl->removeSelection();
+        }
+      }
+      m_canvas->refresh();
+    }
+    refreshWorkPanel();
+    statusBar()->showMessage(QStringLiteral("선택한 %1개 도형을 삭제했습니다. (Ctrl+Z로 즉시 복원 가능)").arg(deletedCount), 6000);
+  }
+#endif
 }
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
@@ -3582,6 +3681,7 @@ void MainWindow::clearDrawnFeaturesOfCurrentLayer() {
   vl->triggerRepaint();
   if (m_canvas) m_canvas->refresh();
   m_committedUndo.clear();
+  m_undoActions.clear();
   updateNextActionStatus();
   refreshWorkPanel();
   notify(Notice::Success, QStringLiteral("그린 도형 삭제"),
@@ -3857,6 +3957,7 @@ void MainWindow::loadSurveyLayers(const QString& gpkgOrStub) {
   stopAlignSession();
   m_editLayer = nullptr;
   m_committedUndo.clear();
+  m_undoActions.clear();
   LayerOps::removeSurveyDomainLayers(proj);
   proj->setCrs(QgsCoordinateReferenceSystem(m_workCrs));
   if (m_canvas) m_canvas->setDestinationCrs(QgsCoordinateReferenceSystem(m_workCrs));
@@ -4711,8 +4812,15 @@ void MainWindow::onGeometryCaptured(const QgsGeometry& geom) {
     }
     if (addedId < 0 && feat.id() >= 0)
       addedId = static_cast<qint64>(feat.id());
-    if (addedId >= 0)
+    if (addedId >= 0) {
       m_committedUndo.append(qMakePair(layer->id(), addedId));
+      KaUndoAction act;
+      act.type = KaUndoAction::FeatureAdded;
+      act.layerId = layer->id();
+      act.featureId = addedId;
+      act.description = QStringLiteral("도형 그리기");
+      m_undoActions.append(act);
+    }
     if (!layer->isEditable() && !layer->startEditing()) {
       statusBar()->showMessage(QStringLiteral("저장됨 · 편집 모드 재시작 실패 — 그리기 도구를 다시 선택"), 8000);
     }
@@ -4962,14 +5070,25 @@ void MainWindow::startSplitPolygonTool() {
     auto* l2 = selected[1].layer.data();
     if (l1 && l2) {
       QString err;
-      if (!LayerOps::splitTwoOverlappingFeatures(l1, selected[0].fid, l2, selected[1].fid, &err)) {
+      qint64 createdFid = -1;
+      QgsVectorLayer* targetLayer = nullptr;
+      if (!LayerOps::splitTwoOverlappingFeatures(l1, selected[0].fid, l2, selected[1].fid,
+                                                 &createdFid, &targetLayer, &err)) {
         QMessageBox::warning(this, QStringLiteral("폴리곤 겹침 분할 실패"), err);
         return;
       }
+      if (createdFid >= 0 && targetLayer) {
+        KaUndoAction act;
+        act.type = KaUndoAction::FeatureAdded;
+        act.layerId = targetLayer->id();
+        act.featureId = createdFid;
+        act.description = QStringLiteral("구간 분리 도형 생성");
+        m_undoActions.append(act);
+      }
       if (m_canvas) m_canvas->refresh();
-      statusBar()->showMessage(QStringLiteral("선택한 두 도형의 겹치는 구간을 자동으로 분할했습니다!"), 8000);
+      statusBar()->showMessage(QStringLiteral("선택한 두 도형의 겹치는 구간을 분리했습니다! (원본 보존됨 · Ctrl+Z로 되돌리기 가능)"), 8000);
       notify(Notice::Success, QStringLiteral("폴리곤 겹침 분할 완료"),
-             QStringLiteral("선택된 두 도형의 겹치는 구간을 기준으로 분할되었습니다."));
+             QStringLiteral("선택된 두 도형의 원본은 보존되며, 겹치는 구간이 새 도형으로 분리되었습니다.\n잘못 분할된 경우 Ctrl+Z로 즉시 되돌릴 수 있습니다."));
       return;
     }
   }
@@ -5078,9 +5197,15 @@ void MainWindow::clipOverlappingLayers() {
   }
 
   if (m_canvas) m_canvas->refresh();
-  statusBar()->showMessage(QStringLiteral("겹치는 구간을 분리하여 「%1」 레이어를 생성했습니다.").arg(clipped->name()), 8000);
+  KaUndoAction act;
+  act.type = KaUndoAction::LayerAdded;
+  act.layerId = clipped->id();
+  act.description = QStringLiteral("구간 분리 레이어 생성");
+  m_undoActions.append(act);
+
+  statusBar()->showMessage(QStringLiteral("겹치는 구간을 분리하여 「%1」 레이어를 생성했습니다. (Ctrl+Z로 되돌리기 가능)").arg(clipped->name()), 8000);
   notify(Notice::Success, QStringLiteral("구간 분리 완료"),
-         QStringLiteral("「%1」 레이어가 성공적으로 생성되었습니다.").arg(clipped->name()),
+         QStringLiteral("「%1」 레이어가 성공적으로 생성되었습니다. (Ctrl+Z로 되돌리기 가능)").arg(clipped->name()),
          QStringLiteral("기준: %1 | 대상: %2").arg(boundary->name(), target->name()));
 #else
   statusBar()->showMessage(QStringLiteral("스텁: 구간 분리"), 3000);

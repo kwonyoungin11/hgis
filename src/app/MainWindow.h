@@ -27,6 +27,7 @@ class ChecklistEngine;
 class KaStatusBar;
 class KaBeginnerRibbon;
 #if KA_HGIS_HAS_QGIS
+#include <qgsfeature.h>
 class QgsMapCanvas;
 class QgsLayerTreeView;
 class QgsMapLayer;
@@ -196,6 +197,7 @@ private slots:
   void showMapWorkspace();
   void rememberSurvey(const QString& path, const QString& name);
   void undoLastAction();
+  void deleteSelectedFeatures();
 
 private:
   void buildUi();
@@ -366,6 +368,15 @@ private:
   KaStartPage* m_startPage = nullptr;
   QWidget* m_mapPage = nullptr;
   KaBeginnerRibbon* m_ribbon = nullptr;
+  struct KaUndoAction {
+    enum Type { FeatureAdded, FeatureDeleted, LayerAdded };
+    Type type = FeatureAdded;
+    QString layerId;
+    qint64 featureId = -1;
+    QgsFeature featureData;
+    QString description;
+  };
+  QVector<KaUndoAction> m_undoActions;
   QVector<QPair<QString, qint64>> m_committedUndo;
 #endif
 };
