@@ -1650,6 +1650,14 @@ QgsVectorLayer* LayerOps::createUserPolygonLayer(QgsProject* project, const QStr
 
 void LayerOps::ensureSatelliteAtBottom(QgsProject* project) {
   if (!project) return;
+  static bool inReorder = false;
+  if (inReorder) return;
+  struct Guard {
+    bool& flag;
+    explicit Guard(bool& f) : flag(f) { flag = true; }
+    ~Guard() { flag = false; }
+  } guard(inReorder);
+
   QgsLayerTree* root = project->layerTreeRoot();
   if (!root) return;
 
@@ -1696,7 +1704,6 @@ void LayerOps::ensureSatelliteAtBottom(QgsProject* project) {
 QList<QgsMapLayer*> LayerOps::visibleLayersPaintOrder(QgsProject* project) {
   QList<QgsMapLayer*> visible;
   if (!project) return visible;
-  ensureSatelliteAtBottom(project);
   QgsLayerTree* root = project->layerTreeRoot();
   QList<QgsMapLayer*> ordered = root ? root->layerOrder() : QList<QgsMapLayer*>();
   if (ordered.isEmpty()) {
@@ -2494,52 +2501,57 @@ QString LayerOps::copernicusCogUriForWgs84(double latDeg, double lonDeg) {
 
 static bool tryAddCopernicusViewDem(QgsProject* project, QgsMapCanvas* canvas, QString* errorOut) {
   if (!project || !canvas) return false;
-  QgsRectangle ext = canvas->extent();
-  if (ext.isEmpty() || !ext.isFinite()) return false;
-  QgsCoordinateReferenceSystem wgs(QStringLiteral("EPSG:4326"));
-  const QgsCoordinateReferenceSystem canvasCrs = canvas->mapSettings().destinationCrs();
-  QgsRectangle wgsExt = ext;
-  if (canvasCrs.isValid() && canvasCrs != wgs) {
-    try {
-      const QgsCoordinateTransform tr(canvasCrs, wgs, QgsCoordinateTransformContext());
-      wgsExt = tr.transformBoundingBox(ext);
-    } catch (...) {
+  try {
+    QgsRectangle ext = canvas->extent();
+    if (ext.isEmpty() || !ext.isFinite()) return false;
+    QgsCoordinateReferenceSystem wgs(QStringLiteral("EPSG:4326"));
+    const QgsCoordinateReferenceSystem canvasCrs = canvas->mapSettings().destinationCrs();
+    QgsRectangle wgsExt = ext;
+    if (canvasCrs.isValid() && canvasCrs != wgs) {
+      try {
+        const QgsCoordinateTransform tr(canvasCrs, wgs, QgsCoordinateTransformContext());
+        wgsExt = tr.transformBoundingBox(ext);
+      } catch (...) {
+        return false;
+      }
+    }
+    const QgsPointXY c = wgsExt.center();
+    int latFloor = static_cast<int>(std::floor(c.y()));
+    int lonFloor = static_cast<int>(std::floor(c.x()));
+    if (latFloor < -90 || latFloor > 89 || lonFloor < -180 || lonFloor > 179)
+      return false;
+    CPLSetConfigOption("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR");
+    const QString uri = copernicusCogVsicurl(latFloor, lonFloor);
+    auto* rl = new QgsRasterLayer(uri, QStringLiteral("DEM"), QStringLiteral("gdal"));
+    if (!rl->isValid() || rl->bandCount() < 1) {
+      if (errorOut) *errorOut = rl->error().message();
+      delete rl;
       return false;
     }
-  }
-  const QgsPointXY c = wgsExt.center();
-  int latFloor = static_cast<int>(std::floor(c.y()));
-  int lonFloor = static_cast<int>(std::floor(c.x()));
-  if (latFloor < -90 || latFloor > 89 || lonFloor < -180 || lonFloor > 179)
-    return false;
-  CPLSetConfigOption("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR");
-  const QString uri = copernicusCogVsicurl(latFloor, lonFloor);
-  auto* rl = new QgsRasterLayer(uri, QStringLiteral("DEM"), QStringLiteral("gdal"));
-  if (!rl->isValid() || rl->bandCount() < 1) {
-    if (errorOut) *errorOut = rl->error().message();
-    delete rl;
-    return false;
-  }
-  QgsRectangle statsExt;
-  if (rl->crs().isValid() && canvasCrs.isValid() && rl->crs() != canvasCrs) {
-    try {
-      const QgsCoordinateTransform tr(canvasCrs, rl->crs(), QgsCoordinateTransformContext());
-      statsExt = tr.transformBoundingBox(ext);
-    } catch (...) {
+    QgsRectangle statsExt;
+    if (rl->crs().isValid() && canvasCrs.isValid() && rl->crs() != canvasCrs) {
+      try {
+        const QgsCoordinateTransform tr(canvasCrs, rl->crs(), QgsCoordinateTransformContext());
+        statsExt = tr.transformBoundingBox(ext);
+      } catch (...) {
+      }
+    } else if (rl->crs() == canvasCrs) {
+      statsExt = ext;
     }
-  } else if (rl->crs() == canvasCrs) {
-    statsExt = ext;
-  }
-  LayerOps::applyDemElevationStyle(rl, statsExt);
-  LayerOps::markReferenceLayer(rl);
-  removeLayersNamed(project, QStringLiteral("DEM"));
-  if (!project->addMapLayer(rl, true)) {
-    delete rl;
+    LayerOps::applyDemElevationStyle(rl, statsExt);
+    LayerOps::markReferenceLayer(rl);
+    removeLayersNamed(project, QStringLiteral("DEM"));
+    if (!project->addMapLayer(rl, true)) {
+      delete rl;
+      return false;
+    }
+    LayerOps::placeInLegendGroup(project, rl, QStringLiteral("참조 지도"));
+    LayerOps::ensureDemRelief(project, rl);
+    return true;
+  } catch (...) {
+    if (errorOut) *errorOut = QStringLiteral("원격 DEM 접근 중 예외가 발생했습니다.");
     return false;
   }
-  LayerOps::placeInLegendGroup(project, rl, QStringLiteral("참조 지도"));
-  LayerOps::ensureDemRelief(project, rl);
-  return true;
 }
 
 double LayerOps::demElevationClassStep(double zMin, double zMax) {
@@ -2844,17 +2856,21 @@ QgsRasterLayer* LayerOps::ensureDemRelief(QgsProject* project, QgsRasterLayer* d
         delete rl;
       }
     }
-    if (!shade && demLayer->bandCount() >= 1) {
-      auto* hs = new QgsRasterLayer(demLayer->source(), reliefTitle, demLayer->providerType());
-      if (hs->isValid()) {
-        if (demLayer->crs().isValid()) hs->setCrs(demLayer->crs());
-        auto* rend = new QgsHillshadeRenderer(hs->dataProvider(), 1, 315.0, 45.0);
-        rend->setZFactor(hs->crs().isGeographic() ? 111120.0 : 3.0);
-        rend->setMultiDirectional(true);
-        hs->setRenderer(rend);
-        shade = hs;
-      } else {
-        delete hs;
+    const bool isGdalRaster = demLayer->providerType().compare(QStringLiteral("gdal"), Qt::CaseInsensitive) == 0;
+    if (!shade && isGdalRaster && demLayer->bandCount() >= 1 && demLayer->dataProvider()) {
+      Qgis::DataType dt = demLayer->dataProvider()->dataType(1);
+      if (dt != Qgis::DataType::ARGB32 && dt != Qgis::DataType::ARGB32_Premultiplied && dt != Qgis::DataType::UnknownDataType) {
+        auto* hs = new QgsRasterLayer(demLayer->source(), reliefTitle, demLayer->providerType());
+        if (hs->isValid()) {
+          if (demLayer->crs().isValid()) hs->setCrs(demLayer->crs());
+          auto* rend = new QgsHillshadeRenderer(hs->dataProvider(), 1, 315.0, 45.0);
+          rend->setZFactor(hs->crs().isGeographic() ? 111120.0 : 3.0);
+          rend->setMultiDirectional(true);
+          hs->setRenderer(rend);
+          shade = hs;
+        } else {
+          delete hs;
+        }
       }
     }
     if (!shade) return nullptr;

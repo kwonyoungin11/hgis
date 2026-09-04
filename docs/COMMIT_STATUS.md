@@ -8,24 +8,24 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-09-04 22:30:05 +09:00 |
+| Updated (local) | 2026-09-04 22:49:01 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `7beb4b1` |
-| HEAD full | `7beb4b16b77071100124c7d4405a9a71f4c669b9` |
-| HEAD date | 2026-09-04 22:23:46 +0900 |
+| HEAD short | `81c0d1e` |
+| HEAD full | `81c0d1e7df95ef7bbf4bd3284688a133b31e69e9` |
+| HEAD date | 2026-09-04 22:30:04 +0900 |
 | HEAD author | kwonypungin <kyi25@nate.com> |
-| HEAD subject | chore: 최신 포터블 바이너리 및 커밋 상태 동기화 |
-| Total commits | 49 |
+| HEAD subject | style(ui): 전체 카드창 그림자(Drop Shadow) 및 버튼/리본 입체감(Elevation) 적용 |
+| Total commits | 50 |
 | Upstream | `origin/main` |
-| Sync | up to date with origin/main |
+| Sync | ahead 1 of origin/main (push pending) |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
 | Working tree dirty | **yes** (6 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** chore: 최신 포터블 바이너리 및 커밋 상태 동기화 (`7beb4b1` @ 2026-09-04 22:23:46 +0900)
-- **Remote sync at write time:** up to date with origin/main
+- **Recorded tip when this file was written:** style(ui): 전체 카드창 그림자(Drop Shadow) 및 버튼/리본 입체감(Elevation) 적용 (`81c0d1e` @ 2026-09-04 22:30:04 +0900)
+- **Remote sync at write time:** ahead 1 of origin/main (push pending)
 - **Uncommitted local changes at write time:** yes (6 paths)
 
 ### Read this correctly
@@ -56,6 +56,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `81c0d1e` | 2026-09-04T22:30:04+09:00 | style(ui): 전체 카드창 그림자(Drop Shadow) 및 버튼/리본 입체감(Elevation) 적용 |
 | `7beb4b1` | 2026-09-04T22:23:46+09:00 | chore: 최신 포터블 바이너리 및 커밋 상태 동기화 |
 | `c600253` | 2026-09-04T22:18:58+09:00 | feat(app): 구간분리 생성 취소 및 선택 도형 Delete 삭제 후 Ctrl+Z 복원 지원 |
 | `bde6a19` | 2026-09-04T22:14:01+09:00 | feat(core): 구간분리 시 원본 도형 보존 및 교차 피처 독립 분리, 피처 복원 함수 구현 |
@@ -85,17 +86,16 @@
 | `3bd6ff8` | 2026-08-16T15:35:45+09:00 | Refresh COMMIT_STATUS after teal chrome and digitize ship. |
 | `74abc32` | 2026-08-16T15:35:36+09:00 | Ship teal chrome, artifact digitize, snap, and studio layer-center. |
 | `ef06bf1` | 2026-08-16T12:37:19+09:00 | Refresh COMMIT_STATUS after chrome and folder-import ship. |
-| `e5c16ea` | 2026-08-16T12:37:07+09:00 | Ship flat chrome, layout grid/paper, and a fast PC folder import. |
 
 ## Staged in this commit
 
 ```
-M	data/theme/ka-hgis.qss
-M	dist/ka-hgis-portable/data/theme/ka-hgis.qss
+M	CMakeLists.txt
 M	dist/ka-hgis-portable/ka-hgis.exe
 M	docs/COMMIT_STATUS.md
-M	src/app/KaStartPage.cpp
-M	src/app/MainWindow.cpp
+M	src/app/KaDrawingStudio.cpp
+M	src/app/KaDrawingStudio.h
+M	src/core/LayerOps.cpp
 ```
 ## Other PC checklist
 

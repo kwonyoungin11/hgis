@@ -192,6 +192,7 @@ private:
   bool m_mmbPanning = false;
   QPoint m_mmbLast;
   QSize m_lastFitViewport;
+  bool m_syncingMapFromLayers = false;
   QTimer* m_scaleSyncTimer = nullptr;
   double m_savedLayoutDpi = 0.0;
   QVector<QPointF> m_coordMapPts;

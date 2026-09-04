@@ -2343,6 +2343,13 @@ void KaDrawingStudio::placeScaleLabel(const QRectF& layoutRect, bool selectAfter
 }
 
 void KaDrawingStudio::syncMapFromLayers() {
+  if (m_syncingMapFromLayers) return;
+  m_syncingMapFromLayers = true;
+  struct Guard {
+    bool& flag;
+    ~Guard() { flag = false; }
+  } guard{m_syncingMapFromLayers};
+
   if (auto* map = mapItem()) {
     applyLayersToMap(map, true, false);
     if (auto* ly = layout()) {
