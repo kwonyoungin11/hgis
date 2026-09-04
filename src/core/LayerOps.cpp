@@ -1067,6 +1067,123 @@ bool LayerOps::splitPolygonWithLine(QgsVectorLayer* layer,
   return true;
 }
 
+bool LayerOps::splitTwoOverlappingFeatures(QgsVectorLayer* layer1, qint64 fid1,
+                                          QgsVectorLayer* layer2, qint64 fid2,
+                                          QString* errorOut) {
+  if (!layer1 || !layer1->isValid() || !layer2 || !layer2->isValid()) {
+    if (errorOut) *errorOut = QStringLiteral("유효하지 않은 레이어입니다.");
+    return false;
+  }
+
+  QgsFeature f1, f2;
+  if (!layer1->getFeatures(QgsFeatureRequest(fid1)).nextFeature(f1) || !f1.hasGeometry()) {
+    if (errorOut) *errorOut = QStringLiteral("첫 번째 피처를 찾을 수 없습니다.");
+    return false;
+  }
+  if (!layer2->getFeatures(QgsFeatureRequest(fid2)).nextFeature(f2) || !f2.hasGeometry()) {
+    if (errorOut) *errorOut = QStringLiteral("두 번째 피처를 찾을 수 없습니다.");
+    return false;
+  }
+
+  QgsGeometry g1 = f1.geometry();
+  QgsGeometry g2 = f2.geometry();
+
+  if (layer1->crs().isValid() && layer2->crs().isValid() && layer1->crs() != layer2->crs()) {
+    QgsCoordinateTransform xf(layer2->crs(), layer1->crs(),
+                              QgsProject::instance() ? QgsProject::instance()->transformContext()
+                                                     : QgsCoordinateTransformContext());
+    xf.setBallparkTransformsAreAppropriate(true);
+    try {
+      if (g2.transform(xf) != Qgis::GeometryOperationResult::Success) {
+        if (errorOut) *errorOut = QStringLiteral("좌표계 변환에 실패했습니다.");
+        return false;
+      }
+    } catch (...) {
+      if (errorOut) *errorOut = QStringLiteral("좌표계 변환 예외가 발생했습니다.");
+      return false;
+    }
+  }
+
+  if (!g1.isGeosValid()) g1 = g1.makeValid();
+  if (!g2.isGeosValid()) g2 = g2.makeValid();
+
+  if (!g1.intersects(g2)) {
+    if (errorOut) *errorOut = QStringLiteral("선택한 두 도형이 서로 겹치지 않습니다.");
+    return false;
+  }
+
+  QgsGeometry interGeom = g1.intersection(g2);
+  if (interGeom.isEmpty()) {
+    if (errorOut) *errorOut = QStringLiteral("두 도형의 교차 영역을 계산할 수 없습니다.");
+    return false;
+  }
+  if (!interGeom.isGeosValid()) interGeom = interGeom.makeValid();
+
+  QgsVectorLayer* targetLayer = layer1;
+  QgsFeature targetFeat = f1;
+  QgsGeometry cutterGeom = g2;
+
+  const QString k1 = layerKeyOf(layer1);
+  if (k1 == QLatin1String("survey_area") || layer1->name().contains(QStringLiteral("바운더리"))) {
+    targetLayer = layer2;
+    targetFeat = f2;
+    cutterGeom = f1.geometry();
+    if (layer1->crs() != layer2->crs()) {
+      QgsCoordinateTransform xf(layer1->crs(), layer2->crs(),
+                                QgsProject::instance() ? QgsProject::instance()->transformContext()
+                                                       : QgsCoordinateTransformContext());
+      xf.setBallparkTransformsAreAppropriate(true);
+      cutterGeom.transform(xf);
+    }
+    if (!cutterGeom.isGeosValid()) cutterGeom = cutterGeom.makeValid();
+  }
+
+  QgsGeometry targetGeom = targetFeat.geometry();
+  if (!targetGeom.isGeosValid()) targetGeom = targetGeom.makeValid();
+
+  QgsGeometry targetInter = targetGeom.intersection(cutterGeom);
+  QgsGeometry targetDiff = targetGeom.difference(cutterGeom);
+
+  if (targetInter.isEmpty()) {
+    if (errorOut) *errorOut = QStringLiteral("대상 도형의 교차 영역이 비어 있습니다.");
+    return false;
+  }
+  if (targetDiff.isEmpty()) {
+    if (errorOut) *errorOut = QStringLiteral("대상 도형이 다른 도형 안에 완전히 포함되어 있어 추가 분할할 영역이 없습니다.");
+    return false;
+  }
+
+  const bool startedHere = !targetLayer->isEditable();
+  if (startedHere && !targetLayer->startEditing()) {
+    if (errorOut) *errorOut = QStringLiteral("편집 모드 시작 실패");
+    return false;
+  }
+
+  if (!targetLayer->changeGeometry(targetFeat.id(), targetDiff)) {
+    if (errorOut) *errorOut = QStringLiteral("기존 피처 지오메트리 업데이트 실패");
+    if (startedHere) targetLayer->rollBack();
+    return false;
+  }
+
+  QgsFeature newF(targetLayer->fields());
+  newF.setAttributes(targetFeat.attributes());
+  newF.setGeometry(targetInter);
+  if (!targetLayer->addFeature(newF)) {
+    if (errorOut) *errorOut = QStringLiteral("분할된 교차 피처 추가 실패");
+    if (startedHere) targetLayer->rollBack();
+    return false;
+  }
+
+  if (startedHere && !targetLayer->commitChanges()) {
+    if (errorOut) *errorOut = targetLayer->commitErrors().join(QLatin1Char(';'));
+    targetLayer->rollBack();
+    return false;
+  }
+
+  targetLayer->triggerRepaint();
+  return true;
+}
+
 static void applyKaNetworkHeaders(QNetworkRequest* req) {
   if (!req) return;
   req->setHeader(QNetworkRequest::UserAgentHeader,

@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-09-04 21:46:35 +09:00 |
+| Updated (local) | 2026-09-04 21:57:12 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `72cb771` |
-| HEAD full | `72cb77140e270862a2c098721524758841fe3ce0` |
-| HEAD date | 2026-09-04 21:39:40 +0900 |
+| HEAD short | `d41d825` |
+| HEAD full | `d41d8253b28d262fb6fd83ca0d6b19387ce2ba0a` |
+| HEAD date | 2026-09-04 21:46:34 +0900 |
 | HEAD author | kwonypungin <kyi25@nate.com> |
-| HEAD subject | feat(core): 레이어 클립(구간 분리) 및 폴리곤 분할(Split) 코어 연산 추가 |
-| Total commits | 43 |
+| HEAD subject | feat(ui): 그리기 툴바에 겹치는 구간 분리(클립) 및 폴리곤 나누기 기능 연동 |
+| Total commits | 44 |
 | Upstream | `origin/main` |
-| Sync | ahead 5 of origin/main (push pending) |
+| Sync | ahead 6 of origin/main (push pending) |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (4 paths) |
+| Working tree dirty | **yes** (5 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** feat(core): 레이어 클립(구간 분리) 및 폴리곤 분할(Split) 코어 연산 추가 (`72cb771` @ 2026-09-04 21:39:40 +0900)
-- **Remote sync at write time:** ahead 5 of origin/main (push pending)
-- **Uncommitted local changes at write time:** yes (4 paths)
+- **Recorded tip when this file was written:** feat(ui): 그리기 툴바에 겹치는 구간 분리(클립) 및 폴리곤 나누기 기능 연동 (`d41d825` @ 2026-09-04 21:46:34 +0900)
+- **Remote sync at write time:** ahead 6 of origin/main (push pending)
+- **Uncommitted local changes at write time:** yes (5 paths)
 
 ### Read this correctly
 
@@ -56,6 +56,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `d41d825` | 2026-09-04T21:46:34+09:00 | feat(ui): 그리기 툴바에 겹치는 구간 분리(클립) 및 폴리곤 나누기 기능 연동 |
 | `72cb771` | 2026-09-04T21:39:40+09:00 | feat(core): 레이어 클립(구간 분리) 및 폴리곤 분할(Split) 코어 연산 추가 |
 | `30db1c4` | 2026-09-04T18:05:19+09:00 | fix(layers): ensure satellite layer stays at bottom and prevent deletion via reorderGroupLayers |
 | `d910e9b` | 2026-09-04T17:11:58+09:00 | fix(georef): instant canvas update on align move/save and fix raster layer order above basemaps |
@@ -85,14 +86,14 @@
 | `17ac917` | 2026-08-15T15:31:08+09:00 | Save resume handoff so reconnect/clone can continue field HGIS work. |
 | `f4c1901` | 2026-08-15T15:29:21+09:00 | Sync COMMIT_STATUS to tip after field HGIS push. |
 | `1f5e990` | 2026-08-15T15:29:07+09:00 | Ship field HGIS: layout studio, keyed VWorld basemap, icon chrome, Ctrl+Z undo. |
-| `3a5a87a` | 2026-08-09T18:57:37+09:00 | Sync COMMIT_STATUS to tip after bootstrap push. |
 
 ## Staged in this commit
 
 ```
 M	docs/COMMIT_STATUS.md
-M	src/app/MainWindow.cpp
-M	src/app/MainWindow.h
+M	src/core/LayerOps.cpp
+M	src/core/LayerOps.h
+M	tests/test_buffer.cpp
 ```
 ## Other PC checklist
 

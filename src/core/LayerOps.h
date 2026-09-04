@@ -78,6 +78,9 @@ public:
   static bool splitPolygonWithLine(QgsVectorLayer* layer,
                                    const QVector<QgsPointXY>& splitLine,
                                    QString* errorOut = nullptr);
+  static bool splitTwoOverlappingFeatures(QgsVectorLayer* layer1, qint64 fid1,
+                                          QgsVectorLayer* layer2, qint64 fid2,
+                                          QString* errorOut = nullptr);
 
   struct FieldBasemapPackResult {
     bool satelliteOk = false;

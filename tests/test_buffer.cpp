@@ -23,6 +23,7 @@ private slots:
   void setLabelsVisible_togglesPolygonLabels();
   void clipLayerByBoundary_clipsIntersectingFeatures();
   void splitPolygonWithLine_splitsGeometry();
+  void splitTwoOverlappingFeatures_splitsTargetPolygon();
 };
 
 void TestBuffer::ringHasGapAndLabel() {
@@ -225,6 +226,55 @@ void TestBuffer::splitPolygonWithLine_splitsGeometry() {
   QVERIFY2(std::abs(totalArea - 10000.0) < 1.0, qPrintable(QStringLiteral("전체 면적 합 오류: %1").arg(totalArea)));
 
   delete layer;
+}
+
+void TestBuffer::splitTwoOverlappingFeatures_splitsTargetPolygon() {
+  // 바운더리 레이어: (0, 0) ~ (50, 100)
+  auto* bnd = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5187"), QStringLiteral("260813 림하면 바운더리"),
+                                 QStringLiteral("memory"));
+  QVERIFY(bnd->isValid());
+  QVERIFY(bnd->startEditing());
+  QgsFeature bf(bnd->fields());
+  bf.setGeometry(QgsGeometry::fromRect(QgsRectangle(0, 0, 50, 100)));
+  QVERIFY(bnd->addFeature(bf));
+  QVERIFY(bnd->commitChanges());
+  QgsFeature actualBf;
+  QVERIFY(bnd->getFeatures().nextFeature(actualBf));
+  qint64 bndFid = actualBf.id();
+
+  // 대상 도면 레이어: (0, 0) ~ (100, 100)
+  auto* road = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5187"), QStringLiteral("쉽게그리기"),
+                                  QStringLiteral("memory"));
+  QVERIFY(road->isValid());
+  QVERIFY(road->startEditing());
+  QgsFeature rf(road->fields());
+  rf.setGeometry(QgsGeometry::fromRect(QgsRectangle(0, 0, 100, 100)));
+  QVERIFY(road->addFeature(rf));
+  QVERIFY(road->commitChanges());
+  QgsFeature actualRf;
+  QVERIFY(road->getFeatures().nextFeature(actualRf));
+  qint64 roadFid = actualRf.id();
+
+  QString err;
+  bool ok = LayerOps::splitTwoOverlappingFeatures(bnd, bndFid, road, roadFid, &err);
+  QVERIFY2(ok, qPrintable(err));
+
+  // 대상 road 레이어의 피처가 2개로 분할되었어야 함 (바운더리 안쪽과 바깥쪽)
+  QCOMPARE(int(road->featureCount()), 2);
+
+  double totalArea = 0.0;
+  QgsFeatureIterator it = road->getFeatures();
+  QgsFeature pf;
+  while (it.nextFeature(pf)) {
+    QVERIFY(pf.hasGeometry());
+    const double a = pf.geometry().area();
+    QVERIFY2(std::abs(a - 5000.0) < 1.0, qPrintable(QStringLiteral("분할 조각 면적 오류: %1").arg(a)));
+    totalArea += a;
+  }
+  QVERIFY2(std::abs(totalArea - 10000.0) < 1.0, qPrintable(QStringLiteral("총 면적 합 오류: %1").arg(totalArea)));
+
+  delete bnd;
+  delete road;
 }
 
 #include "test_buffer.moc"
