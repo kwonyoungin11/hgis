@@ -2,6 +2,7 @@
 #include <QString>
 #include <QStringList>
 #include <QList>
+#include <QVector>
 #include <QColor>
 class QgsProject;
 class QgsVectorLayer;
@@ -9,6 +10,7 @@ class QgsRasterLayer;
 class QgsMapLayer;
 class QgsMapCanvas;
 class QgsRectangle;
+class QgsPointXY;
 class QgsLayerTreeGroup;
 
 class LayerOps {
@@ -69,6 +71,13 @@ public:
                                     bool* noFill = nullptr, bool* noStroke = nullptr,
                                     bool* dashed = nullptr);
   static bool mergePolygonFeatures(QgsVectorLayer* layer, QString* errorOut = nullptr);
+  static QgsVectorLayer* clipLayerByBoundary(QgsVectorLayer* sourceLayer,
+                                             QgsVectorLayer* boundaryLayer,
+                                             QgsProject* project,
+                                             QString* errorOut = nullptr);
+  static bool splitPolygonWithLine(QgsVectorLayer* layer,
+                                   const QVector<QgsPointXY>& splitLine,
+                                   QString* errorOut = nullptr);
 
   struct FieldBasemapPackResult {
     bool satelliteOk = false;

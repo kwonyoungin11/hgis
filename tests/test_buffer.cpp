@@ -21,6 +21,8 @@ private slots:
   void offsetIs500mFromSource();
   void moveFeatureVertex_updatesPolygonCorner();
   void setLabelsVisible_togglesPolygonLabels();
+  void clipLayerByBoundary_clipsIntersectingFeatures();
+  void splitPolygonWithLine_splitsGeometry();
 };
 
 void TestBuffer::ringHasGapAndLabel() {
@@ -148,6 +150,81 @@ void TestBuffer::setLabelsVisible_togglesPolygonLabels() {
   QVERIFY(LayerOps::setLabelsVisible(vl, true));
   QVERIFY2(LayerOps::labelsVisible(vl), "글자 켜기는 같은 레이어 라벨을 다시 켜야 한다");
   delete vl;
+}
+
+void TestBuffer::clipLayerByBoundary_clipsIntersectingFeatures() {
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
+
+  // 대상 레이어: (0, 0) ~ (100, 100) 면적 10000
+  auto* src = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5187"), QStringLiteral("source_roads"),
+                                 QStringLiteral("memory"));
+  QVERIFY(src->isValid());
+  QVERIFY(src->startEditing());
+  QgsFeature sf(src->fields());
+  sf.setGeometry(QgsGeometry::fromRect(QgsRectangle(0, 0, 100, 100)));
+  QVERIFY(src->addFeature(sf));
+  QVERIFY(src->commitChanges());
+  proj.addMapLayer(src);
+
+  // 바운더리 레이어: (0, 0) ~ (50, 100) - 절반만 겹침
+  auto* bnd = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5187"), QStringLiteral("survey_boundary"),
+                                 QStringLiteral("memory"));
+  QVERIFY(bnd->isValid());
+  QVERIFY(bnd->startEditing());
+  QgsFeature bf(bnd->fields());
+  bf.setGeometry(QgsGeometry::fromRect(QgsRectangle(0, 0, 50, 100)));
+  QVERIFY(bnd->addFeature(bf));
+  QVERIFY(bnd->commitChanges());
+  proj.addMapLayer(bnd);
+
+  QString err;
+  QgsVectorLayer* clipped = LayerOps::clipLayerByBoundary(src, bnd, &proj, &err);
+  QVERIFY2(clipped != nullptr, qPrintable(err));
+  QCOMPARE(int(clipped->featureCount()), 1);
+
+  QgsFeature cf;
+  QVERIFY(clipped->getFeatures().nextFeature(cf));
+  QVERIFY(cf.hasGeometry());
+  // 클립된 지오메트리 면적은 대략 5000이어야 함
+  const double area = cf.geometry().area();
+  QVERIFY2(std::abs(area - 5000.0) < 1.0, qPrintable(QStringLiteral("클립 면적 오류: %1").arg(area)));
+}
+
+void TestBuffer::splitPolygonWithLine_splitsGeometry() {
+  auto* layer = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5187"), QStringLiteral("poly_layer"),
+                                  QStringLiteral("memory"));
+  QVERIFY(layer->isValid());
+  QVERIFY(layer->startEditing());
+  QgsFeature f(layer->fields());
+  f.setGeometry(QgsGeometry::fromRect(QgsRectangle(0, 0, 100, 100)));
+  QVERIFY(layer->addFeature(f));
+  QVERIFY(layer->commitChanges());
+  QCOMPARE(int(layer->featureCount()), 1);
+
+  // x=50을 세로로 관통하는 분할선: (50, -10) ~ (50, 110)
+  QVector<QgsPointXY> splitLine;
+  splitLine.append(QgsPointXY(50, -10));
+  splitLine.append(QgsPointXY(50, 110));
+
+  QString err;
+  bool ok = LayerOps::splitPolygonWithLine(layer, splitLine, &err);
+  QVERIFY2(ok, qPrintable(err));
+  // 분할 후 피처가 2개여야 함
+  QCOMPARE(int(layer->featureCount()), 2);
+
+  double totalArea = 0.0;
+  QgsFeatureIterator it = layer->getFeatures();
+  QgsFeature pf;
+  while (it.nextFeature(pf)) {
+    QVERIFY(pf.hasGeometry());
+    const double a = pf.geometry().area();
+    QVERIFY2(std::abs(a - 5000.0) < 1.0, qPrintable(QStringLiteral("분할된 파트 면적 오류: %1").arg(a)));
+    totalArea += a;
+  }
+  QVERIFY2(std::abs(totalArea - 10000.0) < 1.0, qPrintable(QStringLiteral("전체 면적 합 오류: %1").arg(totalArea)));
+
+  delete layer;
 }
 
 #include "test_buffer.moc"

@@ -8,24 +8,24 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-09-04 18:05:19 +09:00 |
+| Updated (local) | 2026-09-04 21:39:40 +09:00 |
 | VERSION file | 0.3.0 |
-| Branch | `cursor/pro-drawing-and-map-services` |
-| HEAD short | `d910e9b` |
-| HEAD full | `d910e9b474a54aec28c157a42de6cbb9142b2aba` |
-| HEAD date | 2026-09-04 17:11:58 +0900 |
+| Branch | `main` |
+| HEAD short | `30db1c4` |
+| HEAD full | `30db1c421528948b1d2d3b6264aba5f5363cb1ca` |
+| HEAD date | 2026-09-04 18:05:19 +0900 |
 | HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
-| HEAD subject | fix(georef): instant canvas update on align move/save and fix raster layer order above basemaps |
-| Total commits | 41 |
-| Upstream | `origin/cursor/pro-drawing-and-map-services` |
-| Sync | up to date with origin/cursor/pro-drawing-and-map-services |
+| HEAD subject | fix(layers): ensure satellite layer stays at bottom and prevent deletion via reorderGroupLayers |
+| Total commits | 42 |
+| Upstream | `origin/main` |
+| Sync | ahead 4 of origin/main (push pending) |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
 | Working tree dirty | **yes** (5 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** fix(georef): instant canvas update on align move/save and fix raster layer order above basemaps (`d910e9b` @ 2026-09-04 17:11:58 +0900)
-- **Remote sync at write time:** up to date with origin/cursor/pro-drawing-and-map-services
+- **Recorded tip when this file was written:** fix(layers): ensure satellite layer stays at bottom and prevent deletion via reorderGroupLayers (`30db1c4` @ 2026-09-04 18:05:19 +0900)
+- **Remote sync at write time:** ahead 4 of origin/main (push pending)
 - **Uncommitted local changes at write time:** yes (5 paths)
 
 ### Read this correctly
@@ -56,6 +56,7 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `30db1c4` | 2026-09-04T18:05:19+09:00 | fix(layers): ensure satellite layer stays at bottom and prevent deletion via reorderGroupLayers |
 | `d910e9b` | 2026-09-04T17:11:58+09:00 | fix(georef): instant canvas update on align move/save and fix raster layer order above basemaps |
 | `4a5341d` | 2026-09-02T17:57:24+09:00 | Ship align overlay viewport mapping, scan-ink overlay, paleo/soil maps, and trench field GIS. |
 | `83fe782` | 2026-08-31T10:20:41+09:00 | Ship user_sheet submit PDF, 4K/5186 satellite fill, and WMS zoom crash guard. |
@@ -85,16 +86,14 @@
 | `1f5e990` | 2026-08-15T15:29:07+09:00 | Ship field HGIS: layout studio, keyed VWorld basemap, icon chrome, Ctrl+Z undo. |
 | `3a5a87a` | 2026-08-09T18:57:37+09:00 | Sync COMMIT_STATUS to tip after bootstrap push. |
 | `6b9f373` | 2026-08-09T18:57:28+09:00 | Refresh COMMIT_STATUS after bootstrap docs commit. |
-| `30c1a6d` | 2026-08-09T18:57:26+09:00 | Add bootstrap-dev-pc so a fresh clone can build and develop immediately. |
 
 ## Staged in this commit
 
 ```
-M	dist/ka-hgis-portable/ka-hgis.exe
-M	src/app/MainWindow.cpp
+M	docs/COMMIT_STATUS.md
 M	src/core/LayerOps.cpp
 M	src/core/LayerOps.h
-M	tests/test_workflow.cpp
+M	tests/test_buffer.cpp
 ```
 ## Other PC checklist
 

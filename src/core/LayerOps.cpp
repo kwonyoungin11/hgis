@@ -38,6 +38,7 @@
 #include <qgsfeatureiterator.h>
 #include <qgsgeometry.h>
 #include <qgspointxy.h>
+#include <qgslinestring.h>
 #include <qgscategorizedsymbolrenderer.h>
 #include <qgssinglesymbolrenderer.h>
 #include <qgssymbol.h>
@@ -863,6 +864,205 @@ bool LayerOps::mergePolygonFeatures(QgsVectorLayer* layer, QString* errorOut) {
     layer->rollBack();
     return false;
   }
+  layer->triggerRepaint();
+  return true;
+}
+
+QgsVectorLayer* LayerOps::clipLayerByBoundary(QgsVectorLayer* sourceLayer,
+                                             QgsVectorLayer* boundaryLayer,
+                                             QgsProject* project,
+                                             QString* errorOut) {
+  if (!sourceLayer || !sourceLayer->isValid()) {
+    if (errorOut) *errorOut = QStringLiteral("자를 대상 레이어가 올바르지 않습니다.");
+    return nullptr;
+  }
+  if (!boundaryLayer || !boundaryLayer->isValid()) {
+    if (errorOut) *errorOut = QStringLiteral("기준 바운더리 레이어가 올바르지 않습니다.");
+    return nullptr;
+  }
+  if (!project) {
+    if (errorOut) *errorOut = QStringLiteral("프로젝트가 유효하지 않습니다.");
+    return nullptr;
+  }
+
+  // 1. 바운더리 레이어의 지오메트리를 대상 레이어 CRS로 변환 후 Union
+  QgsCoordinateTransform xf;
+  const bool needXf = boundaryLayer->crs().isValid() && sourceLayer->crs().isValid() &&
+                     boundaryLayer->crs() != sourceLayer->crs();
+  if (needXf) {
+    xf = QgsCoordinateTransform(boundaryLayer->crs(), sourceLayer->crs(),
+                                project ? project->transformContext()
+                                        : QgsCoordinateTransformContext());
+    xf.setBallparkTransformsAreAppropriate(true);
+  }
+
+  QVector<QgsGeometry> bGeoms;
+  QgsFeature bf;
+  QgsFeatureIterator bit = boundaryLayer->getFeatures();
+  while (bit.nextFeature(bf)) {
+    if (!bf.hasGeometry() || bf.geometry().isEmpty()) continue;
+    QgsGeometry bg = bf.geometry();
+    if (needXf) {
+      try {
+        if (bg.transform(xf) != Qgis::GeometryOperationResult::Success) continue;
+      } catch (...) {
+        continue;
+      }
+    }
+    if (!bg.isGeosValid())
+      bg = bg.makeValid();
+    if (!bg.isEmpty())
+      bGeoms.append(bg);
+  }
+
+  if (bGeoms.isEmpty()) {
+    if (errorOut) *errorOut = QStringLiteral("바운더리 레이어에 유효한 지오메트리가 없습니다.");
+    return nullptr;
+  }
+
+  QgsGeometry boundaryUnion = QgsGeometry::unaryUnion(bGeoms);
+  if (boundaryUnion.isEmpty()) {
+    boundaryUnion = QgsGeometry::collectGeometry(bGeoms);
+  }
+  if (boundaryUnion.isEmpty() || !boundaryUnion.isGeosValid()) {
+    boundaryUnion = boundaryUnion.makeValid();
+  }
+  if (boundaryUnion.isEmpty()) {
+    if (errorOut) *errorOut = QStringLiteral("바운더리 결합 지오메트리 생성에 실패했습니다.");
+    return nullptr;
+  }
+
+  // 2. 결과 메모리 레이어 생성
+  const QString geomTypeStr = QgsWkbTypes::displayString(sourceLayer->wkbType());
+  const QString uri = QStringLiteral("%1?crs=%2").arg(geomTypeStr, sourceLayer->crs().authid());
+  const QString outTitle = QStringLiteral("[클립] %1").arg(sourceLayer->name());
+  auto* clippedLayer = new QgsVectorLayer(uri, outTitle, QStringLiteral("memory"));
+  if (!clippedLayer || !clippedLayer->isValid()) {
+    if (errorOut) *errorOut = QStringLiteral("클립 결과 레이어 생성 실패");
+    delete clippedLayer;
+    return nullptr;
+  }
+
+  clippedLayer->dataProvider()->addAttributes(sourceLayer->fields().toList());
+  clippedLayer->updateFields();
+
+  // 3. 대상 레이어 피처 순회 및 교차(Intersection) 추출
+  QgsFeature sf;
+  QgsFeatureIterator sit = sourceLayer->getFeatures();
+  QVector<QgsFeature> outFeatures;
+  while (sit.nextFeature(sf)) {
+    if (!sf.hasGeometry() || sf.geometry().isEmpty()) continue;
+    QgsGeometry sg = sf.geometry();
+    if (!sg.isGeosValid())
+      sg = sg.makeValid();
+    if (sg.isEmpty()) continue;
+
+    if (!sg.intersects(boundaryUnion)) continue;
+
+    QgsGeometry clippedGeom = sg.intersection(boundaryUnion);
+    if (clippedGeom.isEmpty()) continue;
+    if (!clippedGeom.isGeosValid())
+      clippedGeom = clippedGeom.makeValid();
+    if (clippedGeom.isEmpty()) continue;
+
+    QgsFeature newFeat(clippedLayer->fields());
+    newFeat.setAttributes(sf.attributes());
+    newFeat.setGeometry(clippedGeom);
+    outFeatures.append(newFeat);
+  }
+
+  if (outFeatures.isEmpty()) {
+    if (errorOut) *errorOut = QStringLiteral("바운더리와 겹치는 구간(피처)이 없습니다.");
+    delete clippedLayer;
+    return nullptr;
+  }
+
+  clippedLayer->dataProvider()->addFeatures(outFeatures);
+  clippedLayer->updateExtents();
+
+  if (sourceLayer->renderer()) {
+    clippedLayer->setRenderer(sourceLayer->renderer()->clone());
+  }
+
+  markSurveyLayer(clippedLayer, QStringLiteral("clip_%1").arg(sourceLayer->id()));
+  project->addMapLayer(clippedLayer);
+  placeInLegendGroup(project, clippedLayer, kGroupSurveyData);
+
+  return clippedLayer;
+}
+
+bool LayerOps::splitPolygonWithLine(QgsVectorLayer* layer,
+                                   const QVector<QgsPointXY>& splitLine,
+                                   QString* errorOut) {
+  if (!layer || !layer->isValid()) {
+    if (errorOut) *errorOut = QStringLiteral("올바른 레이어가 아닙니다.");
+    return false;
+  }
+  if (layer->geometryType() != Qgis::GeometryType::Polygon) {
+    if (errorOut) *errorOut = QStringLiteral("폴리곤 레이어만 나눌 수 있습니다.");
+    return false;
+  }
+  if (splitLine.size() < 2) {
+    if (errorOut) *errorOut = QStringLiteral("분할선은 최소 2개 이상의 점이어야 합니다.");
+    return false;
+  }
+
+  QgsGeometry lineGeom = QgsGeometry::fromPolylineXY(splitLine);
+  if (lineGeom.isEmpty()) {
+    if (errorOut) *errorOut = QStringLiteral("유효한 분할선이 아닙니다.");
+    return false;
+  }
+
+  const bool startedHere = !layer->isEditable();
+  if (startedHere && !layer->startEditing()) {
+    if (errorOut) *errorOut = QStringLiteral("편집 모드 시작 실패");
+    return false;
+  }
+
+  QgsFeatureIterator it = layer->getFeatures();
+  QgsFeature f;
+  int splitCount = 0;
+
+  const QgsFeatureIds selIds = layer->selectedFeatureIds();
+  const bool filterSelected = !selIds.isEmpty();
+
+  while (it.nextFeature(f)) {
+    if (filterSelected && !selIds.contains(f.id())) continue;
+    if (!f.hasGeometry() || f.geometry().isEmpty()) continue;
+
+    QgsGeometry g = f.geometry();
+    if (!g.intersects(lineGeom)) continue;
+
+    QVector<QgsGeometry> newGeometries;
+    QgsPointSequence topologyTestPoints;
+    QgsLineString splitCurve(splitLine);
+    Qgis::GeometryOperationResult res = g.splitGeometry(&splitCurve, newGeometries, false, false, topologyTestPoints, true);
+    if (res == Qgis::GeometryOperationResult::Success && !newGeometries.isEmpty()) {
+      layer->changeGeometry(f.id(), g);
+
+      for (const auto& newG : newGeometries) {
+        if (newG.isEmpty()) continue;
+        QgsFeature newF(layer->fields());
+        newF.setAttributes(f.attributes());
+        newF.setGeometry(newG);
+        layer->addFeature(newF);
+      }
+      ++splitCount;
+    }
+  }
+
+  if (splitCount == 0) {
+    if (startedHere) layer->rollBack();
+    if (errorOut) *errorOut = QStringLiteral("분할선이 관통하는 폴리곤이 없습니다. 폴리곤 양쪽 경계를 완전히 가로질러야 합니다.");
+    return false;
+  }
+
+  if (startedHere && !layer->commitChanges()) {
+    if (errorOut) *errorOut = layer->commitErrors().join(QLatin1Char(';'));
+    layer->rollBack();
+    return false;
+  }
+
   layer->triggerRepaint();
   return true;
 }
