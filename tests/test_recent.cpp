@@ -77,13 +77,15 @@ void TestRecent::bootStaysOnHome_doesNotAutoOpenLastSurvey() {
   QFile f(QStringLiteral("src/app/MainWindow.cpp"));
   QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
   const QString src = QString::fromUtf8(f.readAll());
-  QVERIFY2(!src.contains(QLatin1String("QTimer::singleShot(0, this, &MainWindow::restoreLastSurvey)")),
-           "첫 화면은 홈이다. 마지막 조사를 자동으로 열지 않는다");
+  QVERIFY2(src.contains(QLatin1String("QTimer::singleShot(0, this, &MainWindow::restoreLastSurvey)")),
+           "다시 실행하면 마지막 조사를 열어야 한다");
+  QVERIFY2(src.contains(QLatin1String("OpenSurveyMode::LayersOnly")),
+           "부팅 복원은 내장/.qgz를 읽지 말고 GPKG 테이블만 연다");
   QFile h(QStringLiteral("src/app/MainWindow.h"));
   QVERIFY2(h.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.h");
   const QString hdr = QString::fromUtf8(h.readAll());
-  QVERIFY2(hdr.contains(QLatin1String("m_restoreLastSurveyEnabled = false")),
-           "자동 복원 기본값은 꺼짐");
+  QVERIFY2(hdr.contains(QLatin1String("m_restoreLastSurveyEnabled = true")),
+           "자동 복원 기본값은 켜짐(GPKG 전용)");
 }
 
 void TestRecent::closeEvent_persistsSurveyWork() {
@@ -95,14 +97,16 @@ void TestRecent::closeEvent_persistsSurveyWork() {
   const QString fn = src.mid(close, 500);
   QVERIFY2(fn.contains(QLatin1String("persistSurveyWork")),
            "창을 끄면 조사 편집을 자동 저장해야 한다");
-  QVERIFY2(src.contains(QLatin1String("void MainWindow::persistSurveyWork()")),
+  QVERIFY2(src.contains(QLatin1String("bool MainWindow::persistSurveyWork()")),
            "persistSurveyWork");
-  const int persist = src.indexOf(QLatin1String("void MainWindow::persistSurveyWork()"));
+  const int persist = src.indexOf(QLatin1String("bool MainWindow::persistSurveyWork()"));
   const QString body = src.mid(persist, 900);
-  QVERIFY2(body.contains(QLatin1String("commitChanges")),
+  QVERIFY2(body.contains(QLatin1String("commitSurveyEdits")),
            "자동저장은 편집 버퍼를 GPKG에 써야 한다");
   QVERIFY2(src.contains(QLatin1String("lastPath")),
-           "최근 목록용 lastPath는 유지한다. 부팅 자동 열기는 하지 않는다");
+           "최근 목록용 lastPath는 유지한다");
+  QVERIFY2(src.contains(QLatin1String("m_surveySessionReady")),
+           "열기에 실패한 홈 화면이 조사 파일을 덮어쓰면 안 된다");
 }
 
 void TestRecent::captureTool_dragsSavedPolygonVertex() {

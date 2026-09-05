@@ -1,5 +1,34 @@
 # NOW — Grok resume (2026-08-22)
 
+## 지금 (2026-09-05 재접속 시 레이어 색이 바뀜)
+
+원인: 부팅 `restoreLastSurvey`가 항상 LayersOnly라 내장 작업공간(색·심볼)을 건너뛰고 leftover가 `applyDomainDrawStyle` 공장색을 입힘. 그 상태로 자동저장하면 원래 색이 덮임.
+고침: 안전하면 PreferWorkspace. 저장 때 GPKG `layer_styles`. leftover는 저장된 스타일 우선. LayersOnly는 작업공간 자동덮어쓰기 금지. `applyFeaturePolyStyle`은 열기 leftover에서 제거.
+검증: leftoverRestore_keepsUserFillColor PASS · restoreLastSurvey PreferWorkspace 소스 PASS.
+필드: 옛 창 닫고 **고고학 전용 HGIS**. 다시 열면 작업한 채움/외곽선이 같아야 함. 이미 잘못된 색으로 저장된 파일은 색을 한 번 다시 맞춘 뒤 저장.
+커밋 금지.
+
+## 지금 (2026-09-05 조판 PDF 안 됨)
+
+원인: 조판 「PDF로 내보낼까?」버튼이 `savePdf`에 연결되지 않음. 클릭해도 아무 일도 없음.
+고침: `connect(pdfBtn, clicked, savePdf)`. 실패 시 세션 로그에 코드.
+필드: 옛 창 닫고 고고학 전용 HGIS → 도면만들기 → PDF로 내보낼까? → 저장 대화상자.
+커밋 금지.
+
+## 지금 (2026-09-05 저장 후 다시 열면 레이어 없음)
+
+원인: 저장은 GPKG에 도형을 쓴다. 다시 열기가 내장 작업공간을 읽으면 datasource가 `./안동시_복사본_복사본.gpkg` 상대 경로라 실행 폴더에서 파일을 찾고 레이어 2장이 깨져 버려진다. `user_poly_*`는 도메인 복원 대상이 아니었다. `.qgz` 열기는 동반 gpkg를 안 탔다.
+고침: `readEmbedded`/`writeEmbedded`가 조사 파일 폴더를 project home으로 둔다. `addNonEmptySavedGpkgLayers`가 남은 GPKG 테이블·깨진 레이어를 복구. `openProject`는 동반 gpkg.
+필드: 옛 창 닫고 바탕화면 **고고학 전용 HGIS**. 저장한 조사를 다시 열면 조사구역·유구·사용자 면이 범례에 있어야 함.
+커밋 금지.
+
+## 지금 (2026-09-05 저장은 되고 열기가 홈만 뜸)
+
+원인: GPKG 테이블에는 도형이 있음(바탕 `안동시_복사본_복사본.gpkg` survey_area 2 · feature_poly 4). 열기가 빈/깨진 내장 작업공간을 성공으로 읽고 `loadSurveyLayers`를 건너뜀. 실패해도 `m_surveyPath`를 먼저 넣어 persist가 최근 목록만 갱신하거나 빈 작업공간을 덮음. 부팅 자동복원 꺼짐.
+고침: 성공 전에 경로를 안 박음. `addNonEmptyDomainLayers`로 내장이 비어도 GPKG 도형을 올림. 내장 AV는 unsafe 표시 후 다음엔 GPKG+위성. persist는 `m_surveySessionReady`일 때만. 부팅은 LayersOnly 복원.
+검증: cmake 0 · emptyEmbeddedWorkspace_reopenStillShowsCommittedSurveyArea PASS · recent_surveys PASS · smoke-quit 0 · publish 2732544.
+필드: 옛 창 닫고 바탕화면 **고고학 전용 HGIS**. 최근 조사를 누르면 지도 탭에 조사구역·유구·위성이 보여야 함. 커밋 금지.
+
 ## 지금 (2026-09-05 홈 고정 · 안동시 최근열기 크래시)
 
 원인: `안동시.qgz`에 위성 레이어 4장 + xyz 11개. `openSurveyGpkg`가 동반 qgz를 `QgsProject::read` → `addMapLayers` AV. SEH 뒤 `clear()`는 `exitQgis`/`RelationManager::layersRemoved` AV (13:37). 위성 중복 생성 요청 이후 저장됨.

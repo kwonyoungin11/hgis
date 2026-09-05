@@ -798,6 +798,8 @@ int KaApplication::run(int argc, char** argv) {
   int code = 0;
   {
     MainWindow w;
+    if (smokeQuit || qaPhase1 || !openGpkg.isEmpty())
+      w.setRestoreLastSurveyEnabled(false);
     KaCrashGuard::logLine(QStringLiteral("[boot] 메인창 구성 %1 ms").arg(bootTimer.elapsed()));
     w.show();
     if (splash) {

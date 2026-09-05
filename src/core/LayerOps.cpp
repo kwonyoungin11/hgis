@@ -66,6 +66,7 @@
 #include <cpl_error.h>
 #include <gdal.h>
 #include <gdal_utils.h>
+#include <ogr_api.h>
 #include <qgsnetworkaccessmanager.h>
 #include <qgslayertreegroup.h>
 #include <qgsprojectviewsettings.h>
@@ -1801,6 +1802,11 @@ QgsVectorLayer* LayerOps::createSurveyAreaLayer(QgsProject* project, const QStri
   return vl;
 }
 
+namespace {
+QgsVectorLayer* kaFindExistingSavedLayer(QgsProject* project, const QString& gpkgPath,
+                                         const QString& table);
+}
+
 QgsVectorLayer* LayerOps::ensureDomainLayer(QgsProject* project, const QString& gpkgPath,
                                             const QString& layerKey, const QString& titleKo,
                                             QString* errorOut) {
@@ -1808,7 +1814,7 @@ QgsVectorLayer* LayerOps::ensureDomainLayer(QgsProject* project, const QString& 
     if (errorOut) *errorOut = QStringLiteral("No project");
     return nullptr;
   }
-  if (auto* existing = findByLayerKey(project, layerKey))
+  if (auto* existing = kaFindExistingSavedLayer(project, gpkgPath, layerKey))
     return existing;
   if (gpkgPath.isEmpty()) {
     if (errorOut) *errorOut = QStringLiteral("먼저 「새 조사」로 저장 경로를 만드세요.");
@@ -1873,10 +1879,224 @@ QgsVectorLayer* LayerOps::ensureDomainLayer(QgsProject* project, const QString& 
   vl->setName(titleKo);
   markSurveyLayer(vl, layerKey);
   applyLegendCrsLabel(vl);
-  applyDomainDrawStyle(vl, layerKey);
+  if (!loadGpkgDefaultStyle(vl))
+    applyDomainDrawStyle(vl, layerKey);
   project->addMapLayer(vl, true);
   pruneEmptyLegendGroups(project);
   return vl;
+}
+
+int LayerOps::addNonEmptyDomainLayers(QgsProject* project, const QString& gpkgPath) {
+  return addNonEmptySavedGpkgLayers(project, gpkgPath);
+}
+
+namespace {
+
+bool kaIsGpkgMetadataTable(const QString& name) {
+  const QString n = name.toLower();
+  return n.startsWith(QLatin1String("gpkg_")) || n.startsWith(QLatin1String("rtree_")) ||
+         n.startsWith(QLatin1String("sqlite_")) || n.startsWith(QLatin1String("qgis_")) ||
+         n == QLatin1String("layer_styles");
+}
+
+QString kaGpkgLayerNameFromSource(const QString& source) {
+  const int i = source.indexOf(QLatin1String("layername="), 0, Qt::CaseInsensitive);
+  if (i < 0) return {};
+  QString rest = source.mid(i + 10);
+  const int cut = rest.indexOf(QLatin1Char('|'));
+  if (cut >= 0) rest = rest.left(cut);
+  return rest;
+}
+
+bool kaSourcePointsAtGpkgTable(const QgsMapLayer* layer, const QString& gpkgPath,
+                               const QString& table) {
+  if (!layer) return false;
+  const QString src = layer->source();
+  const QString file = src.section(QLatin1Char('|'), 0, 0);
+  if (QFileInfo(file).absoluteFilePath().compare(QFileInfo(gpkgPath).absoluteFilePath(),
+                                                 Qt::CaseInsensitive) != 0)
+    return false;
+  return kaGpkgLayerNameFromSource(src).compare(table, Qt::CaseInsensitive) == 0;
+}
+
+QStringList kaListGpkgFeatureTables(const QString& gpkgPath) {
+  QStringList names;
+  if (gpkgPath.isEmpty() || !QFileInfo::exists(gpkgPath)) return names;
+  GDALDatasetH ds = GDALOpenEx(gpkgPath.toUtf8().constData(), GDAL_OF_VECTOR, nullptr, nullptr,
+                               nullptr);
+  if (!ds) return names;
+  OGRLayerH res = GDALDatasetExecuteSQL(
+      ds, "SELECT table_name FROM gpkg_contents WHERE data_type='features'", nullptr, nullptr);
+  if (res) {
+    OGRFeatureH f = nullptr;
+    while ((f = OGR_L_GetNextFeature(res)) != nullptr) {
+      const char* v = OGR_F_GetFieldAsString(f, 0);
+      if (v && *v) {
+        const QString name = QString::fromUtf8(v);
+        if (!kaIsGpkgMetadataTable(name))
+          names.append(name);
+      }
+      OGR_F_Destroy(f);
+    }
+    GDALDatasetReleaseResultSet(ds, res);
+  }
+  GDALClose(ds);
+  return names;
+}
+
+QgsVectorLayer* kaFindExistingSavedLayer(QgsProject* project, const QString& gpkgPath,
+                                         const QString& table) {
+  for (QgsMapLayer* ml : project->mapLayers()) {
+    auto* vl = qobject_cast<QgsVectorLayer*>(ml);
+    if (!vl) continue;
+    if (kaSourcePointsAtGpkgTable(vl, gpkgPath, table))
+      return vl;
+  }
+  // A moved survey can retain a broken old path. Only its same-table invalid
+  // placeholder may be replaced; a shared domain key does not identify a table.
+  for (QgsMapLayer* ml : project->mapLayers()) {
+    auto* vl = qobject_cast<QgsVectorLayer*>(ml);
+    if (vl && !vl->isValid() && LayerOps::layerKeyOf(vl) == table &&
+        kaGpkgLayerNameFromSource(vl->source()).compare(table, Qt::CaseInsensitive) == 0)
+      return vl;
+  }
+  return nullptr;
+}
+
+bool kaEnsureLayerTreeNode(QgsProject* project, QgsMapLayer* layer) {
+  if (!project || !layer) return false;
+  if (QgsLayerTree* root = project->layerTreeRoot()) {
+    // A saved layer may still be registered after its legend node was lost.
+    // Reuse the layer object so its name, style and references remain intact.
+    // Existing nodes retain the user's saved visibility and position.
+    if (!root->findLayer(layer->id())) {
+      root->insertLayer(0, layer);
+      return true;
+    }
+  }
+  return false;
+}
+
+bool kaSourceIsSurveyGpkg(const QgsMapLayer* layer, const QString& gpkgPath) {
+  if (!layer || gpkgPath.isEmpty()) return false;
+  const QString file = layer->source().section(QLatin1Char('|'), 0, 0);
+  if (file.isEmpty()) return false;
+  return QFileInfo(file).absoluteFilePath().compare(QFileInfo(gpkgPath).absoluteFilePath(),
+                                                    Qt::CaseInsensitive) == 0;
+}
+
+QString kaSavedGpkgLayerTitle(const QString& table) {
+  if (table == QLatin1String("survey_area")) return QStringLiteral("조사구역");
+  if (table == QLatin1String("feature_poly")) return QStringLiteral("유구 (면)");
+  if (table == QLatin1String("feature_line")) return QStringLiteral("유구 (선)");
+  if (table == QLatin1String("section_line")) return QStringLiteral("단면선");
+  if (table == QLatin1String("control_points")) return QStringLiteral("기준점");
+  if (table == QLatin1String("artifact_point")) return QStringLiteral("유물");
+  if (table == QLatin1String("trial_trench")) return QStringLiteral("시굴격자");
+  if (table.startsWith(QLatin1String("user_poly_"))) return QStringLiteral("면");
+  return table;
+}
+
+}  // namespace
+
+bool LayerOps::loadGpkgDefaultStyle(QgsVectorLayer* layer) {
+  if (!layer || !layer->isValid())
+    return false;
+  bool ok = false;
+  layer->loadDefaultStyle(ok);
+  if (ok)
+    return true;
+  ok = false;
+  layer->loadNamedStyle(layer->source(), ok);
+  return ok;
+}
+
+int LayerOps::saveGpkgDefaultStyles(QgsProject* project, const QString& gpkgPath) {
+  if (!project || gpkgPath.isEmpty())
+    return 0;
+  int n = 0;
+  for (QgsMapLayer* ml : project->mapLayers()) {
+    auto* vl = qobject_cast<QgsVectorLayer*>(ml);
+    if (!vl || !vl->isValid())
+      continue;
+    if (!kaSourceIsSurveyGpkg(vl, gpkgPath))
+      continue;
+    QString err;
+    const QgsMapLayer::SaveStyleResults res = vl->saveStyleToDatabaseV2(
+        QStringLiteral("ka_hgis"), QString(), true, QString(), err);
+    if (!res.testFlag(QgsMapLayer::SaveStyleResult::DatabaseWriteFailed) &&
+        !res.testFlag(QgsMapLayer::SaveStyleResult::QmlGenerationFailed))
+      ++n;
+  }
+  return n;
+}
+
+int LayerOps::restoreMissingLayerTreeNodes(QgsProject* project) {
+  if (!project) return 0;
+  int restored = 0;
+  for (const QString& id : project->mapLayers().keys()) {
+    QgsMapLayer* layer = project->mapLayer(id);
+    if (layer && layer->isValid() && kaEnsureLayerTreeNode(project, layer))
+      ++restored;
+  }
+  return restored;
+}
+
+int LayerOps::addNonEmptySavedGpkgLayers(QgsProject* project, const QString& gpkgPath) {
+  if (!project || gpkgPath.isEmpty())
+    return 0;
+  int added = restoreMissingLayerTreeNodes(project);
+  const QStringList domainKeys = domainLayerKeys();
+  for (const QString& table : kaListGpkgFeatureTables(gpkgPath)) {
+    QgsVectorLayer probe(QStringLiteral("%1|layername=%2").arg(gpkgPath, table), table,
+                         QStringLiteral("ogr"));
+    if (!probe.isValid() || probe.featureCount() <= 0)
+      continue;
+
+    if (QgsVectorLayer* existing = kaFindExistingSavedLayer(project, gpkgPath, table)) {
+      if (existing->isValid()) {
+        if (QgsDataProvider* p = existing->dataProvider())
+          p->reloadData();
+        existing->updateExtents();
+        if (existing->isValid() && existing->featureCount() > 0) {
+          if (kaEnsureLayerTreeNode(project, existing))
+            ++added;
+          continue;
+        }
+      }
+      project->removeMapLayer(existing->id());
+    }
+
+    const QString titleKo = kaSavedGpkgLayerTitle(table);
+    if (domainKeys.contains(table)) {
+      QString err;
+      if (auto* vl = ensureDomainLayer(project, gpkgPath, table, titleKo, &err)) {
+        kaEnsureLayerTreeNode(project, vl);
+        ++added;
+      }
+      continue;
+    }
+
+    auto* vl = new QgsVectorLayer(QStringLiteral("%1|layername=%2").arg(gpkgPath, table), titleKo,
+                                  QStringLiteral("ogr"));
+    if (!vl->isValid()) {
+      delete vl;
+      continue;
+    }
+    if (QgsDataProvider* p = vl->dataProvider())
+      p->reloadData();
+    vl->updateExtents();
+    vl->setName(titleKo);
+    markSurveyLayer(vl, table);
+    applyLegendCrsLabel(vl);
+    if (!loadGpkgDefaultStyle(vl))
+      applyAreaM2Labels(vl);
+    project->addMapLayer(vl, true);
+    placeInLegendGroup(project, vl, QString::fromUtf8(kGroupSurveyData));
+    kaEnsureLayerTreeNode(project, vl);
+    ++added;
+  }
+  return added;
 }
 
 QgsVectorLayer* LayerOps::createUserPolygonLayer(QgsProject* project, const QString& gpkgPath,
@@ -1990,7 +2210,7 @@ void LayerOps::pruneDuplicateSatelliteLayers(QgsProject* project) {
     }
   }
 
-  // 3. 레이어 트리에서 댕글링(삭제된) 노드 및 중복 위성 노드 정리
+  // 3. 레이어 트리의 중복 위성 노드 정리
   if (QgsLayerTree* root = project->layerTreeRoot()) {
     QList<QgsLayerTreeNode*> toRemove;
     bool foundKeepNode = false;
@@ -1999,8 +2219,9 @@ void LayerOps::pruneDuplicateSatelliteLayers(QgsProject* project) {
       for (QgsLayerTreeNode* child : grp->children()) {
         if (auto* lnode = qobject_cast<QgsLayerTreeLayer*>(child)) {
           QgsMapLayer* l = lnode->layer();
+          // QgsProject reads the tree before resolving its layer references.
+          // A null layer here can be a saved survey layer still being loaded.
           if (!l) {
-            toRemove.append(child);
             continue;
           }
           const QString name = lnode->name().isEmpty() ? l->name() : lnode->name();

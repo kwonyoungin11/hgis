@@ -37,6 +37,7 @@ set(KA_LIBDIRS
 add_library(ka_core STATIC
   src/core/ChecklistEngine.cpp
   src/core/SurveyProjectFactory.cpp
+  src/core/SurveyStorage.cpp
   src/core/ExportService.cpp
   src/core/ProjectStateBuilder.cpp
   src/core/LayoutService.cpp
@@ -63,6 +64,7 @@ add_library(ka_core STATIC
   src/core/Terrain3dLayoutService.cpp
   src/core/ChecklistEngine.h
   src/core/SurveyProjectFactory.h
+  src/core/SurveyStorage.h
   src/core/ExportService.h
   src/core/ProjectStateBuilder.h
   src/core/LayoutService.h
@@ -331,6 +333,19 @@ if(KA_HGIS_BUILD_TESTS)
   target_include_directories(ka_recent_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
   add_test(NAME recent_surveys COMMAND ka_recent_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+  # Exercise the actual window's save/open slots, including project signal callbacks.
+  get_target_property(KA_SAVE_OPEN_SOURCES ka-hgis SOURCES)
+  list(REMOVE_ITEM KA_SAVE_OPEN_SOURCES src/app/main.cpp src/app/KaApplication.cpp src/app/app.rc)
+  add_executable(ka_save_open_tests tests/test_save_open.cpp ${KA_SAVE_OPEN_SOURCES})
+  set_target_properties(ka_save_open_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  target_link_libraries(ka_save_open_tests PRIVATE ka_core Qt6::Test Qt6::Svg)
+  target_include_directories(ka_save_open_tests PRIVATE ${KA_INCLUDES} ${CMAKE_BINARY_DIR}/generated)
+  if(MSVC)
+    target_compile_options(ka_save_open_tests PRIVATE /utf-8 /FS)
+  endif()
+  add_test(NAME save_open_window COMMAND ka_save_open_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  set_tests_properties(save_open_window PROPERTIES TIMEOUT 90)
+
   # Windows: ctest without OSGeo4W PATH → 0xc0000135 (DLL not found).
   # ENVIRONMENT is a CMake list, so unescaped ';' would truncate PATH to the
   # first bin dir. Escape path separators; keep ';' only between VAR=value.
@@ -343,7 +358,7 @@ if(KA_HGIS_BUILD_TESTS)
       "${OSGEO4W_ROOT}/bin"
     )
     string(JOIN "\\;" _ka_path_esc ${_ka_path})
-    set_tests_properties(checklist_engine workflow_engine georef_engine feature_presets buffer_ring measure_tape dem_trench_engine theme_qss recent_surveys section_layout_engine section_studio_engine terrain_3d_engine PROPERTIES
+    set_tests_properties(checklist_engine workflow_engine georef_engine feature_presets buffer_ring measure_tape dem_trench_engine theme_qss recent_surveys section_layout_engine section_studio_engine terrain_3d_engine save_open_window PROPERTIES
       ENVIRONMENT "PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
   endif()
 endif()

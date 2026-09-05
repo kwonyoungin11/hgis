@@ -199,6 +199,8 @@ void TestTheme::beginnerChrome_questionLabels() {
   QVERIFY2(!studio.contains(QLatin1String("addGroup(QStringLiteral(\"view\")")),
            "보기 그룹 없음");
   QVERIFY2(studio.contains(QLatin1String("savePdf")), "PDF 슬롯은 그대로");
+  QVERIFY2(studio.contains(QLatin1String("&KaDrawingStudio::savePdf")),
+           "조판 「PDF로 내보낼까?」가 savePdf에 연결되어 있어야 한다");
   QVERIFY2(!studio.contains(QLatin1String("addStudio(QStringLiteral(\"out\")")),
            "위 리본 PDF는 범례창과 중복이라 뺌");
 }

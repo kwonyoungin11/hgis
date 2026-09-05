@@ -255,6 +255,18 @@ public:
   static QgsVectorLayer* ensureDomainLayer(QgsProject* project, const QString& gpkgPath,
                                            const QString& layerKey, const QString& titleKo,
                                            QString* errorOut = nullptr);
+  // GPKG 테이블에 도형이 있는데 작업공간에 없으면 범례에 올린다. 빈 테이블은 올리지 않는다.
+  static int addNonEmptyDomainLayers(QgsProject* project, const QString& gpkgPath);
+  // 저장된 프로젝트에 등록되어 있지만 범례에서 빠진 유효 레이어의 노드만 복원한다.
+  // 외부 벡터·사진도 포함하며 기존 노드의 표시 여부·순서는 바꾸지 않는다.
+  static int restoreMissingLayerTreeNodes(QgsProject* project);
+  // 도메인 + user_poly_* + 저장 때 들여온 벡터 테이블. 깨진(invalid) 작업공간
+  // 레이어는 제거하고 같은 GPKG 테이블을 다시 연다. 빈/메타 테이블은 올리지 않는다.
+  // 유효한 레이어의 빠진 범례 노드도 복원한다. 기존 노드의 표시 여부는 유지한다.
+  static int addNonEmptySavedGpkgLayers(QgsProject* project, const QString& gpkgPath);
+  // GPKG layer_styles 기본 심볼. leftover/LayersOnly 가 공장색으로 덮지 않게 한다.
+  static bool loadGpkgDefaultStyle(QgsVectorLayer* layer);
+  static int saveGpkgDefaultStyles(QgsProject* project, const QString& gpkgPath);
   static QgsVectorLayer* createUserPolygonLayer(QgsProject* project, const QString& gpkgPath,
                                                 const QString& titleKo, const QString& crsAuthId,
                                                 QString* errorOut = nullptr);

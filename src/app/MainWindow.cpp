@@ -31,6 +31,7 @@
 #include "KaSurveyAreaDialog.h"
 #include "core/RecentSurveys.h"
 #include "core/KaSafeQgis.h"
+#include "core/SurveyStorage.h"
 #include "core/GeorefService.h"
 #include "core/BufferAnalysis.h"
 #include "core/ChecklistEngine.h"
@@ -117,6 +118,7 @@
 #include <QRegularExpression>
 #include <QCloseEvent>
 #include <QSettings>
+#include <QScopedValueRollback>
 #include <QListWidget>
 #include <QListWidgetItem>
 #include <QSplitter>
@@ -264,7 +266,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 MainWindow::~MainWindow() = default;
 
 void MainWindow::closeEvent(QCloseEvent* event) {
-  persistSurveyWork();
+  if (!persistSurveyWork()) {
+    event->ignore();
+    return;
+  }
   QSettings st = RecentSurveys::userSettings();
   st.setValue(QStringLiteral("MainWindow/geometry"), saveGeometry());
   st.setValue(QStringLiteral("MainWindow/state"), saveState());
@@ -273,65 +278,186 @@ void MainWindow::closeEvent(QCloseEvent* event) {
   QMainWindow::closeEvent(event);
 }
 
+// 작업공간을 읽은 뒤 화면·범례·창 제목을 한 번에 맞춘다. 내장(.gpkg)과 동반(.qgz)
+// 두 경로가 같은 마무리를 쓰도록 한곳에 모았다.
+void MainWindow::finishOpenedProject(const QString& gpkgPath, const QString& sourceLabel,
+                                     qint64 elapsedMs) {
+#if KA_HGIS_HAS_QGIS
+  LayerOps::pruneDuplicateSatelliteLayers(QgsProject::instance());
+  LayerOps::addNonEmptyDomainLayers(QgsProject::instance(), gpkgPath);
+  m_workspaceRestoreSuppressesAutosave = false;
+  m_surveySessionReady = true;
+  m_surveyPath = gpkgPath;
+  if (QgsProject::instance()->crs().isValid())
+    m_workCrs = QgsProject::instance()->crs().authid();
+  LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, m_workCrs);
+
+  LayerOps::restoreMissingLayerTreeNodes(QgsProject::instance());
+  // QgsProject는 읽기 후에도 같은 트리 루트를 유지한다. 기존 모델과 연결을 보존한다.
+  if (m_layerTree && m_layerTree->selectionModel())
+    m_layerTree->selectionModel()->clear();
+  refreshLayerEmptyState();
+
+  LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
+  if (!LayerOps::zoomToProjectDataLayers(m_canvas, QgsProject::instance()))
+    LayerOps::zoomToKorea(m_canvas, m_workCrs, false);
+  m_startupViewApplied = true;
+  if (m_canvas) {
+    m_canvas->freeze(false);
+    m_canvas->refresh();
+  }
+  ensureDefaultBasemaps();
+  rememberSurvey(gpkgPath, QFileInfo(gpkgPath).completeBaseName());
+  setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(QFileInfo(gpkgPath).completeBaseName()));
+  showMapWorkspace();
+  updateNextActionStatus();
+  KaCrashGuard::logLine(
+      QStringLiteral("[open] 작업공간 복원 %1 ms — %2 · 레이어 %3")
+          .arg(elapsedMs)
+          .arg(sourceLabel)
+          .arg(QgsProject::instance()->mapLayers().size()));
+#else
+  Q_UNUSED(gpkgPath); Q_UNUSED(sourceLabel); Q_UNUSED(elapsedMs);
+#endif
+}
+
 bool MainWindow::openSurveyGpkg(const QString& gpkgPath) {
-  if (gpkgPath.isEmpty() || !QFile::exists(gpkgPath)) return false;
+  return openSurveyGpkg(gpkgPath, OpenSurveyMode::PreferWorkspace);
+}
+
+bool MainWindow::openSurveyGpkg(const QString& gpkgPath, OpenSurveyMode mode) {
+  if (m_isOpeningSurvey || gpkgPath.isEmpty() || !QFile::exists(gpkgPath)) return false;
+  QScopedValueRollback<bool> opening(m_isOpeningSurvey, true);
+#if KA_HGIS_HAS_QGIS
+  QString validationError;
+  if (!SurveyStorage::validateForOpen(gpkgPath, &validationError)) {
+    notify(Notice::Warning, QStringLiteral("조사 열기 실패"), validationError, gpkgPath);
+    return false;
+  }
+  // 프로젝트 읽기가 이전 레이어를 해제하기 전에 도구와 편집 참조를 종료한다.
+  stopAlignSession();
+  stopCaptureTool();
+  m_editLayer = nullptr;
+  m_isSplittingPolygon = false;
+  m_committedUndo.clear();
+  m_undoActions.clear();
+#endif
   QElapsedTimer t;
   t.start();
-  m_surveyPath = gpkgPath;
+  m_surveySessionReady = false;
+  m_workspaceRestoreFailed = false;
+  auto abortOpen = [&]() -> bool {
+    // 읽기는 이미 프로젝트를 바꿨을 수 있다. 이전 경로로 자동 저장하지 않는다.
+    m_surveyPath.clear();
+    m_surveySessionReady = false;
+    m_workspaceRestoreSuppressesAutosave = true;
+    return false;
+  };
 #if KA_HGIS_HAS_QGIS
   // 동반되는 QGIS 프로젝트(.qgz/.qgs)가 있으면 외부 SHP, 라벨 5pt, 스타일 등 작업 레이어를 온전히 복원한다.
   const QString base = QFileInfo(gpkgPath).dir().filePath(QFileInfo(gpkgPath).completeBaseName());
   const QString qgz = base + QStringLiteral(".qgz");
   const QString qgs = base + QStringLiteral(".qgs");
-  const QString projectToRead = QFile::exists(qgz) ? qgz : (QFile::exists(qgs) ? qgs : QString());
-  if (!projectToRead.isEmpty()) {
-    const bool alreadyUnsafe = kaQgisProjectFileIsUnsafeToRead(projectToRead);
-    const bool readOk =
-        !alreadyUnsafe && kaSafeReadQgisProject(QgsProject::instance(), projectToRead);
-    if (!readOk && !alreadyUnsafe)
-      kaMarkQgisProjectUnsafeToRead(projectToRead);
-    if (readOk) {
-      LayerOps::pruneDuplicateSatelliteLayers(QgsProject::instance());
-      m_surveyPath = gpkgPath;
-      if (QgsProject::instance()->crs().isValid())
-        m_workCrs = QgsProject::instance()->crs().authid();
-      LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, m_workCrs);
-
-      // 레이어 트리 뷰(m_layerTree) 모델을 프로젝트 루트로 새로고침하여 불러온 모든 레이어가 레전드에 즉시 표시되도록 보장
-      if (m_layerTree) {
-        if (m_layerTree->selectionModel())
-          m_layerTree->selectionModel()->clear();
-        auto* model = new QgsLayerTreeModel(QgsProject::instance()->layerTreeRoot(), m_layerTree);
-        model->setFlag(QgsLayerTreeModel::AllowNodeReorder, true);
-        model->setFlag(QgsLayerTreeModel::AllowNodeChangeVisibility, true);
-        model->setFlag(QgsLayerTreeModel::AllowNodeRename, true);
-        m_layerTree->setModel(model);
-      }
-      refreshLayerEmptyState();
-
-      LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
-      if (!LayerOps::zoomToProjectDataLayers(m_canvas, QgsProject::instance())) {
-        LayerOps::zoomToKorea(m_canvas, m_workCrs, false);
-      }
-      m_startupViewApplied = true;
-      if (m_canvas) {
-        m_canvas->freeze(false);
-        m_canvas->refresh();
-      }
-      ensureDefaultBasemaps();
-      rememberSurvey(gpkgPath, QFileInfo(gpkgPath).completeBaseName());
-      setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(QFileInfo(gpkgPath).completeBaseName()));
-      showMapWorkspace();
-      updateNextActionStatus();
-      KaCrashGuard::logLine(
-          QStringLiteral("[open] 조사 프로젝트 열기 %1 ms — %2").arg(t.elapsed()).arg(projectToRead));
+  // 1순위: 조사 파일(.gpkg) 안에 들어 있는 작업공간. 바깥 경로에 기대지 않으므로
+  // 파일을 옮기거나 복사해도 그대로 열린다. 부팅 복원은 이 경로를 건너뛴다
+  // (위성 중복 AV). 실패해도 m_surveyPath를 미리 넣지 않는다 — persist가 빈
+  // 홈 작업공간으로 원본을 덮는 것을 막는다.
+  const bool hasEmbedded = SurveyStorage::hasEmbeddedProject(gpkgPath);
+  if (mode == OpenSurveyMode::PreferWorkspace && hasEmbedded &&
+      kaQgisProjectFileIsUnsafeToRead(gpkgPath)) {
+    m_workspaceRestoreFailed = true;
+    m_workspaceRestoreSuppressesAutosave = true;
+  }
+  if (mode == OpenSurveyMode::PreferWorkspace && hasEmbedded &&
+      !kaQgisProjectFileIsUnsafeToRead(gpkgPath)) {
+    bool embCrashed = false;
+    QString embErr;
+    if (SurveyStorage::readEmbedded(QgsProject::instance(), gpkgPath, &embCrashed, &embErr)) {
+      finishOpenedProject(gpkgPath, QStringLiteral("조사 파일 내장"), t.elapsed());
       return true;
     }
+    m_workspaceRestoreFailed = true;
+    m_workspaceRestoreSuppressesAutosave = true;
+    KaCrashGuard::logLine(
+        QStringLiteral("[open] 내장 작업공간 읽기 실패(%1) — 동반 .qgz로 넘어갑니다: %2")
+            .arg(embCrashed ? QStringLiteral("예외") : QStringLiteral("실패"), embErr));
+    if (embCrashed) {
+      kaMarkQgisProjectUnsafeToRead(gpkgPath);
+      QMessageBox::warning(
+          this, QStringLiteral("조사 열기"),
+          QStringLiteral("조사 파일 안의 작업공간을 읽는 중 오류가 났습니다.\n\n"
+                         "프로그램을 닫았다가 다시 열어 주세요. 다시 열면 조사 데이터"
+                         "(.gpkg)만으로 엽니다."));
+      return abortOpen();
+    }
   }
+  const QString projectToRead = (mode == OpenSurveyMode::PreferWorkspace)
+      ? (QFile::exists(qgz) ? qgz : (QFile::exists(qgs) ? qgs : QString()))
+      : QString();
+  if (!projectToRead.isEmpty()) {
+    const bool alreadyUnsafe = kaQgisProjectFileIsUnsafeToRead(projectToRead);
+    bool readCrashed = false;
+    bool readOk = !alreadyUnsafe && kaSafeReadQgisProject(QgsProject::instance(),
+                                                          projectToRead, &readCrashed);
+    if (!readOk && !alreadyUnsafe)
+      kaMarkQgisProjectUnsafeToRead(projectToRead);
+    // 원자적 저장이 남긴 직전 정상본. 현재 파일을 못 읽어도 한 세대 전으로 되살릴 수 있다.
+    // 예외(AV)로 실패한 경우는 프로세스 상태를 믿을 수 없으므로 재시도하지 않는다.
+    const QString bakPath = kaProjectBackupPath(projectToRead);
+    if (!readOk && !readCrashed && QFile::exists(bakPath) &&
+        !kaQgisProjectFileIsUnsafeToRead(bakPath)) {
+      readOk = kaSafeReadQgisProject(QgsProject::instance(), bakPath, &readCrashed);
+      if (readOk)
+        KaCrashGuard::logLine(
+            QStringLiteral("[open] 직전 저장본으로 복구했습니다: %1").arg(bakPath));
+      else if (!readCrashed)
+        kaMarkQgisProjectUnsafeToRead(bakPath);
+    }
+    if (readCrashed) {
+      // __except caught an access violation inside QgsProject::read. Every
+      // QgsScopedRuntimeProfile still on the stack was skipped, so QgsRuntimeProfiler
+      // now holds dangling parents and the next QgsVectorLayer ctor dies inside it
+      // (crash-20260905-192205). Loading the .gpkg here is what actually killed the
+      // app, so stop and let the user restart — the mark above is on disk now, so
+      // the next launch skips this .qgz and opens the .gpkg normally.
+      KaCrashGuard::logLine(
+          QStringLiteral("[open] 동반 프로젝트 읽기 중 예외 — 이어서 열지 않음: %1")
+              .arg(projectToRead));
+      QMessageBox::warning(
+          this, QStringLiteral("조사 열기"),
+          QStringLiteral(
+              "동반 프로젝트 파일이 손상되어 읽는 중 오류가 났습니다.\n\n%1\n\n"
+              "프로그램을 닫았다가 다시 열면 이 파일을 건너뛰고 조사 데이터(.gpkg)로 "
+              "정상적으로 열립니다. 손상된 파일을 지우고 다시 저장하면 원래대로 돌아갑니다.")
+              .arg(QDir::toNativeSeparators(projectToRead)));
+      return abortOpen();
+    }
+    if (readOk) {
+      finishOpenedProject(gpkgPath, projectToRead, t.elapsed());
+      return true;
+    }
+    // 여기까지 왔다는 것은 작업공간(.qgz)을 못 읽었다는 뜻이다. 이 파일에만 있는
+    // 외부 SHP·스크린샷·스타일은 복원되지 않는다. 조용히 넘어가면 "열었더니 지적과
+    // 위성만 있다"로 보이므로 무엇이 빠졌는지 반드시 알린다.
+    m_workspaceRestoreFailed = true;
+    m_workspaceRestoreSuppressesAutosave = true;
+    KaCrashGuard::logLine(
+        QStringLiteral("[open] 작업공간 복원 실패 — 조사 데이터만 엽니다: %1").arg(projectToRead));
+  }
+  // 이전 조사의 레이어를 남긴 채 다음 조사를 얹으면 범례가 섞인다. 열기는 언제나
+  // 빈 프로젝트에서 시작한다(QGIS 「프로젝트 열기」와 같은 동작).
+  if (m_canvas) m_canvas->freeze(true);
+  const bool cleared = kaSafeClearQgisProject(QgsProject::instance());
+  if (m_canvas) m_canvas->freeze(false);
+  if (!cleared) return abortOpen();
 #endif
+  if (mode == OpenSurveyMode::LayersOnly)
+    m_workspaceRestoreSuppressesAutosave = true;
   loadSurveyLayers(gpkgPath);
 #if KA_HGIS_HAS_QGIS
+  m_surveySessionReady = true;
   applyStartupMap();
+  ensureDefaultBasemaps();
   QgsProject* proj = QgsProject::instance();
   for (QgsMapLayer* ml : proj->mapLayers()) {
     if (ml && ml->name() == QLatin1String("DEM") && ml->isValid()) {
@@ -348,6 +474,18 @@ bool MainWindow::openSurveyGpkg(const QString& gpkgPath) {
   showMapWorkspace();
   KaCrashGuard::logLine(
       QStringLiteral("[open] 조사 열기 %1 ms — %2").arg(t.elapsed()).arg(gpkgPath));
+#if KA_HGIS_HAS_QGIS
+  if (m_workspaceRestoreFailed) {
+    m_workspaceRestoreFailed = false;
+    QMessageBox::warning(
+        this, QStringLiteral("조사 열기"),
+        QStringLiteral(
+            "조사 데이터(.gpkg)는 열었지만 저장된 작업공간을 읽지 못했습니다.\n\n"
+            "외부 파일과 일부 레이어 설정은 복원되지 않았을 수 있습니다. "
+            "원래 작업공간은 자동으로 덮어쓰지 않습니다.\n\n"
+            "「저장」을 누르면 현재 복원된 작업을 다른 이름의 조사 파일로 저장합니다."));
+  }
+#endif
   return true;
 }
 
@@ -1274,10 +1412,12 @@ void MainWindow::buildUi() {
       updateAlignOverlay();
   });
   connect(QgsProject::instance(), &QgsProject::layersAdded, this, [this](const QList<QgsMapLayer*>&) {
+    if (m_isOpeningSurvey) return;
     LayerOps::ensureSatelliteAtBottom(QgsProject::instance());
     QTimer::singleShot(0, this, [this]() { refreshMapCanvasNow(); syncThematicButtons(); });
   });
   connect(QgsProject::instance(), &QgsProject::layersRemoved, this, [this](const QStringList&) {
+    if (m_isOpeningSurvey) return;
     LayerOps::ensureSatelliteAtBottom(QgsProject::instance());
     QTimer::singleShot(0, this, [this]() { refreshMapCanvasNow(); syncThematicButtons(); });
   });
@@ -1606,8 +1746,8 @@ void MainWindow::buildUi() {
   m_autosaveTimer->setInterval(20000);
   connect(m_autosaveTimer, &QTimer::timeout, this, &MainWindow::persistSurveyWork);
   m_autosaveTimer->start();
-  // 첫 화면은 항상 홈. 마지막 조사를 자동으로 열지 않는다.
-  // (안동시.qgz 위성 중복 → restoreLastSurvey가 부팅마다 프로세스를 죽였다)
+  // 마지막 조사는 GPKG 테이블+위성만 복원한다. 내장/.qgz 읽기는 부팅에서 하지 않는다.
+  QTimer::singleShot(0, this, &MainWindow::restoreLastSurvey);
 #endif
 
 }
@@ -2003,6 +2143,7 @@ void MainWindow::showMapWorkspace() {
 }
 
 void MainWindow::openRecentSurvey(const QString& path) {
+  if (m_isOpeningSurvey) return;
   if (path.isEmpty() || !QFile::exists(path)) {
     QMessageBox::warning(this, QStringLiteral("최근 조사"),
                          QStringLiteral("파일이 없습니다.\n%1").arg(path));
@@ -2027,10 +2168,14 @@ void MainWindow::openRecentSurvey(const QString& path) {
       rememberSurvey(path, QFileInfo(path).completeBaseName());
       setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(QFileInfo(path).completeBaseName()));
       showMapWorkspace();
-      return;
     }
+    return;
   }
 
+  QScopedValueRollback<bool> opening(m_isOpeningSurvey, true);
+  m_surveySessionReady = false;
+  m_surveyPath.clear();
+  m_workspaceRestoreSuppressesAutosave = true;
   if (kaQgisProjectFileIsUnsafeToRead(path) ||
       !kaSafeReadQgisProject(QgsProject::instance(), path)) {
     kaMarkQgisProjectUnsafeToRead(path);
@@ -2038,19 +2183,19 @@ void MainWindow::openRecentSurvey(const QString& path) {
     return;
   }
   LayerOps::pruneDuplicateSatelliteLayers(QgsProject::instance());
+  LayerOps::restoreMissingLayerTreeNodes(QgsProject::instance());
+  if (QFile::exists(companionGpkg)) {
+    m_surveyPath = companionGpkg;
+    LayerOps::addNonEmptySavedGpkgLayers(QgsProject::instance(), companionGpkg);
+  }
+  m_surveySessionReady = true;
+  m_workspaceRestoreSuppressesAutosave = false;
   if (QgsProject::instance()->crs().isValid())
     m_workCrs = QgsProject::instance()->crs().authid();
   LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, m_workCrs);
 
-  if (m_layerTree) {
-    if (m_layerTree->selectionModel())
-      m_layerTree->selectionModel()->clear();
-    auto* model = new QgsLayerTreeModel(QgsProject::instance()->layerTreeRoot(), m_layerTree);
-    model->setFlag(QgsLayerTreeModel::AllowNodeReorder, true);
-    model->setFlag(QgsLayerTreeModel::AllowNodeChangeVisibility, true);
-    model->setFlag(QgsLayerTreeModel::AllowNodeRename, true);
-    m_layerTree->setModel(model);
-  }
+  if (m_layerTree && m_layerTree->selectionModel())
+    m_layerTree->selectionModel()->clear();
   refreshLayerEmptyState();
 
   LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
@@ -2142,20 +2287,28 @@ void MainWindow::newSurvey() {
   const QString dir = QFileDialog::getExistingDirectory(this, QStringLiteral("저장 폴더"));
   if (dir.isEmpty()) return;
 #if KA_HGIS_HAS_QGIS
-  // Drop the previous survey from the legend before creating the GPKG so
-  // open layers do not lock the old file, and 새 조사 always starts clean.
+  // 새 조사는 빈 프로젝트에서 시작한다. removeSurveyDomainLayers만 부르던 예전 코드는
+  // 도면 레이어 7종만 지워서, 끌어다 넣은 SHP·스크린샷·클립 레이어가 새 조사 범례에
+  // 그대로 남았고 자동 저장이 그것을 새 .qgz에 박아 넣었다. QGIS의 「새 프로젝트」와
+  // 같이 전부 비운 뒤 지적·위성만 다시 올린다.
   hideSubTools();
   stopAlignSession();
   stopCaptureTool();
   m_editLayer = nullptr;
   m_committedUndo.clear();
   m_undoActions.clear();
-  LayerOps::removeSurveyDomainLayers(QgsProject::instance());
+  m_surveyPath.clear();  // 비우는 동안 자동 저장이 이전 조사에 덮어쓰지 않게 한다
+  m_workspaceRestoreSuppressesAutosave = false;
+  if (m_canvas) m_canvas->freeze(true);
+  kaSafeClearQgisProject(QgsProject::instance());
   refreshLayerEmptyState();
 #endif
   QString err;
   const QString path = SurveyProjectFactory::createNewSurvey(dir, name, &err, m_workCrs);
   if (path.isEmpty()) {
+#if KA_HGIS_HAS_QGIS
+    if (m_canvas) m_canvas->freeze(false);
+#endif
     QMessageBox::warning(this, QStringLiteral("실패"), err);
     return;
   }
@@ -2163,13 +2316,26 @@ void MainWindow::newSurvey() {
   m_stubSurveyArea = 0; m_stubFeatures = 0; m_stubGcp = 0; m_stubHasMeta = false;
   loadSurveyLayers(path);
 #if KA_HGIS_HAS_QGIS
+  if (m_canvas) m_canvas->freeze(false);
   applyStartupMap();
+  // 같은 이름으로 다시 만든 경우 예전 작업 공간(.qgz)이 남아 있으면 다음 열기가 그것을
+  // 읽어 새 조사에 남의 레이어가 되살아난다. 지금 상태로 덮어써 짝을 맞춘다.
+  {
+    const QString newQgz =
+        QFileInfo(path).dir().filePath(QFileInfo(path).completeBaseName() + QStringLiteral(".qgz"));
+    QString werr;
+    if (kaWriteQgisProjectAtomic(QgsProject::instance(), newQgz, &werr))
+      kaClearQgisProjectUnsafeMark(newQgz);
+    else
+      KaCrashGuard::logLine(QStringLiteral("[new] 새 작업공간 저장 실패 — %1").arg(werr));
+  }
 #endif
   if (auto* b86 = findChild<QToolButton*>(QStringLiteral("btnCrs5186")))
     b86->setChecked(!m_workCrs.contains(QLatin1String("5187")));
   if (auto* b87 = findChild<QToolButton*>(QStringLiteral("btnCrs5187")))
     b87->setChecked(m_workCrs.contains(QLatin1String("5187")));
   setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(name));
+  m_surveySessionReady = true;
   rememberSurvey(path, name);
   showMapWorkspace();
   updateNextActionStatus();
@@ -2326,7 +2492,7 @@ void MainWindow::loadBootBasemaps() {
 
 void MainWindow::ensureStartupViewReady() {
 #if KA_HGIS_HAS_QGIS
-  if (!m_canvas || m_startupViewApplied) return;
+  if (m_isOpeningSurvey || !m_canvas || m_startupViewApplied) return;
   if (m_canvas->width() < 40 || m_canvas->height() < 40) return;
   m_canvas->freeze(true);
   LayerOps::applyCanvasScreenDpi(m_canvas);
@@ -4069,7 +4235,7 @@ void MainWindow::applyMapScaleFromUi() {
 
 void MainWindow::refreshMapCanvasNow() {
 #if KA_HGIS_HAS_QGIS
-  if (!m_canvas) return;
+  if (m_isOpeningSurvey || !m_canvas) return;
   if (m_canvas->isDrawing()) return;
   LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
   updateNextActionStatus();
@@ -4152,25 +4318,8 @@ void MainWindow::loadSurveyLayers(const QString& gpkgOrStub) {
   if (m_canvas) m_canvas->setDestinationCrs(QgsCoordinateReferenceSystem(m_workCrs));
   m_surveyPath = gpkgOrStub;
 
-  // 이미 피처(도형)가 존재하는 도면 레이어는 한국어 명칭으로 불러온다 (빈 테이블은 레전드를 어지럽히지 않도록 자동 추가하지 않음)
-  for (const QString& key : LayerOps::domainLayerKeys()) {
-    QgsVectorLayer probe(QStringLiteral("%1|layername=%2").arg(gpkgOrStub, key), key, QStringLiteral("ogr"));
-    if (probe.isValid() && probe.featureCount() > 0) {
-      QString titleKo = key;
-      if (key == QLatin1String("survey_area")) titleKo = QStringLiteral("조사구역");
-      else if (key == QLatin1String("feature_poly")) titleKo = QStringLiteral("유구 (면)");
-      else if (key == QLatin1String("feature_line")) titleKo = QStringLiteral("유구 (선)");
-      else if (key == QLatin1String("section_line")) titleKo = QStringLiteral("단면선");
-      else if (key == QLatin1String("control_points")) titleKo = QStringLiteral("기준점");
-      else if (key == QLatin1String("artifact_point")) titleKo = QStringLiteral("유물");
-      else if (key == QLatin1String("trial_trench")) titleKo = QStringLiteral("시굴격자");
-      QString err;
-      auto* vl = LayerOps::ensureDomainLayer(proj, gpkgOrStub, key, titleKo, &err);
-      if (vl) {
-        LayerOps::applyDomainDrawStyle(vl, key);
-      }
-    }
-  }
+  // 이미 피처(도형)가 존재하는 도면 레이어만 한국어 명칭으로 불러온다.
+  LayerOps::addNonEmptyDomainLayers(proj, gpkgOrStub);
 
   // 도면 5장을 미리 만들지 않는다 — 조사를 열 때마다 2.4초를 먹었고(실측),
   // 사용자가 도면을 안 볼 수도 있다. 검수·내보내기·도면 창에서 그때 만든다.
@@ -4225,7 +4374,7 @@ QgsVectorLayer* MainWindow::ensureDomainLayerForEdit(const QString& layerKey, co
 }
 
 void MainWindow::onLayerTreeRowsMoved() {
-  if (!m_canvas) return;
+  if (m_isOpeningSurvey || !m_canvas) return;
   LayerOps::ensureSatelliteAtBottom(QgsProject::instance());
   LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
   LayerOps::refreshCanvasIfIdle(m_canvas);
@@ -6971,36 +7120,80 @@ void MainWindow::downloadRiverMap() {
 #endif
 }
 
-void MainWindow::persistSurveyWork() {
+bool MainWindow::commitSurveyEdits(int* committedCount) {
+  if (committedCount) *committedCount = 0;
 #if KA_HGIS_HAS_QGIS
-  int n = 0;
   if (QgsProject* proj = QgsProject::instance()) {
     for (QgsMapLayer* l : proj->mapLayers()) {
       auto* v = qobject_cast<QgsVectorLayer*>(l);
       if (!v || !v->isValid() || !v->isEditable() || !v->isModified())
         continue;
-      if (!v->commitChanges(false))
-        continue;
-      ++n;
-      v->startEditing();
+      if (!v->commitChanges(false)) {
+        const QString message = QStringLiteral("%1의 편집 내용을 저장하지 못했습니다. 편집은 유지됩니다.")
+                                    .arg(v->name());
+        const QString details = v->commitErrors().join(QLatin1Char('\n'));
+        KaCrashGuard::logLine(QStringLiteral("[save] %1 — %2").arg(message, details));
+        notify(Notice::Warning, QStringLiteral("저장 실패"), message, details);
+        return false;
+      }
+      if (committedCount) ++*committedCount;
     }
   }
-    if (!m_surveyPath.isEmpty())
-      rememberSurvey(m_surveyPath, QFileInfo(m_surveyPath).completeBaseName());
+#endif
+  return true;
+}
+
+bool MainWindow::persistSurveyWork() {
+#if KA_HGIS_HAS_QGIS
+  if (m_isOpeningSurvey) return false;
+  if (!m_surveySessionReady || m_surveyPath.isEmpty()) return true;
+  QScopedValueRollback<bool> saving(m_isOpeningSurvey, true);
+  int n = 0;
+  if (!commitSurveyEdits(&n)) return false;
+  // 작업공간을 못 읽고 열린 상태다. 지금 화면에는 외부 SHP가 빠져 있으므로 자동 저장이
+  // 이것을 덮어쓰면 그 레이어들이 파일에서 영구히 사라진다(실제로 23개 → 8개가 되었다).
+  // 복원된 데이터 편집만 커밋하고 원래 작업공간은 유지한다.
+  if (m_workspaceRestoreSuppressesAutosave) {
+    if (n > 0 && statusBar())
+      statusBar()->showMessage(
+          QStringLiteral("조사 데이터만 자동 저장했습니다. 작업공간(.qgz)은 복원에 실패해 "
+                         "덮어쓰지 않습니다."),
+          4000);
+    return true;
+  }
   if (!m_surveyPath.isEmpty()) {
     const QString qgzPath =
         QFileInfo(m_surveyPath).dir().filePath(QFileInfo(m_surveyPath).completeBaseName() +
                                                QStringLiteral(".qgz"));
-    QgsProject::instance()->setFileName(qgzPath);
-    QgsProject::instance()->write();
+    // 주 저장소는 조사 파일 안이다. SQLite 트랜잭션이라 도중에 죽어도 반쯤 쓰인 상태가
+    // 남지 않는다. 레이어를 .gpkg 안으로 들여오는 것은 사용자가 「저장」을 누를 때만 한다.
+    LayerOps::pruneDuplicateSatelliteLayers(QgsProject::instance());
+    QString serr;
+    if (!SurveyStorage::writeEmbedded(QgsProject::instance(), m_surveyPath, &serr)) {
+      KaCrashGuard::logLine(QStringLiteral("[autosave] 내장 작업공간 저장 실패 — %1").arg(serr));
+      notify(Notice::Warning, QStringLiteral("저장 실패"),
+             QStringLiteral("조사 파일에 작업공간을 저장하지 못했습니다."), serr);
+      return false;
+    } else {
+      kaClearQgisProjectUnsafeMark(m_surveyPath);
+      rememberSurvey(m_surveyPath, QFileInfo(m_surveyPath).completeBaseName());
+    }
+    // 동반 .qgz 사본. 목표 파일에 바로 쓰면 쓰는 도중 죽었을 때 잘린 파일이 남으므로
+    // 원자적으로 바꿔 넣는다.
+    QString werr;
+    if (!kaWriteQgisProjectAtomic(QgsProject::instance(), qgzPath, &werr))
+      KaCrashGuard::logLine(QStringLiteral("[autosave] 동반 .qgz 저장 실패 — %1").arg(werr));
+    else
+      kaClearQgisProjectUnsafeMark(qgzPath);
   }
   if (n > 0 && statusBar())
     statusBar()->showMessage(QStringLiteral("자동 저장했습니다."), 2500);
 #endif
+  return true;
 }
 
 void MainWindow::restoreLastSurvey() {
-  if (!m_restoreLastSurveyEnabled)
+  if (m_isOpeningSurvey || !m_restoreLastSurveyEnabled)
     return;
   if (!m_surveyPath.isEmpty())
     return;
@@ -7018,31 +7211,77 @@ void MainWindow::restoreLastSurvey() {
   if (last.isEmpty() || !QFile::exists(last))
     return;
   RecentSurveys::setSkipAutoRestore(st, true);
-  openRecentSurvey(last);
+  const QString gpkg = QFileInfo(last).suffix().compare(QLatin1String("gpkg"), Qt::CaseInsensitive) == 0
+      ? last
+      : QFileInfo(last).dir().filePath(QFileInfo(last).completeBaseName() + QStringLiteral(".gpkg"));
+  const QString toOpen = QFile::exists(gpkg) ? gpkg : last;
+  if (QFileInfo(toOpen).suffix().compare(QLatin1String("gpkg"), Qt::CaseInsensitive) == 0) {
+    const bool preferWorkspace = SurveyStorage::hasEmbeddedProject(toOpen) &&
+                                 !kaQgisProjectFileIsUnsafeToRead(toOpen);
+    openSurveyGpkg(toOpen, preferWorkspace ? OpenSurveyMode::PreferWorkspace
+                                           : OpenSurveyMode::LayersOnly);
+  } else
+    openRecentSurvey(toOpen);
   RecentSurveys::setSkipAutoRestore(st, false);
 }
 
 void MainWindow::saveProject() {
 #if KA_HGIS_HAS_QGIS
+  if (m_isOpeningSurvey) return;
+  if (m_workspaceRestoreSuppressesAutosave) {
+    notify(Notice::Info, QStringLiteral("다른 이름으로 저장"),
+           QStringLiteral("원래 작업공간을 보존하도록 복원된 작업을 새 파일로 저장합니다."));
+    saveProjectAs();
+    return;
+  }
   if (m_surveyPath.isEmpty()) {
     saveProjectAs();
     return;
   }
-  persistSurveyWork();
-  // 동반되는 QGIS 프로젝트(.qgz) 파일도 함께 저장하여 외부 SHP 레이어, 스타일, 라벨(5pt) 등 전체 작업환경을 보존한다.
+  if (!m_surveySessionReady) return;
+  QScopedValueRollback<bool> saving(m_isOpeningSurvey, true);
+  if (!commitSurveyEdits()) return;
   QFileInfo sfi(m_surveyPath);
   const QString qgzPath = sfi.dir().filePath(sfi.completeBaseName() + QStringLiteral(".qgz"));
-  QgsProject::instance()->setFileName(qgzPath);
-  const bool ok = QgsProject::instance()->write();
-  if (!ok) {
+
+  // 1) 조사 파일 바깥에 있던 벡터 레이어를 .gpkg 안으로 들여온다. 이걸 해야 파일 하나를
+  //    복사·이동해도 레이어가 끊기지 않는다. 원본 SHP는 지우지 않는다.
+  const SurveyStorage::AbsorbResult absorbed =
+      SurveyStorage::absorbExternalVectors(QgsProject::instance(), m_surveyPath);
+  // 2) 작업공간을 조사 파일 안에 기록한다. 여기가 주 저장소다.
+  QString serr;
+  if (!SurveyStorage::writeEmbedded(QgsProject::instance(), m_surveyPath, &serr)) {
     QMessageBox::warning(this, QStringLiteral("저장 실패"),
-                         QStringLiteral("프로젝트 파일(.qgz) 저장에 실패했습니다:\n%1").arg(qgzPath));
+                         QStringLiteral("조사 파일에 작업공간을 저장하지 못했습니다:\n%1\n\n%2")
+                             .arg(m_surveyPath, serr));
     return;
+  }
+  kaClearQgisProjectUnsafeMark(m_surveyPath);
+  // 3) 동반 .qgz는 QGIS 데스크톱에서 열어 보기 위한 사본이다. 실패해도 저장 자체는 성공이다.
+  QString werr;
+  if (kaWriteQgisProjectAtomic(QgsProject::instance(), qgzPath, &werr))
+    kaClearQgisProjectUnsafeMark(qgzPath);
+  else
+    KaCrashGuard::logLine(QStringLiteral("[save] 동반 .qgz 사본 저장 실패 — %1").arg(werr));
+
+  if (!absorbed.imported.isEmpty() || !absorbed.failed.isEmpty() || !absorbed.skippedRaster.isEmpty()) {
+    QStringList lines;
+    if (!absorbed.imported.isEmpty())
+      lines << QStringLiteral("조사 파일 안으로 들여왔습니다 (%1개): %2")
+                   .arg(absorbed.imported.size())
+                   .arg(absorbed.imported.join(QStringLiteral(", ")));
+    if (!absorbed.failed.isEmpty())
+      lines << QStringLiteral("들여오지 못해 원래 경로를 그대로 쓰는 레이어: %1")
+                   .arg(absorbed.failed.join(QStringLiteral(", ")));
+    if (!absorbed.skippedRaster.isEmpty())
+      lines << QStringLiteral("사진·래스터는 바깥 파일 그대로입니다: %1")
+                   .arg(absorbed.skippedRaster.join(QStringLiteral(", ")));
+    notify(Notice::Info, QStringLiteral("저장"), lines.join(QLatin1Char('\n')));
   }
   rememberSurvey(m_surveyPath, sfi.completeBaseName());
   statusBar()->showMessage(QStringLiteral("저장했습니다: %1").arg(sfi.fileName()), 4000);
   notify(Notice::Success, QStringLiteral("저장"),
-         QStringLiteral("현재 조사와 작업 중인 모든 레이어를 저장했습니다:\n%1").arg(QDir::toNativeSeparators(m_surveyPath)));
+         QStringLiteral("조사 데이터와 레이어 구성을 저장했습니다:\n%1").arg(QDir::toNativeSeparators(m_surveyPath)));
 #else
   QMessageBox::information(this, QStringLiteral("스텁"), QStringLiteral("프로젝트 저장 시뮬레이션"));
 #endif
@@ -7050,7 +7289,8 @@ void MainWindow::saveProject() {
 
 void MainWindow::saveProjectAs() {
 #if KA_HGIS_HAS_QGIS
-  persistSurveyWork();
+  if (m_isOpeningSurvey) return;
+  QScopedValueRollback<bool> saving(m_isOpeningSurvey, true);
 
   QString defaultPath;
   if (!m_surveyPath.isEmpty()) {
@@ -7072,31 +7312,50 @@ void MainWindow::saveProjectAs() {
   if (!targetGpkg.endsWith(QLatin1String(".gpkg"), Qt::CaseInsensitive))
     targetGpkg += QStringLiteral(".gpkg");
 
-  const QString targetQgz = newFi.dir().filePath(newFi.completeBaseName() + QStringLiteral(".qgz"));
+  const bool sameFile = !m_surveyPath.isEmpty() &&
+      QFileInfo(m_surveyPath).absoluteFilePath().compare(
+          QFileInfo(targetGpkg).absoluteFilePath(), Qt::CaseInsensitive) == 0;
+  if (m_workspaceRestoreSuppressesAutosave && sameFile) {
+    notify(Notice::Warning, QStringLiteral("다른 이름으로 저장"),
+           QStringLiteral("복원하지 못한 원래 작업공간은 덮어쓸 수 없습니다. 다른 파일 이름을 선택해 주세요."));
+    return;
+  }
+  if (!commitSurveyEdits()) return;
 
   // 1. 기존 조사가 있으면 새 GPKG로 복사하여 조사 데이터(유구, 구역 등) 보존
-  if (!m_surveyPath.isEmpty() && QFile::exists(m_surveyPath) && m_surveyPath != targetGpkg) {
-    if (QFile::exists(targetGpkg))
-      QFile::remove(targetGpkg);
-    if (!QFile::copy(m_surveyPath, targetGpkg)) {
+  if (!m_surveyPath.isEmpty() && QFile::exists(m_surveyPath) && !sameFile) {
+    QString copyError;
+    if (!SurveyStorage::copySurvey(m_surveyPath, targetGpkg, &copyError)) {
       QMessageBox::warning(this, QStringLiteral("저장 실패"),
-                           QStringLiteral("파일을 생성할 수 없습니다:\n%1").arg(targetGpkg));
+                           QStringLiteral("파일을 생성할 수 없습니다:\n%1\n%2").arg(targetGpkg, copyError));
       return;
     }
-    // 도면 레이어들의 데이터소스를 새 GPKG 경로로 갱신 (외부 SHP 레이어는 그대로 유지)
-    const QStringList domainKeys = LayerOps::domainLayerKeys();
+    // 논리 키는 같은 구역도 실제 테이블은 survey_area_2 등으로 다를 수 있다.
+    // 파일 경로만 바꾸고 각 레이어의 테이블·옵션·스타일은 보존한다.
     for (QgsMapLayer* l : QgsProject::instance()->mapLayers()) {
       auto* vl = qobject_cast<QgsVectorLayer*>(l);
-      if (!vl) continue;
-      const QString key = LayerOps::layerKeyOf(vl);
-      if (domainKeys.contains(key)) {
-        vl->setDataSource(QStringLiteral("%1|layername=%2").arg(targetGpkg, key), vl->name(), QStringLiteral("ogr"));
+      if (!vl || vl->providerType() != QLatin1String("ogr")) continue;
+      const QString source = vl->source();
+      const QString sourcePath = source.section(QLatin1Char('|'), 0, 0);
+      if (QFileInfo(sourcePath).absoluteFilePath().compare(
+              QFileInfo(m_surveyPath).absoluteFilePath(), Qt::CaseInsensitive) == 0) {
+        const int options = source.indexOf(QLatin1Char('|'));
+        vl->setDataSource(targetGpkg + (options < 0 ? QString() : source.mid(options)),
+                          vl->name(), QStringLiteral("ogr"));
+        if (!vl->isValid()) {
+          m_surveySessionReady = false;
+          m_workspaceRestoreSuppressesAutosave = true;
+          notify(Notice::Warning, QStringLiteral("저장 실패"),
+                 QStringLiteral("새 조사 파일에서 %1 레이어를 다시 읽지 못했습니다.").arg(vl->name()));
+          return;
+        }
       }
     }
   } else if (m_surveyPath.isEmpty() || !QFile::exists(m_surveyPath)) {
     QString err;
-    const QString created = SurveyProjectFactory::createNewSurvey(newFi.dir().absolutePath(),
-                                                                  newFi.completeBaseName(),
+    const QFileInfo targetFile(targetGpkg);
+    const QString created = SurveyProjectFactory::createNewSurvey(targetFile.dir().absolutePath(),
+                                                                  targetFile.completeBaseName(),
                                                                   &err, m_workCrs);
     if (created.isEmpty()) {
       QMessageBox::warning(this, QStringLiteral("저장 실패"), err);
@@ -7105,19 +7364,45 @@ void MainWindow::saveProjectAs() {
     targetGpkg = created;
   }
 
-  m_surveyPath = targetGpkg;
-
-  // 2. QGIS 프로젝트(.qgz) 저장 - 외부에서 넣은 SHP 레이어, 지적/위성 배경, 5pt 라벨 등 모든 레이어 상태가 완벽히 보존됨
-  QgsProject::instance()->setFileName(targetQgz);
-  if (!QgsProject::instance()->write()) {
-    QMessageBox::warning(this, QStringLiteral("경고"), QStringLiteral("프로젝트 파일(.qgz) 저장에 실패했습니다."));
+  // 2. 외부 벡터를 새 조사 파일 안으로 들여온 뒤 작업공간을 그 안에 기록한다.
+  //    이렇게 해야 새로 만든 .gpkg 하나만 건네도 상대가 그대로 열 수 있다.
+  const SurveyStorage::AbsorbResult absorbed =
+      SurveyStorage::absorbExternalVectors(QgsProject::instance(), targetGpkg);
+  QString serr;
+  if (!SurveyStorage::writeEmbedded(QgsProject::instance(), targetGpkg, &serr)) {
+    m_surveySessionReady = false;
+    m_workspaceRestoreSuppressesAutosave = true;
+    QMessageBox::warning(this, QStringLiteral("저장 실패"),
+                         QStringLiteral("새 조사 파일에 작업공간을 저장하지 못했습니다:\n%1\n\n%2")
+                             .arg(targetGpkg, serr));
+    return;
   }
+  m_surveyPath = targetGpkg;
+  m_surveySessionReady = true;
+  m_workspaceRestoreSuppressesAutosave = false;
+  kaClearQgisProjectUnsafeMark(targetGpkg);
+  // 3. 동반 .qgz 사본. 파일 위치가 바뀌므로 상대경로가 새 폴더 기준으로 다시 계산된다.
+  const QFileInfo targetInfo(targetGpkg);
+  const QString targetQgz = targetInfo.dir().filePath(targetInfo.completeBaseName() + QStringLiteral(".qgz"));
+  QString werr;
+  if (kaWriteQgisProjectAtomic(QgsProject::instance(), targetQgz, &werr))
+    kaClearQgisProjectUnsafeMark(targetQgz);
+  else
+    KaCrashGuard::logLine(QStringLiteral("[saveas] 동반 .qgz 사본 저장 실패 — %1").arg(werr));
+  if (!absorbed.failed.isEmpty())
+    notify(Notice::Warning, QStringLiteral("다른 이름으로 저장"),
+           QStringLiteral("원래 외부 파일 경로를 유지한 레이어: %1")
+               .arg(absorbed.failed.join(QStringLiteral(", "))));
+  if (!absorbed.skippedRaster.isEmpty())
+    notify(Notice::Info, QStringLiteral("다른 이름으로 저장"),
+           QStringLiteral("사진·래스터는 바깥 파일을 함께 보관해 주세요: %1")
+               .arg(absorbed.skippedRaster.join(QStringLiteral(", "))));
 
   // 3. 윈도우 타이틀 및 최근 조사 갱신
   setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(newFi.completeBaseName()));
   rememberSurvey(targetGpkg, newFi.completeBaseName());
 
-  const QString msg = QStringLiteral("작업 중이던 모든 레이어를 유지한 채 새 파일로 저장했습니다:\n%1").arg(QDir::toNativeSeparators(targetGpkg));
+  const QString msg = QStringLiteral("조사 데이터와 레이어 구성을 새 파일로 저장했습니다:\n%1").arg(QDir::toNativeSeparators(targetGpkg));
   statusBar()->showMessage(QStringLiteral("다른 이름으로 저장했습니다: %1").arg(newFi.fileName()), 5000);
   notify(Notice::Success, QStringLiteral("다른 이름으로 저장"), msg);
 #else
@@ -7127,6 +7412,7 @@ void MainWindow::saveProjectAs() {
 
 void MainWindow::openProject() {
 #if KA_HGIS_HAS_QGIS
+  if (m_isOpeningSurvey) return;
   const QString path = QFileDialog::getOpenFileName(
       this, QStringLiteral("열기"), QString(),
       QStringLiteral("조사 (*.gpkg *.qgz *.qgs);;GeoPackage (*.gpkg);;QGIS (*.qgz *.qgs)"));
@@ -7136,6 +7422,18 @@ void MainWindow::openProject() {
       setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(QFileInfo(path).completeBaseName()));
     return;
   }
+  const QString companionGpkg =
+      QFileInfo(path).dir().filePath(QFileInfo(path).completeBaseName() + QStringLiteral(".gpkg"));
+  if (QFile::exists(companionGpkg)) {
+    if (openSurveyGpkg(companionGpkg)) {
+      setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(QFileInfo(path).completeBaseName()));
+    }
+    return;
+  }
+  QScopedValueRollback<bool> opening(m_isOpeningSurvey, true);
+  m_surveySessionReady = false;
+  m_surveyPath.clear();
+  m_workspaceRestoreSuppressesAutosave = true;
   if (kaQgisProjectFileIsUnsafeToRead(path) ||
       !kaSafeReadQgisProject(QgsProject::instance(), path)) {
     kaMarkQgisProjectUnsafeToRead(path);
@@ -7143,6 +7441,7 @@ void MainWindow::openProject() {
     return;
   }
   LayerOps::pruneDuplicateSatelliteLayers(QgsProject::instance());
+  LayerOps::restoreMissingLayerTreeNodes(QgsProject::instance());
   for (QgsMapLayer* ml : QgsProject::instance()->mapLayers()) {
     auto* vl = qobject_cast<QgsVectorLayer*>(ml);
     if (!vl || !vl->isValid()) continue;
@@ -7155,15 +7454,14 @@ void MainWindow::openProject() {
       }
     }
   }
-  if (m_surveyPath.isEmpty()) {
-    const QString companionGpkg = QFileInfo(path).dir().filePath(QFileInfo(path).completeBaseName() + QStringLiteral(".gpkg"));
-    if (QFile::exists(companionGpkg))
-      m_surveyPath = companionGpkg;
-  }
+  if (m_surveyPath.isEmpty() && QFile::exists(companionGpkg))
+    m_surveyPath = companionGpkg;
+  if (!m_surveyPath.isEmpty())
+    LayerOps::addNonEmptySavedGpkgLayers(QgsProject::instance(), m_surveyPath);
+  m_surveySessionReady = true;
+  m_workspaceRestoreSuppressesAutosave = false;
   if (auto* cp = layerByKey(QStringLiteral("control_points")))
     LayerOps::ensureControlPointQualityFields(cp);
-  if (auto* fp = layerByKey(QStringLiteral("feature_poly")))
-    LayerOps::applyFeaturePolyStyle(fp);
   for (QgsMapLayer* ml : QgsProject::instance()->mapLayers()) {
     if (ml && ml->name() == QLatin1String("DEM") && ml->isValid()) {
       if (auto* rl = qobject_cast<QgsRasterLayer*>(ml)) {
@@ -7178,15 +7476,8 @@ void MainWindow::openProject() {
     m_workCrs = QgsProject::instance()->crs().authid();
   LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, m_workCrs);
 
-  if (m_layerTree) {
-    if (m_layerTree->selectionModel())
-      m_layerTree->selectionModel()->clear();
-    auto* model = new QgsLayerTreeModel(QgsProject::instance()->layerTreeRoot(), m_layerTree);
-    model->setFlag(QgsLayerTreeModel::AllowNodeReorder, true);
-    model->setFlag(QgsLayerTreeModel::AllowNodeChangeVisibility, true);
-    model->setFlag(QgsLayerTreeModel::AllowNodeRename, true);
-    m_layerTree->setModel(model);
-  }
+  if (m_layerTree && m_layerTree->selectionModel())
+    m_layerTree->selectionModel()->clear();
   refreshLayerEmptyState();
 
   LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);

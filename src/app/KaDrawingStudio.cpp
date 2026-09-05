@@ -1,6 +1,7 @@
 #include "KaDrawingStudio.h"
 #include "KaTheme.h"
 #include "KaIcons.h"
+#include "KaCrashGuard.h"
 #include "KaBeginnerRibbon.h"
 #include "core/LayoutService.h"
 #include "core/LayerOps.h"
@@ -1174,6 +1175,7 @@ void KaDrawingStudio::buildUi() {
                               QStringLiteral("PDF로 내보낼까?"), QSize(22, 22));
   pdfBtn->setObjectName(QStringLiteral("btnPrimary"));
   pdfBtn->setToolTip(QStringLiteral("지금 용지를 PDF 파일로 저장합니다"));
+  connect(pdfBtn, &QToolButton::clicked, this, &KaDrawingStudio::savePdf);
   auto* paperBtn = makeRailTile(m_cardLegend, KaIcons::icon(QStringLiteral("layout_map_frame")),
                                 QStringLiteral("용지/방향"), QSize(22, 22));
   paperBtn->setToolTip(QStringLiteral("A4/A3 용지 크기 및 가로/세로 방향을 전환합니다"));
@@ -3275,7 +3277,11 @@ void KaDrawingStudio::savePdf() {
   }
   if (m_pageOutline) m_pageOutline->show();
   if (pdfOk != QgsLayoutExporter::Success) {
-    QMessageBox::warning(this, QStringLiteral("PDF"), QStringLiteral("저장에 실패했습니다."));
+    KaCrashGuard::logLine(QStringLiteral("[layout] PDF 내보내기 실패 코드 %1 — %2")
+                              .arg(int(pdfOk))
+                              .arg(path));
+    QMessageBox::warning(this, QStringLiteral("PDF"),
+                         QStringLiteral("저장에 실패했습니다. (코드 %1)").arg(int(pdfOk)));
     return;
   }
   if (m_status) m_status->setText(QStringLiteral("저장: %1").arg(path));

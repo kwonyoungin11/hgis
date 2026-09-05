@@ -8,25 +8,25 @@
 
 | Field | Value |
 |------|--------|
-| Updated (local) | 2026-09-04 22:49:01 +09:00 |
+| Updated (local) | 2026-09-05 23:38:02 +09:00 |
 | VERSION file | 0.3.0 |
 | Branch | `main` |
-| HEAD short | `81c0d1e` |
-| HEAD full | `81c0d1e7df95ef7bbf4bd3284688a133b31e69e9` |
-| HEAD date | 2026-09-04 22:30:04 +0900 |
-| HEAD author | kwonypungin <kyi25@nate.com> |
-| HEAD subject | style(ui): 전체 카드창 그림자(Drop Shadow) 및 버튼/리본 입체감(Elevation) 적용 |
-| Total commits | 50 |
+| HEAD short | `6fc9375` |
+| HEAD full | `6fc93752e82c873b1f8e9b4fbffa12c765c04db1` |
+| HEAD date | 2026-09-05 17:39:25 +0900 |
+| HEAD author | kwonyoungin11 <kyi2516@gmail.com> |
+| HEAD subject | feat: restore field drawing tools and keep imported SHP on save/open |
+| Total commits | 52 |
 | Upstream | `origin/main` |
-| Sync | ahead 1 of origin/main (push pending) |
+| Sync | up to date with origin/main |
 | Origin | https://github.com/kwonyoungin11/hgis.git |
-| Working tree dirty | **yes** (6 paths) |
+| Working tree dirty | **yes** (21 paths) |
 
 ## How far we are
 
-- **Recorded tip when this file was written:** style(ui): 전체 카드창 그림자(Drop Shadow) 및 버튼/리본 입체감(Elevation) 적용 (`81c0d1e` @ 2026-09-04 22:30:04 +0900)
-- **Remote sync at write time:** ahead 1 of origin/main (push pending)
-- **Uncommitted local changes at write time:** yes (6 paths)
+- **Recorded tip when this file was written:** feat: restore field drawing tools and keep imported SHP on save/open (`6fc9375` @ 2026-09-05 17:39:25 +0900)
+- **Remote sync at write time:** up to date with origin/main
+- **Uncommitted local changes at write time:** yes (21 paths)
 
 ### Read this correctly
 
@@ -56,6 +56,8 @@
 
 | Hash | Date | Subject |
 |------|------|---------|
+| `6fc9375` | 2026-09-05T17:39:25+09:00 | feat: restore field drawing tools and keep imported SHP on save/open |
+| `3631571` | 2026-09-04T22:49:00+09:00 | fix(dem): 스택 오버플로우 재귀 및 WMS 렌더러 크래시 방지 |
 | `81c0d1e` | 2026-09-04T22:30:04+09:00 | style(ui): 전체 카드창 그림자(Drop Shadow) 및 버튼/리본 입체감(Elevation) 적용 |
 | `7beb4b1` | 2026-09-04T22:23:46+09:00 | chore: 최신 포터블 바이너리 및 커밋 상태 동기화 |
 | `c600253` | 2026-09-04T22:18:58+09:00 | feat(app): 구간분리 생성 취소 및 선택 도형 Delete 삭제 후 Ctrl+Z 복원 지원 |
@@ -84,18 +86,31 @@
 | `2ca17b9` | 2026-08-17T14:04:33+09:00 | Ship site buffer rings, new-survey legend reset, and OSGeo launch PATH. |
 | `e896fce` | 2026-08-17T10:48:58+09:00 | Ship georef split-align, easy-draw layer, and feature kind/period presets. |
 | `3bd6ff8` | 2026-08-16T15:35:45+09:00 | Refresh COMMIT_STATUS after teal chrome and digitize ship. |
-| `74abc32` | 2026-08-16T15:35:36+09:00 | Ship teal chrome, artifact digitize, snap, and studio layer-center. |
-| `ef06bf1` | 2026-08-16T12:37:19+09:00 | Refresh COMMIT_STATUS after chrome and folder-import ship. |
 
 ## Staged in this commit
 
 ```
+M	.grok/NOW.md
+A	.grok/plans/2026-09-05-save-open.md
 M	CMakeLists.txt
+M	HANDOFF.md
 M	dist/ka-hgis-portable/ka-hgis.exe
 M	docs/COMMIT_STATUS.md
+M	docs/HANDOFF.md
+M	src/app/KaApplication.cpp
 M	src/app/KaDrawingStudio.cpp
-M	src/app/KaDrawingStudio.h
+M	src/app/MainWindow.cpp
+M	src/app/MainWindow.h
+M	src/core/KaSafeQgis.cpp
+M	src/core/KaSafeQgis.h
 M	src/core/LayerOps.cpp
+M	src/core/LayerOps.h
+A	src/core/SurveyStorage.cpp
+A	src/core/SurveyStorage.h
+M	tests/test_recent.cpp
+A	tests/test_save_open.cpp
+M	tests/test_theme.cpp
+M	tests/test_workflow.cpp
 ```
 ## Other PC checklist
 

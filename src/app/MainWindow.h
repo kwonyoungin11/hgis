@@ -74,7 +74,9 @@ public:
   bool eventFilter(QObject* watched, QEvent* event) override;
   void showEvent(QShowEvent* event) override;
   void closeEvent(QCloseEvent* event) override;
+  enum class OpenSurveyMode { PreferWorkspace, LayersOnly };
   bool openSurveyGpkg(const QString& gpkgPath);
+  bool openSurveyGpkg(const QString& gpkgPath, OpenSurveyMode mode);
   int domainLayerCount() const;
   QString workCrsAuthId() const { return m_workCrs; }
   void runChecklistPublic() { runChecklist(); }
@@ -221,6 +223,9 @@ private:
   bool tryAddDroppedPaths(const QStringList& paths);
   QStringList selectedBrowserFiles() const;
   void loadSurveyLayers(const QString& gpkgOrStub);
+  // 내장(.gpkg) / 동반(.qgz) 두 복원 경로가 공유하는 마무리.
+  void finishOpenedProject(const QString& gpkgPath, const QString& sourceLabel,
+                           qint64 elapsedMs);
   void ensureDefaultBasemaps();
   // 주제도 아이콘의 눌림 상태를 범례에서 되읽는다. 레이어를 지우거나 체크를
   // 끄면 아이콘도 꺼져야 한다(범례가 진실).
@@ -265,7 +270,8 @@ private:
   void editAttributesAtCanvasPos(const QPoint& canvasPos);
   static QString attributeFieldLabelKo(const QString& fieldName);
 #endif
-  void persistSurveyWork();
+  bool commitSurveyEdits(int* committedCount = nullptr);
+  bool persistSurveyWork();
   void restoreLastSurvey();
 
   // Non-blocking feedback on the canvas. Reserve QMessageBox for questions and
@@ -367,10 +373,14 @@ private:
   QSplitter* m_mainSplit = nullptr;
   bool m_locationSearchBusy = false;
   bool m_startupViewApplied = false;
+  bool m_workspaceRestoreFailed = false;  // .qgz를 못 읽어 외부 레이어가 빠진 채 열렸다
+  // 복원되지 않은 작업공간은 덮어쓰지 않는다. 수동 저장도 새 사본으로 안내한다.
+  bool m_workspaceRestoreSuppressesAutosave = false;
   bool m_basemapBootPending = false;
-  bool m_restoreLastSurveyEnabled = false;
+  bool m_restoreLastSurveyEnabled = true;
   bool m_isLoadingBasemaps = false;
   bool m_isOpeningSurvey = false;
+  bool m_surveySessionReady = false;
   bool m_mapScreenBound = false;
   QTimer* m_displayRefresh = nullptr;
   QTimer* m_autosaveTimer = nullptr;
