@@ -6,6 +6,7 @@
 #include <QStringList>
 
 static QString listKey() { return QStringLiteral("RecentSurveys/items"); }
+static QString skipRestoreKey() { return QStringLiteral("RecentSurveys/skipAutoRestore"); }
 
 QSettings RecentSurveys::userSettings() {
   return QSettings(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("ka-hgis"),
@@ -74,4 +75,18 @@ void RecentSurveys::forget(QSettings& settings, const QString& path) {
   }
   settings.setValue(listKey(), raw);
   settings.sync();
+}
+
+void RecentSurveys::setSkipAutoRestore(QSettings& settings, bool skip) {
+  settings.setValue(skipRestoreKey(), skip);
+  settings.sync();
+}
+
+bool RecentSurveys::takeSkipAutoRestore(QSettings& settings) {
+  const bool skip = settings.value(skipRestoreKey(), false).toBool();
+  if (skip) {
+    settings.setValue(skipRestoreKey(), false);
+    settings.sync();
+  }
+  return skip;
 }

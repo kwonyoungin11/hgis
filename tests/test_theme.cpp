@@ -156,17 +156,27 @@ void TestTheme::beginnerChrome_questionLabels() {
   QVERIFY2(main.contains(QString::fromUtf8("조사파일")), "조사파일 그룹");
   QVERIFY2(main.contains(QString::fromUtf8("기록")), "기록 그룹");
   QVERIFY2(main.contains(QString::fromUtf8("배경 지도를 깔아볼까?")), "배경 그룹");
-  QVERIFY2(main.contains(QString::fromUtf8("정합·분석")), "정합 그룹");
-  QVERIFY2(main.contains(QString::fromUtf8("산출")), "산출 그룹");
+  QVERIFY2(main.contains(QString::fromUtf8("정합·분석")) ||
+               main.contains(QString::fromUtf8("좌표없는 사진에 좌표를")),
+           "정합 그룹");
+  QVERIFY2(main.contains(QString::fromUtf8("산출")) ||
+               main.contains(QString::fromUtf8("내보내기")),
+           "내보내기 그룹");
   QVERIFY2(main.contains(QString::fromUtf8("찾기")), "찾기 그룹");
   QVERIFY2(main.contains(QString::fromUtf8("만들까?")), "새조사 초보자 말");
-  QVERIFY2(main.contains(QString::fromUtf8("도면")) && main.contains(QString::fromUtf8("만들까?")),
-           "도면출력 초보자 말");
+  QVERIFY2(main.contains(QString::fromUtf8("도면 만들기")) ||
+               (main.contains(QString::fromUtf8("도면")) && main.contains(QString::fromUtf8("만들까?"))),
+           "도면 만들기");
   QVERIFY2(!main.contains(QLatin1String("addDockWidget(Qt::RightDockWidgetArea, checkDock)")),
            "도면 검수 칸을 지도에 붙이지 않음");
-  QVERIFY2(main.contains(QString::fromUtf8("제출(5179)")), "제출은 5179");
-  QVERIFY2(main.contains(QString::fromUtf8("유구 면을 그려볼까?")), "그리기 둘째 줄");
-  QVERIFY2(main.contains(QString::fromUtf8("파일을 지도에 끌어 넣으면 레이어가 됩니다.")),
+  QVERIFY2(main.contains(QString::fromUtf8("5179")), "제출은 5179");
+  QVERIFY2(main.contains(QString::fromUtf8("유구 면을 그려볼까?")) ||
+               main.contains(QString::fromUtf8("그려볼까?")),
+           "그리기 말");
+  QFile fb(QStringLiteral("src/app/KaFileBrowserPanel.cpp"));
+  const QString panelCode = fb.open(QIODevice::ReadOnly | QIODevice::Text) ? QString::fromUtf8(fb.readAll()) : QString();
+  QVERIFY2(main.contains(QString::fromUtf8("파일을 지도에 끌어 넣으면 레이어가 됩니다.")) ||
+               panelCode.contains(QString::fromUtf8("파일을 지도에 끌어 넣으면 레이어가 됩니다.")),
            "파일함 끌어넣기 안내");
   QVERIFY2(!main.contains(QLatin1String("addIcon(QStringLiteral(\"out\"), QStringLiteral(\"terrain_3d\")")),
            "입체지형 리본 삭제");

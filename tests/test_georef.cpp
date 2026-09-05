@@ -8,8 +8,11 @@
 #include <QTextStream>
 #include <QDateTime>
 #include <QCoreApplication>
+#include <QTemporaryDir>
+#include <qgsziputils.h>
 
 #include "core/GeorefService.h"
+#include "core/KaSafeQgis.h"
 #include "core/LayerOps.h"
 #include "core/SurveyProjectFactory.h"
 
@@ -48,6 +51,8 @@ private slots:
   void styleAlignedRasterOverlay_keepsInkDarkAfterPaperKnockout();
   void styleAlignedRasterOverlay_colorGeotiffKeepsNaturalColors();
   void updateAlignOverlay_remapsDestFromMapOnEveryPaint();
+  void safeReadQgisProject_missingFileReturnsFalse();
+  void qgisProjectFile_duplicateSatellitesDetected();
 };
 
 static bool nearly(double a, double b, double eps = 1e-6) {
@@ -450,6 +455,60 @@ void TestGeoref::updateAlignOverlay_remapsDestFromMapOnEveryPaint() {
            "CAD 왼쪽 줌에도 연결선을 다시 맞춤");
   QVERIFY2(src.contains(QLatin1String("KaImageView::viewChanged")),
            "왼쪽 그림 팬에도 연결선을 다시 맞춤");
+}
+
+void TestGeoref::safeReadQgisProject_missingFileReturnsFalse() {
+  QVERIFY(!kaSafeReadQgisProject(nullptr, QStringLiteral("missing.qgz")));
+  QVERIFY(!kaSafeReadQgisProject(QgsProject::instance(), QString()));
+  QVERIFY(!kaSafeReadQgisProject(QgsProject::instance(),
+                                QStringLiteral("Z:/ka-hgis-no-such-project.qgz")));
+  QVERIFY(!kaSafeClearQgisProject(nullptr));
+}
+
+void TestGeoref::qgisProjectFile_duplicateSatellitesDetected() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  const QString oneQgs = dir.filePath(QStringLiteral("one.qgs"));
+  {
+    QFile f(oneQgs);
+    QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Text));
+    f.write("<?xml version='1.0'?>\n<qgis><projectlayers>"
+            "<maplayer><layername>VWorld 위성</layername></maplayer>"
+            "<maplayer><layername>지적 본번</layername></maplayer>"
+            "</projectlayers></qgis>\n");
+  }
+  QCOMPARE(kaCountSatelliteLayersInQgisProjectFile(oneQgs), 1);
+  QVERIFY(!kaQgisProjectFileHasDuplicateSatellites(oneQgs));
+
+  const QString dupQgs = dir.filePath(QStringLiteral("dup.qgs"));
+  {
+    QFile f(dupQgs);
+    QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Text));
+    f.write("<?xml version='1.0'?>\n<qgis><projectlayers>"
+            "<maplayer><layername>VWorld 위성</layername></maplayer>"
+            "<maplayer><layername>VWorld 위성</layername></maplayer>"
+            "<maplayer><layername>위성</layername></maplayer>"
+            "<maplayer><layername>위성</layername></maplayer>"
+            "</projectlayers>"
+            "<layer-tree-group>"
+            "<layer-tree-layer name=\"위성\"/>"
+            "<layer-tree-layer name=\"위성\"/>"
+            "<layer-tree-layer name=\"위성\"/>"
+            "<layer-tree-layer name=\"위성\"/>"
+            "</layer-tree-group></qgis>\n");
+  }
+  QCOMPARE(kaCountSatelliteLayersInQgisProjectFile(dupQgs), 4);
+  QVERIFY(kaQgisProjectFileHasDuplicateSatellites(dupQgs));
+
+  const QString qgz = dir.filePath(QStringLiteral("dup.qgz"));
+  QVERIFY(QgsZipUtils::zip(qgz, QStringList{dupQgs}));
+  QCOMPARE(kaCountSatelliteLayersInQgisProjectFile(qgz), 4);
+  QVERIFY(kaQgisProjectFileHasDuplicateSatellites(qgz));
+  QVERIFY(!kaQgisProjectFileIsUnsafeToRead(qgz));
+  QVERIFY(!kaQgisProjectFileHasDuplicateSatellites(QStringLiteral("Z:/no-such.qgz")));
+  QVERIFY(!kaQgisProjectFileIsUnsafeToRead(oneQgs));
+  kaMarkQgisProjectUnsafeToRead(oneQgs);
+  QVERIFY(kaQgisProjectFileIsUnsafeToRead(oneQgs));
 }
 
 #include "test_georef.moc"

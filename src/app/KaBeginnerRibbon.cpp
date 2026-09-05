@@ -1,6 +1,9 @@
 #include "KaBeginnerRibbon.h"
 
+#include <algorithm>
+
 #include <QAction>
+#include <QFontMetrics>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -96,8 +99,21 @@ void KaBeginnerRibbon::applyTwoLine(QToolButton* button) {
   button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   button->setAutoRaise(false);
   button->setFocusPolicy(Qt::TabFocus);
-  button->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-  button->setFixedSize(64, 58);
+  button->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+  const QFontMetrics fm(button->font());
+  int textW = 0;
+  const QString text = button->text();
+  const QStringList lines = text.split(QLatin1Char('\n'));
+  for (const QString& line : lines) {
+    textW = std::max(textW, fm.horizontalAdvance(line));
+  }
+  const int iconW = button->iconSize().width() > 0 ? button->iconSize().width() : 24;
+  const int iconH = button->iconSize().height() > 0 ? button->iconSize().height() : 24;
+  const int w = std::max(64, std::max(textW + 12, iconW + 16));
+  const int lineCount = std::max(1, static_cast<int>(lines.size()));
+  const int textH = lineCount * fm.lineSpacing();
+  const int h = std::max(58, iconH + textH + 10);
+  button->setMinimumSize(w, h);
 }
 
 QFrame* KaBeginnerRibbon::group(const QString& id) const {

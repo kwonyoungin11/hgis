@@ -30,7 +30,7 @@ if (-not (Test-Path "build\CMakeCache.txt")) {
   if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
 }
 
-& cmake --build build --config Release
+& cmake --build build --config Release --parallel
 if ($LASTEXITCODE -ne 0) { throw "build failed" }
 
 # Best-effort: refresh clangd compile_commands.json (never fail the main pipeline)
@@ -43,7 +43,7 @@ try {
   Write-Host "WARN: clangd compile_commands refresh failed: $_"
 }
 
-& ctest --test-dir build -C Release --output-on-failure
+& ctest --test-dir build -C Release --output-on-failure --parallel
 if ($LASTEXITCODE -ne 0) { throw "ctest failed" }
 
 & "$PSScriptRoot\run-ka-hgis.ps1" --smoke-quit

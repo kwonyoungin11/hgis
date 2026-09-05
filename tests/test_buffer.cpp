@@ -263,20 +263,22 @@ void TestBuffer::splitTwoOverlappingFeatures_splitsTargetPolygon() {
   QCOMPARE(outLayer, road);
   QVERIFY(createdFid >= 0);
 
-  // 대상 road 레이어의 원본 피처(10000 면적)는 그대로 보존되고, 교차 피처(5000 면적)가 추가되어 총 2개여야 함
+  // 원본 A·B는 유지하고 교차 구간만 새 피처로 추가한다.
   QCOMPARE(int(road->featureCount()), 2);
+  QCOMPARE(int(bnd->featureCount()), 1);
 
-  // 원본 피처 확인: 면적이 10000 그대로 보존되어야 함
   QgsFeature origCheck = road->getFeature(roadFid);
   QVERIFY(origCheck.isValid());
-  QVERIFY2(std::abs(origCheck.geometry().area() - 10000.0) < 1.0, "원본 도형 면적이 훼손되지 않고 보존되어야 함");
+  QVERIFY2(std::abs(origCheck.geometry().area() - 10000.0) < 1.0, "원본 도형 면적은 그대로 10000");
 
-  // 새로 추가된 교차 피처 확인: 면적이 5000이어야 함
+  QgsFeature bndCheck = bnd->getFeature(bndFid);
+  QVERIFY(bndCheck.isValid());
+  QVERIFY2(std::abs(bndCheck.geometry().area() - 5000.0) < 1.0, "원본 바운더리 면적은 그대로 5000");
+
   QgsFeature newCheck = road->getFeature(createdFid);
   QVERIFY(newCheck.isValid());
   QVERIFY2(std::abs(newCheck.geometry().area() - 5000.0) < 1.0, "새로 분리된 교차 도형 면적이 5000이어야 함");
 
-  // Undo(새 피처 삭제) 테스트
   QVERIFY(LayerOps::undoCommittedFeature(road, createdFid, &err));
   QCOMPARE(int(road->featureCount()), 1);
 

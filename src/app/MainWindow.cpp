@@ -22,11 +22,15 @@
 #include "KaFoundLocationMark.h"
 #include "KaStatusBar.h"
 #include "KaBeginnerRibbon.h"
+#include "KaFileBrowserPanel.h"
 #include "KaCrashGuard.h"
 #include <QElapsedTimer>
+#include <QSlider>
 #include "KaTrenchDialog.h"
 #include "KaDemClassDialog.h"
+#include "KaSurveyAreaDialog.h"
 #include "core/RecentSurveys.h"
+#include "core/KaSafeQgis.h"
 #include "core/GeorefService.h"
 #include "core/BufferAnalysis.h"
 #include "core/ChecklistEngine.h"
@@ -275,23 +279,52 @@ bool MainWindow::openSurveyGpkg(const QString& gpkgPath) {
   t.start();
   m_surveyPath = gpkgPath;
 #if KA_HGIS_HAS_QGIS
-  // 동반되는 QGIS 프로젝트(.qgz)가 있으면 외부 SHP, 라벨 5pt, 스타일 등 작업 레이어를 온전히 복원한다.
-  const QString qgz = QFileInfo(gpkgPath).dir().filePath(QFileInfo(gpkgPath).completeBaseName() + QStringLiteral(".qgz"));
-  if (QFile::exists(qgz)) {
-    if (QgsProject::instance()->read(qgz)) {
+  // 동반되는 QGIS 프로젝트(.qgz/.qgs)가 있으면 외부 SHP, 라벨 5pt, 스타일 등 작업 레이어를 온전히 복원한다.
+  const QString base = QFileInfo(gpkgPath).dir().filePath(QFileInfo(gpkgPath).completeBaseName());
+  const QString qgz = base + QStringLiteral(".qgz");
+  const QString qgs = base + QStringLiteral(".qgs");
+  const QString projectToRead = QFile::exists(qgz) ? qgz : (QFile::exists(qgs) ? qgs : QString());
+  if (!projectToRead.isEmpty()) {
+    const bool alreadyUnsafe = kaQgisProjectFileIsUnsafeToRead(projectToRead);
+    const bool readOk =
+        !alreadyUnsafe && kaSafeReadQgisProject(QgsProject::instance(), projectToRead);
+    if (!readOk && !alreadyUnsafe)
+      kaMarkQgisProjectUnsafeToRead(projectToRead);
+    if (readOk) {
+      LayerOps::pruneDuplicateSatelliteLayers(QgsProject::instance());
       m_surveyPath = gpkgPath;
       if (QgsProject::instance()->crs().isValid())
         m_workCrs = QgsProject::instance()->crs().authid();
       LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, m_workCrs);
-      LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, true);
-      if (m_canvas) m_canvas->refresh();
+
+      // 레이어 트리 뷰(m_layerTree) 모델을 프로젝트 루트로 새로고침하여 불러온 모든 레이어가 레전드에 즉시 표시되도록 보장
+      if (m_layerTree) {
+        if (m_layerTree->selectionModel())
+          m_layerTree->selectionModel()->clear();
+        auto* model = new QgsLayerTreeModel(QgsProject::instance()->layerTreeRoot(), m_layerTree);
+        model->setFlag(QgsLayerTreeModel::AllowNodeReorder, true);
+        model->setFlag(QgsLayerTreeModel::AllowNodeChangeVisibility, true);
+        model->setFlag(QgsLayerTreeModel::AllowNodeRename, true);
+        m_layerTree->setModel(model);
+      }
+      refreshLayerEmptyState();
+
+      LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
+      if (!LayerOps::zoomToProjectDataLayers(m_canvas, QgsProject::instance())) {
+        LayerOps::zoomToKorea(m_canvas, m_workCrs, false);
+      }
+      m_startupViewApplied = true;
+      if (m_canvas) {
+        m_canvas->freeze(false);
+        m_canvas->refresh();
+      }
       ensureDefaultBasemaps();
       rememberSurvey(gpkgPath, QFileInfo(gpkgPath).completeBaseName());
       setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(QFileInfo(gpkgPath).completeBaseName()));
       showMapWorkspace();
       updateNextActionStatus();
       KaCrashGuard::logLine(
-          QStringLiteral("[open] 조사 프로젝트 열기 %1 ms — %2").arg(t.elapsed()).arg(qgz));
+          QStringLiteral("[open] 조사 프로젝트 열기 %1 ms — %2").arg(t.elapsed()).arg(projectToRead));
       return true;
     }
   }
@@ -458,8 +491,8 @@ void MainWindow::buildMenus() {
   ribbon->addGroup(QStringLiteral("survey"), QStringLiteral("조사파일"));
   ribbon->addGroup(QStringLiteral("record"), QStringLiteral("기록"));
   ribbon->addGroup(QStringLiteral("basemap"), QStringLiteral("배경 지도를 깔아볼까?"));
-  ribbon->addGroup(QStringLiteral("align"), QStringLiteral("정합·분석"));
-  ribbon->addGroup(QStringLiteral("out"), QStringLiteral("산출"));
+  ribbon->addGroup(QStringLiteral("align"), QStringLiteral("좌표없는 사진에 좌표를"));
+  ribbon->addGroup(QStringLiteral("out"), QStringLiteral("내보내기"));
   ribbon->addGroup(QStringLiteral("find"), QStringLiteral("찾기"));
 
   auto addIcon = [this, ribbon](const QString& group, const QString& iconId, const QString& text,
@@ -647,13 +680,13 @@ void MainWindow::buildMenus() {
   });
   ribbon->addWidget(QStringLiteral("align"), btnBuffer);
 
-  addIcon(QStringLiteral("out"), QStringLiteral("pdf"), QStringLiteral("도면 만들까?"),
+  addIcon(QStringLiteral("out"), QStringLiteral("pdf"), QStringLiteral("도면 만들기"),
           QStringLiteral("종이에 지도를 올려 도면을 만듭니다"), &MainWindow::openLayoutDesigner);
   addIcon(QStringLiteral("out"), QStringLiteral("section"), QStringLiteral("단면도"),
           QStringLiteral("단면 GeoTIFF로 표고·거리 눈금 도면을 만듭니다"),
           &MainWindow::openSectionDesigner);
-  addIcon(QStringLiteral("out"), QStringLiteral("transform"), QStringLiteral("제출(5179)"),
-          QStringLiteral("레이어 목록에서 고른 레이어를 제출용 EPSG:5179 SHP로 저장합니다"),
+  addIcon(QStringLiteral("out"), QStringLiteral("transform"), QStringLiteral("인트라넷\n내보내기 5179"),
+          QStringLiteral("인트라넷 제출. 레이어 선택 후 내보내기를 하면 자동 5179 변환 후 저장됩니다."),
           &MainWindow::convertSelectedTo5179);
 
   auto* region = new KaRegionLocator(ribbon);
@@ -869,23 +902,60 @@ void MainWindow::showSubToolsDraw() {
                                 : QStringLiteral("자석 꺼짐"),
                              4000);
   });
-  m_subToolbar->addAction(KaIcons::icon(QStringLiteral("easy_draw")), QStringLiteral("쉽게 그려볼까?"),
-                          this, &MainWindow::startEasyDraw);
-  m_subToolbar->addAction(KaIcons::icon(QStringLiteral("draw_area")), QStringLiteral("조사구역"),
-                          this, &MainWindow::startEditSurveyArea);
-  m_subToolbar->addAction(KaIcons::icon(QStringLiteral("draw_poly")), QStringLiteral("유구 면을 그려볼까?"),
-                          this, &MainWindow::startEditFeaturePoly);
-  m_subToolbar->addAction(KaIcons::icon(QStringLiteral("draw_line")), QStringLiteral("유구 선"),
-                          this, &MainWindow::startEditFeatureLine);
-  m_subToolbar->addAction(KaIcons::icon(QStringLiteral("artifact")), QStringLiteral("유물 찍을까?"),
-                          this, &MainWindow::startEditArtifact);
-  m_subToolbar->addAction(KaIcons::icon(QStringLiteral("line")), QStringLiteral("단면선"),
-                          this, &MainWindow::startEditSectionLine);
-  m_subToolbar->addAction(QStringLiteral("속성"), this, &MainWindow::startAttributeEditTool);
-  m_subToolbar->addAction(QStringLiteral("폴리곤 묶기"), this, &MainWindow::mergeFeaturePolygons);
-  m_subToolbar->addAction(QStringLiteral("구간 분리"), this, &MainWindow::clipOverlappingLayers);
-  m_subToolbar->addAction(QStringLiteral("폴리곤 나누기"), this, &MainWindow::startSplitPolygonTool);
+  auto* easyAct = m_subToolbar->addAction(KaIcons::icon(QStringLiteral("easy_draw")),
+                                          QStringLiteral("쉽게그리기"),
+                                          this, &MainWindow::startEasyDraw);
+  easyAct->setToolTip(QStringLiteral(
+      "쉽게그리기 — 이미 찍은 점 가까이에 마우스를 가져가면 그 점에 딱 붙어 자동으로 찍힙니다.\n"
+      "잘못 찍었으면 Ctrl+Z를 누르세요. 바로 앞 점으로 되돌아갑니다."));
+  auto* areaAct = m_subToolbar->addAction(KaIcons::icon(QStringLiteral("draw_area")),
+                                          QStringLiteral("조사구역 그리기"),
+                                          this, &MainWindow::startEditSurveyArea);
+  areaAct->setToolTip(QStringLiteral(
+      "조사구역(발굴 범위) 면을 그립니다. 점을 차례로 찍고 Enter로 닫습니다.\n"
+      "Ctrl+Z는 마지막 점을 되돌립니다."));
+  auto* polyAct = m_subToolbar->addAction(KaIcons::icon(QStringLiteral("draw_poly")),
+                                          QStringLiteral("유구 그리기"),
+                                          this, &MainWindow::startEditFeaturePoly);
+  polyAct->setToolTip(QStringLiteral(
+      "유구의 면(수혈·주거지 등)을 그립니다. 점을 차례로 찍고 Enter로 닫습니다.\n"
+      "Ctrl+Z는 마지막 점을 되돌립니다."));
+  auto* lineAct = m_subToolbar->addAction(KaIcons::icon(QStringLiteral("draw_line")),
+                                          QStringLiteral("유구 선"),
+                                          this, &MainWindow::startEditFeatureLine);
+  lineAct->setToolTip(QStringLiteral(
+      "유구의 선(석렬·구 등)을 그립니다. 점을 차례로 찍고 Enter로 끝냅니다."));
+  auto* artiAct = m_subToolbar->addAction(KaIcons::icon(QStringLiteral("artifact")),
+                                          QStringLiteral("유물위치표시"),
+                                          this, &MainWindow::startEditArtifact);
+  artiAct->setToolTip(QStringLiteral(
+      "유물이 나온 자리를 점으로 찍어 표시합니다. 한 번 클릭에 한 점입니다."));
+
+  // 폴리곤 묶기·나누기는 「그리는 도구」가 아니라 「이미 그린 면을 고치는 도구」다.
+  // 늘어나는 빈칸으로 오른쪽 끝에 따로 모아 두어 그리기 흐름과 섞이지 않게 한다.
+  auto* spacer = new QWidget(m_subToolbar);
+  spacer->setObjectName(QStringLiteral("subToolbarSpacer"));
+  spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+  m_subToolbar->addWidget(spacer);
+  m_subToolbar->addSeparator();
+  auto* mergeAct = m_subToolbar->addAction(QStringLiteral("폴리곤 묶기"),
+                                           this, &MainWindow::mergeFeaturePolygons);
+  mergeAct->setToolTip(QStringLiteral(
+      "여러 면을 하나로 묶습니다.\n"
+      "쓰는 법: [도형선택]을 누르고 Shift를 누른 채 지도에서 면을 두 개 이상 고른 뒤\n"
+      "[폴리곤 묶기]를 누르면 고른 면들이 하나로 합쳐집니다."));
+  auto* clipAct = m_subToolbar->addAction(QStringLiteral("구간 분리"),
+                                          this, &MainWindow::clipOverlappingLayers);
+  clipAct->setToolTip(QStringLiteral(
+      "겹쳐 있는 두 레이어에서 겹치는 구간만 새 레이어로 떼어 냅니다. 원본은 그대로 남습니다."));
+  auto* splitAct = m_subToolbar->addAction(QStringLiteral("폴리곤 나누기"),
+                                           this, &MainWindow::startSplitPolygonTool);
+  splitAct->setToolTip(QStringLiteral(
+      "[폴리곤 묶기]로 하나가 된 면을 다시 나눕니다.\n"
+      "쓰는 법: 면을 가로지르는 선을 클릭해 그리고 우클릭하면 그 선을 따라 갈라집니다.\n"
+      "(Shift로 도형 두 개를 고른 뒤 눌러도 겹친 구간에서 나뉩니다.)"));
   auto* closeAct = m_subToolbar->addAction(QStringLiteral("닫기"));
+  closeAct->setToolTip(QStringLiteral("그리기 도구 모음을 닫고 지도 이동으로 돌아갑니다"));
   connect(closeAct, &QAction::triggered, this, &MainWindow::hideSubTools);
   m_subToolbar->setVisible(true);
   statusBar()->showMessage(
@@ -1218,8 +1288,6 @@ void MainWindow::buildUi() {
   }
   LayerOps::applyKoreaMapLimits(QgsProject::instance(), m_canvas);
 
-  setupFileBrowser();
-
   // 1. 레이어 패널 (m_layersCard) - 상단 배치
   auto* layersCard = new QFrame(central);
   layersCard->setObjectName(QStringLiteral("layersCard"));
@@ -1254,153 +1322,80 @@ void MainWindow::buildUi() {
 #endif
   refreshLayerEmptyState();
 
-  auto* addBtn = new QToolButton(layersCard);
-  addBtn->setObjectName(QStringLiteral("btnAddLayer"));
-  addBtn->setText(QStringLiteral("+ 추가"));
-  addBtn->setToolTip(QStringLiteral("SHP·DXF·GPKG 등 파일을 도면 레이어로 불러옵니다"));
-  addBtn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-  connect(addBtn, &QToolButton::clicked, this, &MainWindow::addUserLayer);
-
-  auto* delBtn = new QToolButton(layersCard);
-  delBtn->setObjectName(QStringLiteral("btnRemoveLayer"));
-  delBtn->setIcon(KaIcons::icon(QStringLiteral("trash")));
-  delBtn->setText(QStringLiteral("삭제"));
-  delBtn->setToolTip(QStringLiteral("선택한 레이어를 목록에서 뺍니다 (파일은 남습니다)"));
-  delBtn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-  connect(delBtn, &QToolButton::clicked, this, &MainWindow::removeSelectedLayers);
-
-  auto* upBtn = new QToolButton(layersCard);
-  upBtn->setObjectName(QStringLiteral("btnLayerUp"));
-  upBtn->setText(QStringLiteral("▲ 위로"));
-  upBtn->setToolTip(QStringLiteral("선택한 레이어 순서를 위로 올립니다 (지도에서도 위)"));
-  connect(upBtn, &QToolButton::clicked, this, [this]() { moveSelectedLayer(-1); });
-
-  auto* downBtn = new QToolButton(layersCard);
-  downBtn->setObjectName(QStringLiteral("btnLayerDown"));
-  downBtn->setText(QStringLiteral("▼ 아래로"));
-  downBtn->setToolTip(QStringLiteral("선택한 레이어 순서를 아래로 내립니다 (지도에서도 아래)"));
-  connect(downBtn, &QToolButton::clicked, this, [this]() { moveSelectedLayer(1); });
-
-  auto* btnZoomMax = new QToolButton(layersCard);
-  btnZoomMax->setObjectName(QStringLiteral("btnZoomMax"));
-  btnZoomMax->setText(QStringLiteral("🔍 전체보기"));
-  btnZoomMax->setToolTip(QStringLiteral("지도를 최대 전체 범위로 맞춤"));
-  connect(btnZoomMax, &QToolButton::clicked, this, &MainWindow::zoomMapToFullMax);
-
-  addBtn->setAutoRaise(true);
-  delBtn->setAutoRaise(true);
-  upBtn->setAutoRaise(true);
-  downBtn->setAutoRaise(true);
-  btnZoomMax->setAutoRaise(true);
-
-  auto* layerBottomBar1 = new QHBoxLayout();
-  layerBottomBar1->setSpacing(4);
-  layerBottomBar1->addWidget(addBtn);
-  layerBottomBar1->addWidget(delBtn);
-  layerBottomBar1->addStretch(1);
-
-  auto* layerBottomBar2 = new QHBoxLayout();
-  layerBottomBar2->setSpacing(4);
-  layerBottomBar2->addWidget(upBtn);
-  layerBottomBar2->addWidget(downBtn);
-  layerBottomBar2->addWidget(btnZoomMax);
-  layerBottomBar2->addStretch(1);
-
+  // 레이어 카드에는 버튼을 두지 않는다. 추가는 파일함에서 끌어 넣기,
+  // 순서는 마우스 끌기, 삭제는 Delete 키(되돌리기는 Ctrl+Z), 나머지는 우클릭 메뉴다.
   layersLay->addWidget(capLayers);
   layersLay->addWidget(layersInner, 1);
-  layersLay->addLayout(layerBottomBar1);
-  layersLay->addLayout(layerBottomBar2);
 
-  // 2. 파일함 패널 (m_filesCard) - 하단 배치
-  auto* filesCard = new QFrame(central);
-  filesCard->setObjectName(QStringLiteral("filesCard"));
-  m_filesCard = filesCard;
-  applyWidgetShadow(filesCard, 14, 3, 30);
-  auto* filesLay = new QVBoxLayout(filesCard);
-  filesLay->setContentsMargins(6, 6, 6, 6);
-  filesLay->setSpacing(6);
+#if KA_HGIS_HAS_QGIS
+  // 배경지도 전용 투명도 조절 바
+  m_layerOpacityWidget = new QWidget(layersCard);
+  m_layerOpacityWidget->setObjectName(QStringLiteral("layerOpacityWidget"));
+  auto* opLay = new QHBoxLayout(m_layerOpacityWidget);
+  opLay->setContentsMargins(4, 2, 4, 2);
+  opLay->setSpacing(6);
 
-  auto* capFiles = new QLabel(QStringLiteral("파일함"), filesCard);
-  capFiles->setObjectName(QStringLiteral("cardCaption"));
-  capFiles->setProperty("class", QStringLiteral("cardCaptionFiles"));
+  auto* opTitle = new QLabel(QStringLiteral("투명도"), m_layerOpacityWidget);
+  opTitle->setStyleSheet(QStringLiteral("font-size: 11px; font-weight: bold; color: #475569;"));
+  m_layerOpacitySlider = new QSlider(Qt::Horizontal, m_layerOpacityWidget);
+  m_layerOpacitySlider->setRange(0, 100);
+  m_layerOpacitySlider->setValue(100);
+  m_layerOpacitySlider->setEnabled(false);
+  m_layerOpacitySlider->setToolTip(QStringLiteral("선택한 배경지도의 투명도를 조절합니다 (배경지도 전용)"));
 
-  auto* pathBar = new QHBoxLayout();
-  pathBar->setSpacing(4);
-  auto* btnPc = new QToolButton(filesCard);
-  btnPc->setText(QStringLiteral("내PC"));
-  btnPc->setToolTip(QStringLiteral("내 컴퓨터 드라이브 목록으로 이동"));
-  btnPc->setObjectName(QStringLiteral("btnBrowsePc"));
-  connect(btnPc, &QToolButton::clicked, this, [this]() { goFileBrowserRoot(QString()); });
+  m_layerOpacityLabel = new QLabel(QStringLiteral("-"), m_layerOpacityWidget);
+  m_layerOpacityLabel->setFixedWidth(36);
+  m_layerOpacityLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+  m_layerOpacityLabel->setStyleSheet(QStringLiteral("font-size: 11px; color: #64748b; font-weight: 500;"));
 
-  auto* btnUp = new QToolButton(filesCard);
-  btnUp->setText(QStringLiteral("⬆ 상위"));
-  btnUp->setToolTip(QStringLiteral("상위 폴더(..)로 한 단계 이동"));
-  btnUp->setObjectName(QStringLiteral("btnBrowseUp"));
-  connect(btnUp, &QToolButton::clicked, this, [this]() {
-    if (m_browserPath.isEmpty()) {
-      goFileBrowserRoot(QString());
-      return;
+  opLay->addWidget(opTitle);
+  opLay->addWidget(m_layerOpacitySlider, 1);
+  opLay->addWidget(m_layerOpacityLabel);
+  layersLay->addWidget(m_layerOpacityWidget);
+
+  connect(m_layerOpacitySlider, &QSlider::valueChanged, this, [this](int value) {
+    if (!m_layerTree) return;
+    QgsMapLayer* cur = m_layerTree->currentLayer();
+    if (!cur || !LayerOps::isReferenceOrBasemapLayer(cur)) return;
+    const double opacity = value / 100.0;
+    if (m_layerOpacityLabel) {
+      m_layerOpacityLabel->setText(QStringLiteral("%1%").arg(value));
     }
-    const QDir d(m_browserPath);
-    const QString parent = QDir::cleanPath(d.absolutePath() + QStringLiteral("/.."));
-    if (parent == QDir::cleanPath(m_browserPath) || parent.length() < 3)
-      goFileBrowserRoot(QString());
-    else
-      goFileBrowserRoot(parent);
+    LayerOps::setMapLayerOpacity(cur, opacity, m_canvas);
   });
 
-  auto* btnC = new QToolButton(filesCard);
-  btnC->setText(QStringLiteral("C:\\"));
-  btnC->setToolTip(QStringLiteral("C 드라이브로 바로 이동"));
-  btnC->setObjectName(QStringLiteral("btnBrowseC"));
-  connect(btnC, &QToolButton::clicked, this, [this]() { goFileBrowserRoot(QStringLiteral("C:/")); });
-  pathBar->addWidget(btnPc);
-  pathBar->addWidget(btnUp);
-  pathBar->addWidget(btnC);
-  pathBar->addStretch(1);
-
-  auto* pathBar2 = new QHBoxLayout();
-  pathBar2->setSpacing(4);
-  auto* btnDocs = new QToolButton(filesCard);
-  btnDocs->setText(QStringLiteral("문서"));
-  btnDocs->setToolTip(QStringLiteral("문서 폴더로 바로 이동"));
-  btnDocs->setObjectName(QStringLiteral("btnBrowseDocs"));
-  connect(btnDocs, &QToolButton::clicked, this, [this]() {
-    goFileBrowserRoot(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation));
+  connect(m_layerTree, &QgsLayerTreeView::currentLayerChanged, this, &MainWindow::updateLayerOpacityControl);
+  if (m_layerTree->selectionModel()) {
+    connect(m_layerTree->selectionModel(), &QItemSelectionModel::selectionChanged,
+            this, [this](const QItemSelection&, const QItemSelection&) {
+              updateLayerOpacityControl();
+            });
+  }
+  connect(QgsProject::instance(), &QgsProject::layersAdded, this, [this](const QList<QgsMapLayer*>&) {
+    updateLayerOpacityControl();
   });
-
-  auto* btnDesk = new QToolButton(filesCard);
-  btnDesk->setText(QStringLiteral("바탕화면"));
-  btnDesk->setToolTip(QStringLiteral("바탕화면 폴더로 바로 이동"));
-  btnDesk->setObjectName(QStringLiteral("btnBrowseDesktop"));
-  connect(btnDesk, &QToolButton::clicked, this, [this]() {
-    goFileBrowserRoot(resolvedDesktopPath());
+  connect(QgsProject::instance(), &QgsProject::layersRemoved, this, [this](const QStringList&) {
+    updateLayerOpacityControl();
   });
-  auto* btnPick = new QToolButton(filesCard);
-  btnPick->setText(QStringLiteral("폴더…"));
-  btnPick->setToolTip(QStringLiteral("조사 데이터 폴더 직접 선택"));
-  btnPick->setObjectName(QStringLiteral("btnBrowseFolder"));
-  connect(btnPick, &QToolButton::clicked, this, &MainWindow::browseDataFolder);
-  pathBar2->addWidget(btnDocs);
-  pathBar2->addWidget(btnDesk);
-  pathBar2->addWidget(btnPick);
-  pathBar2->addStretch(1);
+#endif
 
-  auto* filesInner = new QFrame(filesCard);
-  filesInner->setObjectName(QStringLiteral("filesInner"));
-  auto* filesInnerLay = new QVBoxLayout(filesInner);
-  filesInnerLay->setContentsMargins(4, 4, 4, 4);
-  filesInnerLay->addWidget(m_fileBrowser, 1);
-
-  auto* filesHint = new QLabel(QStringLiteral("파일을 지도에 끌어 넣으면 레이어가 됩니다."), filesCard);
-  filesHint->setObjectName(QStringLiteral("emptyState"));
-  filesHint->setWordWrap(true);
-
-  filesLay->addWidget(capFiles);
-  filesLay->addLayout(pathBar);
-  filesLay->addLayout(pathBar2);
-  filesLay->addWidget(filesInner, 1);
-  filesLay->addWidget(filesHint);
+  // 2. 파일함 패널 (m_filesPanel) - 하단 배치
+  auto* filesPanel = new KaFileBrowserPanel(central);
+  m_filesPanel = filesPanel;
+  m_filesCard = filesPanel;
+  m_fileBrowser = filesPanel->listView();
+  applyWidgetShadow(filesPanel, 14, 3, 30);
+  connect(filesPanel, &KaFileBrowserPanel::fileActivated, this, [this](const QString& path) {
+    const bool raster = GeorefService::isImagePath(path);
+    if (raster ? !addRasterFromPath(path) : !addVectorFromPath(path)) {
+      QMessageBox::warning(this, QStringLiteral("파일"),
+                           QStringLiteral("지도 레이어로 열 수 없습니다 (SHP/DXF/DWG/GPKG/GeoTIFF/JPG):\n%1")
+                               .arg(QDir::toNativeSeparators(path)));
+    }
+  });
+  connect(filesPanel, &KaFileBrowserPanel::statusMessage, this, [this](const QString& msg) {
+    statusBar()->showMessage(msg, 6000);
+  });
 
   // 3. 좌측 패널 수직 분할: 레이어(위) + 파일함(아래) 동시 노출
   auto* leftSplit = new QSplitter(Qt::Vertical, central);
@@ -1409,7 +1404,7 @@ void MainWindow::buildUi() {
   leftSplit->setHandleWidth(8);
   leftSplit->setChildrenCollapsible(false);
   leftSplit->addWidget(layersCard);
-  leftSplit->addWidget(filesCard);
+  leftSplit->addWidget(filesPanel);
   leftSplit->setStretchFactor(0, 3);
   leftSplit->setStretchFactor(1, 2);
   leftSplit->setSizes({380, 260});
@@ -1501,6 +1496,41 @@ void MainWindow::buildUi() {
   gridDetailLay->addWidget(new QLabel(QStringLiteral("굵기"), gridDetail));
   gridDetailLay->addWidget(m_mapGridWidth);
   gridDetailLay->addWidget(m_mapGridDash);
+
+  // 격자 선 색: 눌러 보면 바로 아는 색칠 단추 셋(빨강·파랑·검정)과 「그 밖의 색」.
+  gridDetailLay->addWidget(new QLabel(QStringLiteral("색"), gridDetail));
+  const QVector<QPair<QColor, QString>> gridSwatches = {
+      {QColor(0xD9, 0x2B, 0x2B), QStringLiteral("빨간색 격자")},
+      {QColor(0x1D, 0x4E, 0xD8), QStringLiteral("파란색 격자")},
+      {QColor(0x1F, 0x29, 0x37), QStringLiteral("검정색 격자")},
+  };
+  for (const auto& sw : gridSwatches) {
+    auto* b = new QToolButton(gridDetail);
+    b->setObjectName(QStringLiteral("gridColorSwatch"));
+    b->setFixedSize(20, 20);
+    b->setCheckable(true);
+    b->setAutoRaise(false);
+    b->setStyleSheet(KaTheme::colorSwatchStyle(sw.first));
+    b->setToolTip(sw.second);
+    const QColor c = sw.first;
+    connect(b, &QToolButton::clicked, this, [this, c]() { setMapGridColor(c); });
+    m_mapGridColorBtns.append(b);
+    gridDetailLay->addWidget(b);
+  }
+  auto* gridColorMore = new QToolButton(gridDetail);
+  gridColorMore->setObjectName(QStringLiteral("gridColorPick"));
+  gridColorMore->setText(QStringLiteral("…"));
+  gridColorMore->setFixedSize(22, 20);
+  gridColorMore->setToolTip(QStringLiteral("그 밖의 색을 직접 고릅니다"));
+  connect(gridColorMore, &QToolButton::clicked, this, [this]() {
+    const QColor picked = QColorDialog::getColor(m_mapGridColor, this,
+                                                 QStringLiteral("격자 선 색"),
+                                                 QColorDialog::ShowAlphaChannel);
+    if (picked.isValid())
+      setMapGridColor(picked);
+  });
+  gridDetailLay->addWidget(gridColorMore);
+  syncMapGridColorButtons();
   gridDetail->setVisible(false);
   connect(m_mapGridCheck, &QCheckBox::toggled, gridDetail, &QWidget::setVisible);
   scaleBar->addWidget(m_mapGridCheck);
@@ -1576,7 +1606,8 @@ void MainWindow::buildUi() {
   m_autosaveTimer->setInterval(20000);
   connect(m_autosaveTimer, &QTimer::timeout, this, &MainWindow::persistSurveyWork);
   m_autosaveTimer->start();
-  QTimer::singleShot(0, this, &MainWindow::restoreLastSurvey);
+  // 첫 화면은 항상 홈. 마지막 조사를 자동으로 열지 않는다.
+  // (안동시.qgz 위성 중복 → restoreLastSurvey가 부팅마다 프로세스를 죽였다)
 #endif
 
 }
@@ -1990,14 +2021,43 @@ void MainWindow::openRecentSurvey(const QString& path) {
     return;
   }
 #if KA_HGIS_HAS_QGIS
-  if (!QgsProject::instance()->read(path)) {
+  const QString companionGpkg = QFileInfo(path).dir().filePath(QFileInfo(path).completeBaseName() + QStringLiteral(".gpkg"));
+  if (QFile::exists(companionGpkg)) {
+    if (openSurveyGpkg(companionGpkg)) {
+      rememberSurvey(path, QFileInfo(path).completeBaseName());
+      setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(QFileInfo(path).completeBaseName()));
+      showMapWorkspace();
+      return;
+    }
+  }
+
+  if (kaQgisProjectFileIsUnsafeToRead(path) ||
+      !kaSafeReadQgisProject(QgsProject::instance(), path)) {
+    kaMarkQgisProjectUnsafeToRead(path);
     QMessageBox::warning(this, QStringLiteral("오류"), QStringLiteral("프로젝트를 열 수 없습니다."));
     return;
   }
+  LayerOps::pruneDuplicateSatelliteLayers(QgsProject::instance());
   if (QgsProject::instance()->crs().isValid())
     m_workCrs = QgsProject::instance()->crs().authid();
   LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, m_workCrs);
-  LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, true);
+
+  if (m_layerTree) {
+    if (m_layerTree->selectionModel())
+      m_layerTree->selectionModel()->clear();
+    auto* model = new QgsLayerTreeModel(QgsProject::instance()->layerTreeRoot(), m_layerTree);
+    model->setFlag(QgsLayerTreeModel::AllowNodeReorder, true);
+    model->setFlag(QgsLayerTreeModel::AllowNodeChangeVisibility, true);
+    model->setFlag(QgsLayerTreeModel::AllowNodeRename, true);
+    m_layerTree->setModel(model);
+  }
+  refreshLayerEmptyState();
+
+  LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
+  if (!LayerOps::zoomToProjectDataLayers(m_canvas, QgsProject::instance())) {
+    LayerOps::zoomToKorea(m_canvas, m_workCrs, false);
+  }
+  m_startupViewApplied = true;
   if (m_canvas) m_canvas->refresh();
   ensureDefaultBasemaps();
   rememberSurvey(path, QFileInfo(path).completeBaseName());
@@ -2126,10 +2186,39 @@ void MainWindow::refreshLayerEmptyState() {
 #endif
 }
 
+void MainWindow::updateLayerOpacityControl() {
+#if KA_HGIS_HAS_QGIS
+  if (!m_layerOpacitySlider || !m_layerTree) return;
+  QgsMapLayer* cur = m_layerTree->currentLayer();
+  if (cur && LayerOps::isReferenceOrBasemapLayer(cur)) {
+    const double op = LayerOps::mapLayerOpacity(cur);
+    const int val = qBound(0, qRound(op * 100.0), 100);
+    m_layerOpacitySlider->blockSignals(true);
+    m_layerOpacitySlider->setEnabled(true);
+    m_layerOpacitySlider->setValue(val);
+    m_layerOpacitySlider->blockSignals(false);
+    if (m_layerOpacityLabel) {
+      m_layerOpacityLabel->setText(QStringLiteral("%1%").arg(val));
+      m_layerOpacityLabel->setEnabled(true);
+    }
+  } else {
+    m_layerOpacitySlider->blockSignals(true);
+    m_layerOpacitySlider->setEnabled(false);
+    m_layerOpacitySlider->setValue(100);
+    m_layerOpacitySlider->blockSignals(false);
+    if (m_layerOpacityLabel) {
+      m_layerOpacityLabel->setText(QStringLiteral("-"));
+      m_layerOpacityLabel->setEnabled(false);
+    }
+  }
+#endif
+}
+
 void MainWindow::ensureDefaultBasemaps() {
 #if KA_HGIS_HAS_QGIS
   QgsProject* proj = QgsProject::instance();
   if (!proj) return;
+  LayerOps::pruneDuplicateSatelliteLayers(proj);
   bool hasSat = false;
   bool hasCad = false;
   for (QgsMapLayer* l : proj->mapLayers()) {
@@ -2214,12 +2303,18 @@ void MainWindow::syncThematicButtons() {
 void MainWindow::loadBootBasemaps() {
 #if KA_HGIS_HAS_QGIS
   if (!m_basemapBootPending) return;
+  if (m_isOpeningSurvey) {
+    m_basemapBootPending = false;
+    return;
+  }
   m_basemapBootPending = false;
+  m_isLoadingBasemaps = true;
   QElapsedTimer bm;
   bm.start();
   ensureDefaultBasemaps();
   LayerOps::pruneEmptyLegendGroups(QgsProject::instance());
   ensureStartupViewReady();
+  m_isLoadingBasemaps = false;
   KaCrashGuard::logLine(
       QStringLiteral("[boot] 배경지도 %1 ms · 미리보기 = %2 · 병렬렌더 = %3")
           .arg(bm.elapsed())
@@ -2239,16 +2334,10 @@ void MainWindow::ensureStartupViewReady() {
   LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
   m_canvas->freeze(true);
   LayerOps::zoomToKorea(m_canvas, m_workCrs, false);
-  m_canvas->zoomScale(25000.0, true);
   LayerOps::clampCanvasToKorea(m_canvas);
   m_canvas->freeze(false);
   LayerOps::refreshXyzBasemapTiles(m_canvas);
   m_startupViewApplied = true;
-  QTimer::singleShot(200, this, [this]() {
-    if (!m_canvas) return;
-    if (m_canvas->scale() > 40000.0 || m_canvas->scale() < 8000.0)
-      m_canvas->zoomScale(25000.0, true);
-  });
 #endif
 }
 
@@ -2392,6 +2481,8 @@ void MainWindow::onMapContextMenu(const QPoint& pos) {
   QMenu menu(this);
   menu.addAction(QStringLiteral("여기 도형 속성"), this, [this, pos]() { editAttributesAtCanvasPos(pos); });
   menu.addAction(QStringLiteral("속성 편집 도구"), this, &MainWindow::startAttributeEditTool);
+  // 그리기 툴바를 그리는 일에만 쓰도록 정리하면서 단면선을 여기로 옮겼다.
+  menu.addAction(QStringLiteral("단면선 그리기"), this, &MainWindow::startEditSectionLine);
   menu.addSeparator();
   menu.addAction(QStringLiteral("전체 최대 보기"), this, &MainWindow::zoomMapToFullMax);
   menu.addAction(QStringLiteral("한국 범위"), this, [this]() {
@@ -2435,26 +2526,61 @@ static bool isProjectSurveyDomainLayer(const QgsVectorLayer* vl, const QString& 
 #endif
 
 void MainWindow::onLayerTreeContextMenu(const QPoint& pos) {
+  showLayerTreeContextMenu(m_layerTree, pos);
+}
+
+void MainWindow::showLayerTreeContextMenu(QgsLayerTreeView* treeView, const QPoint& pos) {
 #if KA_HGIS_HAS_QGIS
-  if (!m_layerTree) return;
+  if (!treeView) return;
   QPoint vp = pos;
-  if (QWidget* vpW = m_layerTree->viewport())
-    vp = vpW->mapFrom(m_layerTree, pos);
-  const QModelIndex idx = m_layerTree->indexAt(vp);
+  if (QWidget* vpW = treeView->viewport())
+    vp = vpW->mapFrom(treeView, pos);
+  const QModelIndex idx = treeView->indexAt(vp);
+  QgsMapLayer* cur = nullptr;
   if (idx.isValid()) {
-    m_layerTree->setCurrentIndex(idx);
-    if (QgsLayerTreeNode* node = m_layerTree->index2node(idx)) {
+    treeView->setCurrentIndex(idx);
+    if (QgsLayerTreeNode* node = treeView->index2node(idx)) {
       if (auto* ll = qobject_cast<QgsLayerTreeLayer*>(node)) {
-        if (ll->layer())
-          m_layerTree->setCurrentLayer(ll->layer());
+        if (ll->layer()) {
+          cur = ll->layer();
+          treeView->setCurrentLayer(cur);
+          if (m_layerTree && m_layerTree != treeView) {
+            m_layerTree->setCurrentLayer(cur);
+          }
+        }
       }
     }
   }
+  if (!cur) {
+    cur = treeView->currentLayer();
+  }
+  if (!cur && m_layerTree) {
+    cur = m_layerTree->currentLayer();
+  }
+
   QMenu menu(this);
-  menu.addAction(QStringLiteral("이름 바꾸기 (두 번 클릭)"), this, &MainWindow::renameSelectedLayer);
-  menu.addAction(QStringLiteral("면·외곽선 색"), this, &MainWindow::editCurrentLayerStyle);
-  menu.addAction(QStringLiteral("도형 속성"), this, &MainWindow::editCurrentLayerAttributes);
-  if (QgsMapLayer* cur = m_layerTree->currentLayer()) {
+  // 레이어 카드의 「+ 추가」 버튼을 없앤 대신 불러오기를 여기로 옮겼다.
+  menu.addAction(QStringLiteral("레이어 불러오기 (SHP·DXF·GPKG)"), this, &MainWindow::addUserLayer);
+  menu.addSeparator();
+  menu.addAction(QStringLiteral("이름 바꾸기 (두 번 클릭)"), this, [this, cur]() { renameSelectedLayer(cur); });
+  menu.addAction(QStringLiteral("면·외곽선 색"), this, [this, cur]() { editCurrentLayerStyle(cur); });
+  menu.addAction(QStringLiteral("도형 속성"), this, [this, cur]() { editCurrentLayerAttributes(cur); });
+  if (cur && LayerOps::isReferenceOrBasemapLayer(cur)) {
+    QMenu* opMenu = menu.addMenu(QStringLiteral("투명도"));
+    const double curOp = LayerOps::mapLayerOpacity(cur);
+    const int curPct = qBound(0, qRound(curOp * 100.0), 100);
+    const QVector<int> presets = {100, 80, 60, 50, 40, 20};
+    for (int p : presets) {
+      const QString itemText = (p == 100) ? QStringLiteral("100% (불투명)") : QStringLiteral("%1%").arg(p);
+      QAction* act = opMenu->addAction(itemText, this, [this, cur, p]() {
+        LayerOps::setMapLayerOpacity(cur, p / 100.0, m_canvas);
+        updateLayerOpacityControl();
+      });
+      act->setCheckable(true);
+      act->setChecked(std::abs(curPct - p) <= 5);
+    }
+  }
+  if (cur) {
     if (auto* vl = qobject_cast<QgsVectorLayer*>(cur)) {
       if (LayerOps::hasToggleableLabels(vl)) {
         QMenu* labelMenu = menu.addMenu(QStringLiteral("라벨·명칭 속성"));
@@ -2463,6 +2589,8 @@ void MainWindow::onLayerTreeContextMenu(const QPoint& pos) {
           LayerOps::setLabelsVisible(vl, !on);
           if (m_canvas)
             m_canvas->refresh();
+          if (m_drawingStudio)
+            m_drawingStudio->refreshMapFromProject();
           statusBar()->showMessage(!on ? QStringLiteral("라벨 켬") : QStringLiteral("라벨 끔"), 4000);
         });
         labelMenu->addSeparator();
@@ -2478,6 +2606,7 @@ void MainWindow::onLayerTreeContextMenu(const QPoint& pos) {
             const bool showArea = LayerOps::labelShowArea(vl, false);
             LayerOps::applyNameAttributeLabels(vl, fn, sz, showArea);
             if (m_canvas) m_canvas->refresh();
+            if (m_drawingStudio) m_drawingStudio->refreshMapFromProject();
             statusBar()->showMessage(QStringLiteral("라벨 필드: '%1' (글자 크기: %2 pt)").arg(fn).arg(sz), 4000);
           });
           fa->setCheckable(true);
@@ -2491,6 +2620,7 @@ void MainWindow::onLayerTreeContextMenu(const QPoint& pos) {
             const double sz = LayerOps::labelFontSize(vl, 5.0);
             LayerOps::applyNameAttributeLabels(vl, curField, sz, !areaOn);
             if (m_canvas) m_canvas->refresh();
+            if (m_drawingStudio) m_drawingStudio->refreshMapFromProject();
             statusBar()->showMessage(!areaOn ? QStringLiteral("면적 라벨 켬") : QStringLiteral("면적 라벨 끔"), 4000);
           });
           actArea->setCheckable(true);
@@ -2506,6 +2636,7 @@ void MainWindow::onLayerTreeContextMenu(const QPoint& pos) {
             const bool showArea = LayerOps::labelShowArea(vl, false);
             LayerOps::applyNameAttributeLabels(vl, curField, s, showArea);
             if (m_canvas) m_canvas->refresh();
+            if (m_drawingStudio) m_drawingStudio->refreshMapFromProject();
             statusBar()->showMessage(QStringLiteral("라벨 글자 크기: %1 pt").arg(s), 4000);
           });
           sa->setCheckable(true);
@@ -2529,6 +2660,7 @@ void MainWindow::onLayerTreeContextMenu(const QPoint& pos) {
                 LayerOps::applyNameAttributeLabels(vl, nameField, sz, showArea);
               }
               if (m_canvas) m_canvas->refresh();
+              if (m_drawingStudio) m_drawingStudio->refreshMapFromProject();
               statusBar()->showMessage(QStringLiteral("인코딩 적용: %1").arg(e), 4000);
             });
             ea->setCheckable(true);
@@ -2547,40 +2679,57 @@ void MainWindow::onLayerTreeContextMenu(const QPoint& pos) {
     }
   }
   menu.addSeparator();
-  menu.addAction(QStringLiteral("이 레이어로 이동"), this, &MainWindow::zoomSelectedLayerMax);
-  menu.addAction(QStringLiteral("전체 보기"), this, &MainWindow::zoomMapToFullMax);
+  menu.addAction(QStringLiteral("이 레이어로 이동"), this, [this, treeView]() {
+    zoomSelectedLayerMax();
+    if (m_drawingStudio) m_drawingStudio->centerOnMapCanvas();
+  });
+  menu.addAction(QStringLiteral("전체 보기"), this, [this]() {
+    zoomMapToFullMax();
+    if (m_drawingStudio) m_drawingStudio->centerOnMapCanvas();
+  });
   menu.addAction(QStringLiteral("폴리곤 묶기"), this, &MainWindow::mergeFeaturePolygons);
   menu.addSeparator();
   // 레이어만 빼면 GPKG의 도형은 남아, 다시 그리기를 누르면 되살아난다.
   // 처음부터 다시 그리려면 도형 자체를 지워야 해서 곧바로 갈 길을 둔다.
   // 주의: 외부에서 추가한 SHP/CAD/참조 파일은 대상이 아니며, 현재 조사 GPKG의 도메인 레이어만 대상이다.
-  if (auto* vl = qobject_cast<QgsVectorLayer*>(m_layerTree->currentLayer())) {
+  if (auto* vl = qobject_cast<QgsVectorLayer*>(cur)) {
     if (isProjectSurveyDomainLayer(vl, m_surveyPath) && vl->featureCount() > 0) {
       menu.addAction(QStringLiteral("그린 도형 모두 지우기 (%1개)").arg(vl->featureCount()), this,
                      &MainWindow::clearDrawnFeaturesOfCurrentLayer);
     }
   }
   // 인터넷에서 받아 오는 배경은 지금 범위를 파일로 받아 둘 수 있다.
-  if (auto* rl = qobject_cast<QgsRasterLayer*>(m_layerTree->currentLayer())) {
+  if (auto* rl = qobject_cast<QgsRasterLayer*>(cur)) {
     if (rl->source().contains(QLatin1String("type=xyz"))) {
       menu.addAction(QStringLiteral("오프라인 저장 — 지금 화면 범위"), this,
                      &MainWindow::saveOfflineTilePack);
     }
   }
-  menu.addAction(QStringLiteral("레이어 삭제"), this, &MainWindow::removeSelectedLayers);
-  menu.exec(m_layerTree->viewport()->mapToGlobal(pos));
+  menu.addAction(QStringLiteral("레이어 삭제"), this, [this, treeView]() {
+    if (treeView == m_layerTree) {
+      removeSelectedLayers();
+    } else if (m_drawingStudio) {
+      m_drawingStudio->removeSelectedLayers();
+    } else {
+      removeSelectedLayers();
+    }
+    if (m_drawingStudio) m_drawingStudio->refreshMapFromProject();
+  });
+  menu.exec(treeView->viewport()->mapToGlobal(pos));
 #else
+  Q_UNUSED(treeView);
   Q_UNUSED(pos);
 #endif
 }
 
-void MainWindow::renameSelectedLayer() {
+void MainWindow::renameSelectedLayer(QgsMapLayer* targetLayer) {
 #if KA_HGIS_HAS_QGIS
-  if (!m_layerTree) return;
-
   QString currentName;
-  QgsMapLayer* mapLayer = m_layerTree->currentLayer();
-  QgsLayerTreeNode* node = m_layerTree->currentNode();
+  QgsMapLayer* mapLayer = targetLayer;
+  if (!mapLayer && m_layerTree) {
+    mapLayer = m_layerTree->currentLayer();
+  }
+  QgsLayerTreeNode* node = m_layerTree ? m_layerTree->currentNode() : nullptr;
 
   if (mapLayer) {
     currentName = mapLayer->name();
@@ -2611,6 +2760,7 @@ void MainWindow::renameSelectedLayer() {
     node->setName(trimmed);
 
   if (m_canvas) m_canvas->refresh();
+  if (m_drawingStudio) m_drawingStudio->refreshMapFromProject();
   statusBar()->showMessage(QStringLiteral("이름 변경: %1 → %2").arg(currentName, trimmed), 5000);
 #endif
 }
@@ -2705,6 +2855,9 @@ void MainWindow::startSelectTool() {
                        QStringLiteral("상단의 [폴리곤 나누기]를 누르면 겹치는 구간을 자동으로 분할합니다."));
               }
             });
+    connect(m_featureSelectTool, &KaFeatureSelectTool::requestMerge, this, &MainWindow::mergeFeaturePolygons);
+    connect(m_featureSelectTool, &KaFeatureSelectTool::requestSplit, this, &MainWindow::startSplitPolygonTool);
+    connect(m_featureSelectTool, &KaFeatureSelectTool::requestClip, this, &MainWindow::clipOverlappingLayers);
   }
 
   if (m_canvas->mapTool() == m_featureSelectTool) {
@@ -3227,6 +3380,8 @@ void MainWindow::toggleMapGrid() {
   cfg.penStyle = m_mapGridDash
                      ? static_cast<Qt::PenStyle>(m_mapGridDash->currentData().toInt())
                      : Qt::DashLine;
+  if (m_mapGridColor.isValid())
+    cfg.color = m_mapGridColor;
   cfg.type = (QApplication::keyboardModifiers() & Qt::ShiftModifier)
                  ? KaCanvasGridOverlay::Type::GeographicDms
                  : KaCanvasGridOverlay::Type::ProjectedMeters;
@@ -3241,6 +3396,27 @@ void MainWindow::toggleMapGrid() {
           : QStringLiteral("좌표 격자를 껐습니다."),
       4000);
 #endif
+}
+
+void MainWindow::setMapGridColor(const QColor& color) {
+  if (!color.isValid())
+    return;
+  m_mapGridColor = color;
+  syncMapGridColorButtons();
+  // 색만 바꿔도 바로 보이게 한다. 격자가 꺼져 있으면 켜지지 않고 값만 남는다.
+  if (m_mapGridCheck && m_mapGridCheck->isChecked())
+    toggleMapGrid();
+}
+
+void MainWindow::syncMapGridColorButtons() {
+  for (QToolButton* b : m_mapGridColorBtns) {
+    if (!b) continue;
+    const QSignalBlocker block(b);
+    // 툴팁 색과 현재 색이 같은 단추만 눌린 모양으로 둔다.
+    b->setChecked(b->toolTip().startsWith(QStringLiteral("빨간색")) ? m_mapGridColor == QColor(0xD9, 0x2B, 0x2B)
+                  : b->toolTip().startsWith(QStringLiteral("파란색")) ? m_mapGridColor == QColor(0x1D, 0x4E, 0xD8)
+                  : m_mapGridColor == QColor(0x1F, 0x29, 0x37));
+  }
 }
 
 void MainWindow::startCoordPointTool() {
@@ -4003,7 +4179,10 @@ void MainWindow::loadSurveyLayers(const QString& gpkgOrStub) {
     m_canvas->freeze(true);
     LayerOps::ensureOtfEnabled(proj, m_canvas, m_workCrs);
     LayerOps::syncMapCanvas(proj, m_canvas, false);
-    LayerOps::zoomToKorea(m_canvas, m_workCrs, false);
+    if (!LayerOps::zoomToProjectDataLayers(m_canvas, proj))
+      LayerOps::zoomToKorea(m_canvas, m_workCrs, false);
+    m_canvas->freeze(false);
+    m_canvas->refresh();
   }
   refreshLayerEmptyState();
 #else
@@ -4137,10 +4316,12 @@ void MainWindow::ensureAttributeTool() {
 #endif
 }
 
-void MainWindow::editCurrentLayerAttributes() {
+void MainWindow::editCurrentLayerAttributes(QgsMapLayer* targetLayer) {
 #if KA_HGIS_HAS_QGIS
-  if (!m_layerTree) return;
-  auto* layer = qobject_cast<QgsVectorLayer*>(m_layerTree->currentLayer());
+  auto* layer = qobject_cast<QgsVectorLayer*>(targetLayer);
+  if (!layer && m_layerTree) {
+    layer = qobject_cast<QgsVectorLayer*>(m_layerTree->currentLayer());
+  }
   if (!layer || !layer->isValid()) {
     QMessageBox::information(this, QStringLiteral("속성"),
                              QStringLiteral("벡터 레이어(조사구역·유구 등)를 선택한 뒤 다시 실행하세요."));
@@ -4327,10 +4508,12 @@ QDoubleSpinBox* kaMakeArrowSpin(QWidget* parent, QWidget** rowOut, double minV, 
 
 }  // namespace
 
-void MainWindow::editCurrentLayerStyle() {
+void MainWindow::editCurrentLayerStyle(QgsMapLayer* targetLayer) {
 #if KA_HGIS_HAS_QGIS
-  if (!m_layerTree) return;
-  auto* layer = qobject_cast<QgsVectorLayer*>(m_layerTree->currentLayer());
+  auto* layer = qobject_cast<QgsVectorLayer*>(targetLayer);
+  if (!layer && m_layerTree) {
+    layer = qobject_cast<QgsVectorLayer*>(m_layerTree->currentLayer());
+  }
   if (!layer || !layer->isValid()) {
     QMessageBox::information(this, QStringLiteral("모양"),
                              QStringLiteral("벡터 레이어를 선택한 뒤 다시 실행하세요."));
@@ -5008,7 +5191,47 @@ void MainWindow::startEasyDraw() {
 
 void MainWindow::startEditSurveyArea() {
 #if KA_HGIS_HAS_QGIS
-  beginEdit(ensureDomainLayerForEdit(QStringLiteral("survey_area"), QStringLiteral("조사구역")));
+  if (m_surveyPath.isEmpty()) {
+    const auto ans = QMessageBox::question(
+        this, QStringLiteral("레이어"),
+        QStringLiteral("먼저 「새 조사」로 저장 경로를 만드세요.\n\n지금 「새 조사」를 만들까요?"),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+    if (ans == QMessageBox::Yes)
+      newSurvey();
+    if (m_surveyPath.isEmpty()) return;
+  }
+
+  KaSurveyAreaDialog dlg(this, QgsProject::instance(), m_surveyPath);
+  if (dlg.exec() != QDialog::Accepted) {
+    return;
+  }
+
+  QgsVectorLayer* targetLayer = nullptr;
+  if (!dlg.isNewLayer()) {
+    targetLayer = dlg.selectedExistingLayer();
+  }
+
+  if (!targetLayer) {
+    QString err;
+    targetLayer = LayerOps::createSurveyAreaLayer(
+        QgsProject::instance(), m_surveyPath, dlg.layerName(),
+        dlg.strokeColor(), dlg.fillColor(), dlg.strokeWidthMm(), &err);
+    if (!targetLayer) {
+      QMessageBox::critical(this, QStringLiteral("조사구역 생성 실패"),
+                            err.isEmpty() ? QStringLiteral("레이어를 생성하지 못했습니다.") : err);
+      return;
+    }
+  }
+
+  if (m_canvas && !QgsProject::instance()->mapLayer(targetLayer->id())) {
+    LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
+  }
+  if (m_layerTree)
+    m_layerTree->setCurrentLayer(targetLayer);
+
+  statusBar()->showMessage(
+      QStringLiteral("조사구역 [%1] 그리기 시작 — 점을 찍고 Enter로 완성").arg(targetLayer->name()), 8000);
+  beginEdit(targetLayer);
 #else
   m_stubSurveyArea++;
   statusBar()->showMessage(QStringLiteral("스텁: 조사구역 폴리곤 %1개").arg(m_stubSurveyArea));
@@ -5055,19 +5278,39 @@ void MainWindow::startEditArtifact() {
 
 void MainWindow::mergeFeaturePolygons() {
 #if KA_HGIS_HAS_QGIS
-  auto* fp = ensureDomainLayerForEdit(QStringLiteral("feature_poly"), QStringLiteral("유구면"));
-  if (!fp) return;
+  auto selected = KaFeatureSelectTool::allSelectedFeatures(m_canvas);
+  QgsVectorLayer* targetLayer = nullptr;
+  QgsFeatureIds selectedIds;
+  if (!selected.isEmpty()) {
+    targetLayer = selected[0].layer.data();
+    for (const auto& item : selected) {
+      if (item.layer == targetLayer) {
+        selectedIds.insert(item.fid);
+      }
+    }
+  }
+  if (!targetLayer) {
+    targetLayer = m_layerTree ? qobject_cast<QgsVectorLayer*>(m_layerTree->currentLayer()) : nullptr;
+  }
+  if (!targetLayer || targetLayer->geometryType() != Qgis::GeometryType::Polygon) {
+    targetLayer = ensureDomainLayerForEdit(QStringLiteral("feature_poly"), QStringLiteral("유구면"));
+  }
+  if (!targetLayer) return;
+
   QString err;
-  if (!LayerOps::mergePolygonFeatures(fp, &err)) {
+  const bool ok = (selectedIds.size() >= 2) ? LayerOps::mergePolygonFeatures(targetLayer, selectedIds, &err)
+                                            : LayerOps::mergePolygonFeatures(targetLayer, &err);
+  if (!ok) {
     QMessageBox::warning(this, QStringLiteral("폴리곤 묶기"), err);
     return;
   }
   if (m_canvas) m_canvas->refresh();
-  statusBar()->showMessage(
-      QStringLiteral("유구면 폴리곤을 1개(멀티폴리곤)로 묶었습니다 · 제출 시 feature_poly.shp 한 파일"),
-      10000);
-  notify(Notice::Success, QStringLiteral("폴리곤 묶기"),
-         QStringLiteral("여러 폴리곤을 하나의 지오메트리로 합쳤습니다."),
+  const QString msg = (selectedIds.size() >= 2)
+                          ? QStringLiteral("선택한 폴리곤 %1개를 1개로 묶었습니다 · 제출 시 feature_poly.shp 한 파일").arg(selectedIds.size())
+                          : QStringLiteral("유구면 폴리곤을 1개(멀티폴리곤)로 묶었습니다 · 제출 시 feature_poly.shp 한 파일");
+  statusBar()->showMessage(msg, 10000);
+  notify(Notice::Success, QStringLiteral("폴리곤 묶기 완료"),
+         QStringLiteral("선택된 폴리곤들을 하나의 지오메트리로 합쳤습니다."),
          QStringLiteral("문화재 인트라넷 제출 시 「SHP내보내기」하면 "
                         "feature_poly.shp 한 파일(EPSG:5179)로 등록하면 됩니다."));
 #else
@@ -5078,6 +5321,8 @@ void MainWindow::mergeFeaturePolygons() {
 void MainWindow::startSplitPolygonTool() {
 #if KA_HGIS_HAS_QGIS
   auto selected = KaFeatureSelectTool::allSelectedFeatures(m_canvas);
+
+  // 1. 도형 2개가 선택된 경우: 겹치는 곳을 잘라서 나누기 (A\B, B\A, A∩B)
   if (selected.size() == 2) {
     auto* l1 = selected[0].layer.data();
     auto* l2 = selected[1].layer.data();
@@ -5087,7 +5332,7 @@ void MainWindow::startSplitPolygonTool() {
       QgsVectorLayer* targetLayer = nullptr;
       if (!LayerOps::splitTwoOverlappingFeatures(l1, selected[0].fid, l2, selected[1].fid,
                                                  &createdFid, &targetLayer, &err)) {
-        QMessageBox::warning(this, QStringLiteral("폴리곤 겹침 분할 실패"), err);
+        QMessageBox::warning(this, QStringLiteral("폴리곤 중첩 분할 실패"), err);
         return;
       }
       if (createdFid >= 0 && targetLayer) {
@@ -5095,21 +5340,49 @@ void MainWindow::startSplitPolygonTool() {
         act.type = KaUndoAction::FeatureAdded;
         act.layerId = targetLayer->id();
         act.featureId = createdFid;
-        act.description = QStringLiteral("구간 분리 도형 생성");
+        act.description = QStringLiteral("중첩 분할 도형 생성");
         m_undoActions.append(act);
       }
       if (m_canvas) m_canvas->refresh();
-      statusBar()->showMessage(QStringLiteral("선택한 두 도형의 겹치는 구간을 분리했습니다! (원본 보존됨 · Ctrl+Z로 되돌리기 가능)"), 8000);
-      notify(Notice::Success, QStringLiteral("폴리곤 겹침 분할 완료"),
-             QStringLiteral("선택된 두 도형의 원본은 보존되며, 겹치는 구간이 새 도형으로 분리되었습니다.\n잘못 분할된 경우 Ctrl+Z로 즉시 되돌릴 수 있습니다."));
+      statusBar()->showMessage(QStringLiteral("선택한 두 도형의 겹치는 구간을 잘라 분할했습니다! (A, B, 중첩부 3개로 분할됨)"), 8000);
+      notify(Notice::Success, QStringLiteral("폴리곤 중첩 분할 완료"),
+             QStringLiteral("선택된 두 도형의 겹치는 경계를 따라 분할하고 겹친 구간을 독립 폴리곤으로 생성했습니다."));
       return;
     }
   }
 
+  // 2. 그룹으로 묶여있는 폴리곤(멀티폴리곤) 나누기
+  if (selected.size() >= 1) {
+    auto* l = selected[0].layer.data();
+    if (l && l->isValid() && l->geometryType() == Qgis::GeometryType::Polygon) {
+      QgsFeature f;
+      if (l->getFeatures(QgsFeatureRequest(selected[0].fid)).nextFeature(f) && f.hasGeometry()) {
+        if (f.geometry().isMultipart()) {
+          QString err;
+          QgsFeatureIds fids;
+          for (const auto& item : selected) {
+            if (item.layer == l) fids.insert(item.fid);
+          }
+          if (LayerOps::explodeMultipartFeatures(l, fids, &err)) {
+            if (m_canvas) m_canvas->refresh();
+            statusBar()->showMessage(QStringLiteral("그룹으로 묶여 있던 폴리곤을 개별 폴리곤들로 분리했습니다!"), 8000);
+            notify(Notice::Success, QStringLiteral("폴리곤 그룹 분리 완료"),
+                   QStringLiteral("하나로 묶여 있던 멀티폴리곤을 개별 단일 폴리곤들로 정상 분리했습니다."));
+            return;
+          }
+        }
+      }
+    }
+  }
+
+  // 3. 단일 폴리곤인 경우: 분할선 그리기 모드로 전환하여 선으로 자르기
   QgsVectorLayer* cur = m_layerTree ? qobject_cast<QgsVectorLayer*>(m_layerTree->currentLayer()) : nullptr;
+  if (!selected.isEmpty() && selected[0].layer) {
+    cur = selected[0].layer.data();
+  }
   if (!cur || !cur->isValid() || cur->geometryType() != Qgis::GeometryType::Polygon) {
     QMessageBox::information(this, QStringLiteral("폴리곤 나누기"),
-                             QStringLiteral("도형 2개를 Shift+클릭으로 선택하거나, 나눌 폴리곤 레이어를 좌측 목록에서 선택해 주세요."));
+                             QStringLiteral("도형을 Shift+클릭으로 선택하거나, 나눌 폴리곤 레이어를 좌측 목록에서 선택해 주세요."));
     return;
   }
   m_isSplittingPolygon = true;
@@ -6293,6 +6566,25 @@ void MainWindow::toggleDemMap() {
   if (dem) {
     const bool wasVisible = LayerOps::isLayerVisible(proj, QStringLiteral("DEM"));
     const bool makeVisible = !wasVisible;
+    // 켜는 참인데 지금 화면이 기존 DEM 밖으로 나가 있으면, 화면 전체를 덮도록 새로 받는다.
+    if (makeVisible && !LayerOps::demCoversCanvas(proj, m_canvas)) {
+      QString rebuildErr;
+      if (LayerOps::addDemColorReliefMap(proj, m_canvas, &rebuildErr)) {
+        if (m_btnDem)
+          m_btnDem->setChecked(true);
+        if (!m_canvas->isDrawing()) {
+          LayerOps::syncMapCanvas(proj, m_canvas, false);
+          m_canvas->refresh();
+        }
+        statusBar()->showMessage(
+            rebuildErr.isEmpty()
+                ? QStringLiteral("지금 보이는 지도 전체를 DEM으로 다시 채웠습니다.")
+                : rebuildErr,
+            8000);
+        return;
+      }
+      // 새로 받지 못하면 있던 DEM이라도 켠다.
+    }
     LayerOps::toggleLayerVisibility(proj, m_canvas, QStringLiteral("DEM"), makeVisible);
     if (m_btnDem)
       m_btnDem->setChecked(makeVisible);
@@ -6329,8 +6621,10 @@ void MainWindow::toggleDemMap() {
   if (m_btnDem)
     m_btnDem->setChecked(true);
   statusBar()->showMessage(
-      QStringLiteral("정밀 DEM 입체 지형을 올렸습니다. 범례에 높이(m)가 표시됩니다. 다시 누르면 숨깁니다."),
-      6000);
+      err.isEmpty()
+          ? QStringLiteral("지금 보이는 지도 전체를 DEM으로 채웠습니다. 범례에 높이(m)가 나옵니다. 다시 누르면 숨깁니다.")
+          : err,
+      err.isEmpty() ? 6000 : 10000);
 #else
   QMessageBox::information(this, QStringLiteral("스텁"), QStringLiteral("DEM 시뮬레이션"));
 #endif
@@ -6691,21 +6985,41 @@ void MainWindow::persistSurveyWork() {
       v->startEditing();
     }
   }
-  if (!m_surveyPath.isEmpty())
-    rememberSurvey(m_surveyPath, QFileInfo(m_surveyPath).completeBaseName());
+    if (!m_surveyPath.isEmpty())
+      rememberSurvey(m_surveyPath, QFileInfo(m_surveyPath).completeBaseName());
+  if (!m_surveyPath.isEmpty()) {
+    const QString qgzPath =
+        QFileInfo(m_surveyPath).dir().filePath(QFileInfo(m_surveyPath).completeBaseName() +
+                                               QStringLiteral(".qgz"));
+    QgsProject::instance()->setFileName(qgzPath);
+    QgsProject::instance()->write();
+  }
   if (n > 0 && statusBar())
     statusBar()->showMessage(QStringLiteral("자동 저장했습니다."), 2500);
 #endif
 }
 
 void MainWindow::restoreLastSurvey() {
+  if (!m_restoreLastSurveyEnabled)
+    return;
   if (!m_surveyPath.isEmpty())
     return;
+  if (m_isLoadingBasemaps) {
+    // 배경지도 생성 중 WMS 공급자의 QEventLoop 스핀으로 인한 재진입 방지
+    QTimer::singleShot(100, this, &MainWindow::restoreLastSurvey);
+    return;
+  }
   QSettings st = RecentSurveys::userSettings();
+  if (RecentSurveys::takeSkipAutoRestore(st)) {
+    KaCrashGuard::logLine(QStringLiteral("[boot] 지난 실행이 조사 복원 중 끊겨 홈에 머뭅니다"));
+    return;
+  }
   const QString last = RecentSurveys::lastPath(st);
   if (last.isEmpty() || !QFile::exists(last))
     return;
+  RecentSurveys::setSkipAutoRestore(st, true);
   openRecentSurvey(last);
+  RecentSurveys::setSkipAutoRestore(st, false);
 }
 
 void MainWindow::saveProject() {
@@ -6719,7 +7033,13 @@ void MainWindow::saveProject() {
   QFileInfo sfi(m_surveyPath);
   const QString qgzPath = sfi.dir().filePath(sfi.completeBaseName() + QStringLiteral(".qgz"));
   QgsProject::instance()->setFileName(qgzPath);
-  QgsProject::instance()->write();
+  const bool ok = QgsProject::instance()->write();
+  if (!ok) {
+    QMessageBox::warning(this, QStringLiteral("저장 실패"),
+                         QStringLiteral("프로젝트 파일(.qgz) 저장에 실패했습니다:\n%1").arg(qgzPath));
+    return;
+  }
+  rememberSurvey(m_surveyPath, sfi.completeBaseName());
   statusBar()->showMessage(QStringLiteral("저장했습니다: %1").arg(sfi.fileName()), 4000);
   notify(Notice::Success, QStringLiteral("저장"),
          QStringLiteral("현재 조사와 작업 중인 모든 레이어를 저장했습니다:\n%1").arg(QDir::toNativeSeparators(m_surveyPath)));
@@ -6816,10 +7136,13 @@ void MainWindow::openProject() {
       setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(QFileInfo(path).completeBaseName()));
     return;
   }
-  if (!QgsProject::instance()->read(path)) {
+  if (kaQgisProjectFileIsUnsafeToRead(path) ||
+      !kaSafeReadQgisProject(QgsProject::instance(), path)) {
+    kaMarkQgisProjectUnsafeToRead(path);
     QMessageBox::warning(this, QStringLiteral("오류"), QStringLiteral("프로젝트를 열 수 없습니다."));
     return;
   }
+  LayerOps::pruneDuplicateSatelliteLayers(QgsProject::instance());
   for (QgsMapLayer* ml : QgsProject::instance()->mapLayers()) {
     auto* vl = qobject_cast<QgsVectorLayer*>(ml);
     if (!vl || !vl->isValid()) continue;
@@ -6831,6 +7154,11 @@ void MainWindow::openProject() {
         break;
       }
     }
+  }
+  if (m_surveyPath.isEmpty()) {
+    const QString companionGpkg = QFileInfo(path).dir().filePath(QFileInfo(path).completeBaseName() + QStringLiteral(".gpkg"));
+    if (QFile::exists(companionGpkg))
+      m_surveyPath = companionGpkg;
   }
   if (auto* cp = layerByKey(QStringLiteral("control_points")))
     LayerOps::ensureControlPointQualityFields(cp);
@@ -6849,7 +7177,23 @@ void MainWindow::openProject() {
   if (QgsProject::instance()->crs().isValid())
     m_workCrs = QgsProject::instance()->crs().authid();
   LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, m_workCrs);
-  LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, true);
+
+  if (m_layerTree) {
+    if (m_layerTree->selectionModel())
+      m_layerTree->selectionModel()->clear();
+    auto* model = new QgsLayerTreeModel(QgsProject::instance()->layerTreeRoot(), m_layerTree);
+    model->setFlag(QgsLayerTreeModel::AllowNodeReorder, true);
+    model->setFlag(QgsLayerTreeModel::AllowNodeChangeVisibility, true);
+    model->setFlag(QgsLayerTreeModel::AllowNodeRename, true);
+    m_layerTree->setModel(model);
+  }
+  refreshLayerEmptyState();
+
+  LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
+  if (!LayerOps::zoomToProjectDataLayers(m_canvas, QgsProject::instance())) {
+    LayerOps::zoomToKorea(m_canvas, m_workCrs, false);
+  }
+  m_startupViewApplied = true;
   if (m_canvas) m_canvas->refresh();
   ensureDefaultBasemaps();
   setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(QFileInfo(path).completeBaseName()));
@@ -7131,6 +7475,8 @@ void MainWindow::onFileBrowserActivated(QListWidgetItem* item) {
 }
 
 QStringList MainWindow::selectedBrowserFiles() const {
+  if (m_filesPanel)
+    return m_filesPanel->selectedFiles();
   QStringList out;
   if (!m_fileBrowser) return out;
   const auto items = m_fileBrowser->selectedItems();

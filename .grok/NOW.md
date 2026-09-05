@@ -1,5 +1,83 @@
 # NOW — Grok resume (2026-08-22)
 
+## 지금 (2026-09-05 홈 고정 · 안동시 최근열기 크래시)
+
+원인: `안동시.qgz`에 위성 레이어 4장 + xyz 11개. `openSurveyGpkg`가 동반 qgz를 `QgsProject::read` → `addMapLayers` AV. SEH 뒤 `clear()`는 `exitQgis`/`RelationManager::layersRemoved` AV (13:37). 위성 중복 생성 요청 이후 저장됨.
+고침: 부팅 자동복원 제거(첫 화면=홈). qgz XML에 위성 2장+면 read 금지, GPKG만. 저장 전 prune.
+필드: 옛 창 닫고 바탕화면 **고고학 전용 HGIS**. 홈이 유지. 안동시 최근 열어도 안 꺼짐.
+후속: read 실패는 세션 skip + clear 실패 시 홈. 직접 qgz 실패도 GPKG 폴백. `m_isLoadingBasemaps`로 정상 qgz skip 제거.
+커밋 금지.
+
+## 지금 (2026-09-05 첫 화면에서 꺼짐)
+
+원인: 홈이 뜬 뒤 `restoreLastSurvey`가 마지막 조사의 `.qgz`를 `QgsProject::read`로 열다 `addMapLayers` ACCESS_VIOLATION (crash-20260905-130119.log).
+고침: `kaSafeReadQgisProject` SEH, 실패 시 GPKG만, 복원 중 죽으면 다음 실행은 홈에 머묾.
+필드: 기존 창 닫고 바탕화면 **고고학 전용 HGIS**. 홈이 유지되어야 함. 커밋 금지.
+
+## 지금 (2026-09-05 상시: 모든 대화 Context7 + Sequential Thinking)
+
+사용자: 모든 대화에 순차적사고와 Context7 MCP를 쓰고, 기억·기록하라.
+기록:
+- Cursor 사용자 규칙 `모든 대화 Context7+순차적사고` (id 17758501)
+- `%USERPROFILE%\.cursor\rules\always-context7-thinking.mdc`
+- 프로젝트 `.cursor/rules/mcp-context7-thinking.mdc` + `grok-ka-hgis.mdc`
+금지: 있다고만 하고 호출 생략. 키를 채팅에 붙이지 말 것.
+
+## 지금 (2026-09-05 Grok 전용 병렬 — 모델 혼합 아님)
+
+사용자: 여러 AI 조합이 아니라 Grok 에이전트만.
+한 일: `/best-of-n`·내장 explore 제거. 전역 서브에이전트 `model: grok-4.6`. CLI `exploreSubagentModel=grok-4.6`. Max Mode는 이 요청과 무관(켜지 않음).
+
+## 지금 (2026-09-05 5대 요구사항 연속 완료: 파일함 정돈 / 좌표격자 색상 / 조판창 레이어·파일함 통합 / 여백 대칭 / 해상도 폰트겹침 방지)
+
+사용자: Claude Code 한도 후 연속 개발 완수 요청 (media_1788569321370.png 5대 핵심 요구사항).
+한 일:
+1. 파일함 버튼 정리:
+   - `KaFileBrowserPanel.cpp`, `KaFileBrowserPanel.h`: 상위(..) 버튼을 경로바 오른쪽 끝으로 분리 배치. 바로가기 버튼을 `[내PC]`, `[바탕화면]`, `[문서]`, `[다운로드]`, `[폴더직접찾기]` 5개로 정돈.
+   - `MainWindow.cpp`: 중복 브라우저 UI를 `KaFileBrowserPanel` 컴포넌트로 전면 통합.
+2. 좌표격자 선 색상 선택 및 라벨 동기화:
+   - `MainWindow.cpp`, `MainWindow.h`: 격자 상세 바에 빨강(#D92B2B), 파랑(#1D4ED8), 검정(#1F2937) 색상 스와치 및 '…' QColorDialog 커스텀 색상 선택기 추가.
+   - `KaCanvasGridOverlay.cpp`: 격자 선 색상 변경 시 좌표 라벨 텍스트 색상도 일치되도록 연동.
+3. 조판창(KaDrawingStudio) 레이어 및 파일함 통합:
+   - `KaDrawingStudio.cpp`, `KaDrawingStudio.h`: 좌측 열(`studioLeftCol`)에 `QSplitter(Qt::Vertical)` 배치. 상단 레이어 트리(`layersCard`) + 하단 파일함(`KaFileBrowserPanel`) 통합.
+   - 마우스 드래그 순서 변경(`AllowNodeReorder`, `InternalMove`, `rowsMoved` -> `syncMapFromLayers`).
+   - 레이어 삭제(`removeSelectedLayers`): Delete / Backspace 키 및 우클릭 컨텍스트 메뉴 "레이어 삭제".
+   - 되돌리기: Ctrl+Z 단축키 공통 연동.
+   - 파일함 파일 더블클릭 시 벡터/래스터 도면 자동 로드 및 조판 지도 동기화.
+4. 조판창 지도 좌우 여백 대칭:
+   - `KaDrawingStudio.cpp`의 `defaultMapRect()`: 좌우 18.0mm 대칭 여백으로 수정 완료.
+5. 해상도 변경 시 폰트/UI 겹침 방지:
+   - `KaBeginnerRibbon.cpp`: `applyTwoLine`에서 고정 `setFixedSize(64, 58)` 대신 fontMetrics와 iconSize 기반 가변 패딩 및 `setMinimumSize` 적용.
+   - `data/theme/ka-hgis.qss`: `max-width: 64px; max-height: 58px;` 제거, `min-width: 62px; min-height: 58px;` 적용, groupCaption `max-height: 18px` 제거.
+   - `tests/test_theme.cpp`: `diskMatchesEmbedded()` 및 파일함 안내 테스트 동기화.
+검증:
+- MSVC C++20 /MP 병렬 빌드 성공 (Exit Code 0).
+- CTest 전체 12개 테스트 스위트 100% 통과 (Exit Code 0, 36.73s).
+- `run-ka-hgis.ps1 --smoke-quit` 통과 (Exit Code 0).
+- `publish-desktop.ps1` 배포 완료 (2,588,672 bytes -> `dist\ka-hgis-portable\ka-hgis.exe`).
+필드: 바탕화면 아이콘 **고고학 전용 HGIS** 실행 시 5대 요구사항이 모두 완벽히 동작하는 것 확인 가능. 커밋 요청 전까지 커밋 금지.
+
+
+사용자: 모든 개발에서 최대 에이전트·병렬 개발이 되게 전역 설정.
+한 일:
+1. 사용자 `settings.json`: `cursor.worktreeMaxCount=50` (공식 키만. 에이전트 개수 키는 문서에 없음).
+2. 전역 사용자 규칙 + `%USERPROFILE%\.cursor\rules\max-parallel-agents.mdc`.
+3. 전역 서브에이전트: `parallel-scout` / `parallel-reviewer` / `parallel-tester` (`is_background`).
+4. 전역 스킬 `~\.cursor\skills\max-parallel-dev`.
+5. 이 저장소가 사용자 규칙을 덮지 않게 `grok-ka-hgis.mdc` + `.cursor/rules/max-parallel-dev.mdc`.
+필드: 새 채팅에서 개발 요청 시 첫 턴에 스카우트가 여러 개 떠야 함. CLI Max Mode는 켜지 않음(과금).
+
+## 지금 (2026-09-05 Context7 + Sequential Thinking MCP)
+
+사용자: 순차적사고·context7 MCP를 쓸 수 있게 하라.
+한 일:
+1. `.cursor/mcp.json` + 사용자 `~/.cursor/mcp.json`에
+   `sequential-thinking`(`@modelcontextprotocol/server-sequential-thinking`)과
+   `context7`(`@upstash/context7-mcp`) 등록. 키는 파일에 넣지 않음(사용자 env `CONTEXT7_API_KEY`).
+2. Context7 플러그인(`.cursor/settings.json`)은 이미 enabled. 이 세션에서 `resolve-library-id` QGIS 조회 성공.
+3. Cursor 호출 경로: `.cursor/rules/mcp-context7-thinking.mdc` — `GetDynamicTools` → `CallDynamicTool`.
+필드: Cursor **Developer: Reload Window** 후 Settings → Tools & MCP에서 두 서버가 초록(연결)인지 확인. sequential-thinking은 리로드 전에는 이 채팅에 안 붙음.
+
 ## 지금 (2026-09-04 상단 리본 버튼 크기 및 칸 균일화 - 64x58px 고정)
 
 사용자: "ui크기와 칸을 전부 일정하게 하라" (스크린샷 media_1788488013660.png: 버튼마다 제각각인 가로 폭, DEM/토양도의 분할 화살표 칸으로 인한 격자 깨짐).

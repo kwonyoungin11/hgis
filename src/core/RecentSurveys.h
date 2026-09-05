@@ -19,4 +19,6 @@ public:
   static QString lastPath(QSettings& settings);
   static void remember(QSettings& settings, const QString& path, const QString& name);
   static void forget(QSettings& settings, const QString& path);
+  static void setSkipAutoRestore(QSettings& settings, bool skip);
+  static bool takeSkipAutoRestore(QSettings& settings);
 };

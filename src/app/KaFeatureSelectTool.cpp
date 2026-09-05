@@ -1,4 +1,4 @@
-﻿#include "KaFeatureSelectTool.h"
+#include "KaFeatureSelectTool.h"
 
 #include <qgsmapcanvas.h>
 #include <qgsvectorlayer.h>
@@ -8,7 +8,12 @@
 #include <qgscoordinatetransform.h>
 #include <qgsfeaturerequest.h>
 #include <qgsfeatureiterator.h>
+#include <qgsdistancearea.h>
 
+#include <QApplication>
+#include <QClipboard>
+#include <QMenu>
+#include <QTimer>
 #include <QColor>
 #include <cmath>
 #include <limits>
@@ -28,7 +33,7 @@ void KaFeatureSelectTool::activate() {
   if (mCanvas) {
     mCanvas->setCursor(Qt::ArrowCursor);
   }
-  emit statusMessage(QStringLiteral("도형선택: 클릭으로 도형 선택 / Shift+클릭으로 추가 선택 / 드래그로 영역 선택"));
+  emit statusMessage(QStringLiteral("도형선택: 클릭으로 도형 선택 / Shift+클릭으로 추가 선택 / 우클릭 시 면적(㎡·평) 계산"));
 }
 
 void KaFeatureSelectTool::deactivate() {
@@ -69,6 +74,10 @@ void KaFeatureSelectTool::canvasMoveEvent(QgsMapMouseEvent* e) {
 }
 
 void KaFeatureSelectTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
+  if (e->button() == Qt::RightButton) {
+    handleContextMenu(e);
+    return;
+  }
   if (e->button() != Qt::LeftButton) return;
 
   const bool shift = (e->modifiers() & Qt::ShiftModifier);
@@ -84,6 +93,112 @@ void KaFeatureSelectTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
   } else {
     selectAtPoint(e->mapPoint(), shift);
   }
+}
+
+void KaFeatureSelectTool::handleContextMenu(QgsMapMouseEvent* e) {
+  if (!mCanvas || !QgsProject::instance()) return;
+
+  // 선택된 도형이 없으면 우클릭한 위치의 도형을 선택
+  auto all = allSelectedFeatures(mCanvas);
+  if (all.isEmpty()) {
+    selectAtPoint(e->mapPoint(), false);
+    all = allSelectedFeatures(mCanvas);
+  }
+
+  double totalAreaM2 = 0.0;
+  int polyCount = 0;
+  bool hasMultipart = false;
+
+  for (const auto& item : all) {
+    if (!item.layer || !item.layer->isValid() || item.layer->geometryType() != Qgis::GeometryType::Polygon)
+      continue;
+    QgsFeature f;
+    if (!item.layer->getFeatures(QgsFeatureRequest(item.fid)).nextFeature(f) || !f.hasGeometry())
+      continue;
+    QgsGeometry geom = f.geometry();
+    if (geom.isEmpty()) continue;
+    if (geom.isMultipart()) hasMultipart = true;
+
+    QgsDistanceArea da;
+    da.setSourceCrs(item.layer->crs(), QgsProject::instance()->transformContext());
+    da.setEllipsoid(QgsProject::instance()->ellipsoid());
+    double area = da.measureArea(geom);
+    if (area <= 0.0) area = std::abs(geom.area());
+    totalAreaM2 += area;
+    polyCount++;
+  }
+
+  if (polyCount == 0) {
+    emit statusMessage(QStringLiteral("우클릭 위치에 폴리곤 도형이 없습니다."));
+    return;
+  }
+
+  const double pyeong = totalAreaM2 * 0.3025;
+  QString areaStr;
+  if (polyCount == 1) {
+    areaStr = QStringLiteral("면적: %L1 ㎡ (약 %L2평)")
+                  .arg(totalAreaM2, 0, 'f', 1)
+                  .arg(pyeong, 0, 'f', 1);
+  } else {
+    areaStr = QStringLiteral("선택한 폴리곤 %1개 총 면적: %L2 ㎡ (약 %L3평)")
+                  .arg(polyCount)
+                  .arg(totalAreaM2, 0, 'f', 1)
+                  .arg(pyeong, 0, 'f', 1);
+  }
+  emit statusMessage(areaStr);
+
+  QMenu menu(mCanvas);
+  auto* actArea = menu.addAction(areaStr);
+  QFont boldFont = actArea->font();
+  boldFont.setBold(true);
+  actArea->setFont(boldFont);
+
+  auto* actCopy = menu.addAction(QStringLiteral("면적 복사"));
+  connect(actCopy, &QAction::triggered, [areaStr]() {
+    QApplication::clipboard()->setText(areaStr);
+  });
+  menu.addSeparator();
+
+  if (polyCount >= 2) {
+    auto* actMerge = menu.addAction(QStringLiteral("폴리곤 묶기 (선택된 %1개 하나로 합치기)").arg(polyCount));
+    connect(actMerge, &QAction::triggered, this, [this]() {
+      QTimer::singleShot(0, this, [this]() { emit requestMerge(); });
+    });
+  }
+  if (polyCount == 2) {
+    auto* actSplitOverlap = menu.addAction(QStringLiteral("중첩부 잘라서 나누기 (겹친 구간 분할)"));
+    connect(actSplitOverlap, &QAction::triggered, this, [this]() {
+      QTimer::singleShot(0, this, [this]() { emit requestSplit(); });
+    });
+  }
+  if (hasMultipart) {
+    auto* actExplode = menu.addAction(QStringLiteral("폴리곤 나누기 (묶인 그룹 분리)"));
+    connect(actExplode, &QAction::triggered, this, [this]() {
+      QTimer::singleShot(0, this, [this]() { emit requestSplit(); });
+    });
+  }
+  if (polyCount == 1 && !hasMultipart) {
+    auto* actSplit = menu.addAction(QStringLiteral("폴리곤 나누기 (선을 그어 자르기)"));
+    connect(actSplit, &QAction::triggered, this, [this]() {
+      QTimer::singleShot(0, this, [this]() { emit requestSplit(); });
+    });
+  }
+
+  menu.addSeparator();
+  auto* actDeselect = menu.addAction(QStringLiteral("선택 해제"));
+  connect(actDeselect, &QAction::triggered, [this]() {
+    for (QgsMapLayer* l : QgsProject::instance()->mapLayers()) {
+      if (auto* vl = qobject_cast<QgsVectorLayer*>(l)) {
+        vl->removeSelection();
+        vl->triggerRepaint();
+      }
+    }
+    if (mCanvas) mCanvas->refresh();
+    emit selectionChanged(0);
+    emit statusMessage(QStringLiteral("선택 해제됨"));
+  });
+
+  menu.exec(QCursor::pos());
 }
 
 void KaFeatureSelectTool::selectAtPoint(const QgsPointXY& mapPt, bool addToSelection) {

@@ -5,6 +5,10 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
+if (MSVC)
+  add_compile_options(/MP)
+endif()
+
 option(KA_HGIS_BUILD_TESTS "Build tests" ON)
 if (EXISTS "C:/OSGeo4W")
   set(OSGEO4W_ROOT_DEFAULT "C:/OSGeo4W")
@@ -45,6 +49,7 @@ add_library(ka_core STATIC
   src/core/FeaturePresets.cpp
   src/core/BufferAnalysis.cpp
   src/core/RecentSurveys.cpp
+  src/core/KaSafeQgis.cpp
   src/core/MeasureOps.cpp
   src/core/DemAnalyzer.cpp
   src/core/TrenchGridGenerator.cpp
@@ -70,6 +75,7 @@ add_library(ka_core STATIC
   src/core/FeaturePresets.h
   src/core/BufferAnalysis.h
   src/core/RecentSurveys.h
+  src/core/KaSafeQgis.h
   src/core/MeasureOps.h
   src/core/DemAnalyzer.h
   src/core/TrenchGridGenerator.h
@@ -135,10 +141,14 @@ add_executable(ka-hgis
   src/app/KaFoundLocationMark.cpp
   src/app/KaTrenchDialog.cpp
   src/app/KaDemClassDialog.cpp
+  src/app/KaSurveyAreaDialog.cpp
   src/app/KaStatusBar.cpp
   src/app/KaCrashGuard.cpp
   src/app/KaRegionLocator.cpp
+  src/app/KaFileBrowserPanel.cpp
   src/app/MainWindow.h
+  src/app/KaSurveyAreaDialog.h
+  src/app/KaFileBrowserPanel.h
   src/app/KaBeginnerRibbon.h
   src/app/KaApplication.h
   src/app/KaTheme.h

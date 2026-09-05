@@ -4,6 +4,7 @@
 #include <QList>
 #include <QVector>
 #include <QColor>
+#include <qgsfeatureid.h>
 class QgsProject;
 class QgsVectorLayer;
 class QgsRasterLayer;
@@ -72,6 +73,8 @@ public:
                                     bool* noFill = nullptr, bool* noStroke = nullptr,
                                     bool* dashed = nullptr);
   static bool mergePolygonFeatures(QgsVectorLayer* layer, QString* errorOut = nullptr);
+  static bool mergePolygonFeatures(QgsVectorLayer* layer, const QgsFeatureIds& featureIds, QString* errorOut = nullptr);
+  static bool explodeMultipartFeatures(QgsVectorLayer* layer, const QgsFeatureIds& featureIds = QgsFeatureIds(), QString* errorOut = nullptr);
   static QgsVectorLayer* clipLayerByBoundary(QgsVectorLayer* sourceLayer,
                                              QgsVectorLayer* boundaryLayer,
                                              QgsProject* project,
@@ -158,6 +161,8 @@ public:
   static double demElevationClassStep(double zMin, double zMax);
   // Ensure a high-resolution shaded relief layer (Hillshade) is blended over the DEM (Multiply blend).
   static QgsRasterLayer* ensureDemRelief(QgsProject* project, QgsRasterLayer* demLayer);
+  // 지금 올라와 있는 DEM이 화면 전체를 덮고 있는가. 덮지 못하면 다시 만들어야 한다.
+  static bool demCoversCanvas(QgsProject* project, QgsMapCanvas* canvas);
 
   // 흙토람(농진청) 토양도 신청으로 내려받은 SHP를 참조 지도로 불러온다.
   // crsOverrideAuthId가 비어 있지 않으면 레이어 좌표계를 그 값으로 지정한다
@@ -169,6 +174,9 @@ public:
                                           const QString& categoryField, QString* errorOut = nullptr);
 
   static bool setLayerOpacity(QgsProject* project, QgsMapCanvas* canvas, const QString& name, double opacity);
+  static bool setMapLayerOpacity(QgsMapLayer* layer, double opacity, QgsMapCanvas* canvas = nullptr);
+  static double mapLayerOpacity(const QgsMapLayer* layer);
+  static bool isReferenceOrBasemapLayer(const QgsMapLayer* layer);
 
   static bool toggleLayerVisibility(QgsProject* project, QgsMapCanvas* canvas, const QString& name, bool visible);
   static bool isLayerVisible(QgsProject* project, const QString& name);
@@ -191,7 +199,9 @@ public:
   static void syncMapCanvas(QgsProject* project, QgsMapCanvas* canvas, bool zoomKorea = true);
   static QList<QgsMapLayer*> visibleLayersPaintOrder(QgsProject* project);
   static void ensureSatelliteAtBottom(QgsProject* project);
+  static void pruneDuplicateSatelliteLayers(QgsProject* project);
   static bool zoomToLayerMax(QgsMapCanvas* canvas, QgsMapLayer* layer);
+  static bool zoomToProjectDataLayers(QgsMapCanvas* canvas, QgsProject* project);
   static bool isolateAndZoomToLayer(QgsProject* project, QgsMapCanvas* canvas, QgsMapLayer* layer,
                                     bool keepReference = true);
   static void zoomToFullMax(QgsMapCanvas* canvas);
@@ -237,6 +247,11 @@ public:
   static void removeSurveyDomainLayers(QgsProject* project);
   static QStringList domainLayerKeys();
   static void pruneEmptyLegendGroups(QgsProject* project);
+  static QList<QgsVectorLayer*> surveyAreaLayers(QgsProject* project);
+  static QgsVectorLayer* createSurveyAreaLayer(QgsProject* project, const QString& gpkgPath,
+                                               const QString& titleKo, const QColor& stroke,
+                                               const QColor& fill, double widthMm,
+                                               QString* errorOut = nullptr);
   static QgsVectorLayer* ensureDomainLayer(QgsProject* project, const QString& gpkgPath,
                                            const QString& layerKey, const QString& titleKo,
                                            QString* errorOut = nullptr);

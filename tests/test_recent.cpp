@@ -11,6 +11,8 @@ private slots:
   void rememberPutsNewestFirstAndDropsMissing();
   void forgetRemovesPath();
   void lastPath_isNewestRemembered();
+  void takeSkipAutoRestore_clearsOneShot();
+  void bootStaysOnHome_doesNotAutoOpenLastSurvey();
   void closeEvent_persistsSurveyWork();
   void captureTool_dragsSavedPolygonVertex();
 };
@@ -34,6 +36,16 @@ void TestRecent::rememberPutsNewestFirstAndDropsMissing() {
   items = RecentSurveys::load(st);
   QCOMPARE(items.size(), 1);
   QCOMPARE(items.at(0).name, QStringLiteral("조사B"));
+}
+
+void TestRecent::takeSkipAutoRestore_clearsOneShot() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  QSettings st(dir.filePath(QStringLiteral("recent.ini")), QSettings::IniFormat);
+  QVERIFY(!RecentSurveys::takeSkipAutoRestore(st));
+  RecentSurveys::setSkipAutoRestore(st, true);
+  QVERIFY(RecentSurveys::takeSkipAutoRestore(st));
+  QVERIFY(!RecentSurveys::takeSkipAutoRestore(st));
 }
 
 void TestRecent::forgetRemovesPath() {
@@ -61,6 +73,19 @@ void TestRecent::lastPath_isNewestRemembered() {
   QCOMPARE(RecentSurveys::lastPath(st), QFileInfo(b).absoluteFilePath());
 }
 
+void TestRecent::bootStaysOnHome_doesNotAutoOpenLastSurvey() {
+  QFile f(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
+  const QString src = QString::fromUtf8(f.readAll());
+  QVERIFY2(!src.contains(QLatin1String("QTimer::singleShot(0, this, &MainWindow::restoreLastSurvey)")),
+           "첫 화면은 홈이다. 마지막 조사를 자동으로 열지 않는다");
+  QFile h(QStringLiteral("src/app/MainWindow.h"));
+  QVERIFY2(h.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.h");
+  const QString hdr = QString::fromUtf8(h.readAll());
+  QVERIFY2(hdr.contains(QLatin1String("m_restoreLastSurveyEnabled = false")),
+           "자동 복원 기본값은 꺼짐");
+}
+
 void TestRecent::closeEvent_persistsSurveyWork() {
   QFile f(QStringLiteral("src/app/MainWindow.cpp"));
   QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
@@ -77,7 +102,7 @@ void TestRecent::closeEvent_persistsSurveyWork() {
   QVERIFY2(body.contains(QLatin1String("commitChanges")),
            "자동저장은 편집 버퍼를 GPKG에 써야 한다");
   QVERIFY2(src.contains(QLatin1String("lastPath")),
-           "다음 실행에 마지막 조사를 다시 연다");
+           "최근 목록용 lastPath는 유지한다. 부팅 자동 열기는 하지 않는다");
 }
 
 void TestRecent::captureTool_dragsSavedPolygonVertex() {

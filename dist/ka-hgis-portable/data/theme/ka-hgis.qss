@@ -235,17 +235,14 @@ QLabel#ribbonGroupCaption {
   font-size: 11px;
   font-weight: 600;
   min-height: 18px;
-  max-height: 18px;
   padding: 0 2px;
   background: transparent;
 }
 QWidget#beginnerRibbon QToolButton {
-  min-width: 64px;
-  max-width: 64px;
+  min-width: 62px;
   min-height: 58px;
-  max-height: 58px;
   margin: 2px 1px;
-  padding: 3px 1px;
+  padding: 3px 2px;
   background: #FFFFFF;
   color: #1F2328;
   font-size: 11px;
@@ -468,9 +465,9 @@ QWidget#sampleStrip {
 }
 QToolButton.sampleTile {
   min-width: 56px;
-  min-height: 44px;
-  padding: 6px 10px;
-  font-size: 12px;
+  min-height: 54px;
+  padding: 4px 6px;
+  font-size: 11px;
   font-weight: 600;
   color: #1F2328;
   background: #FFFFFF;

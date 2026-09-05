@@ -794,60 +794,65 @@ int KaApplication::run(int argc, char** argv) {
       VworldSettings::saveApiKey(QString::fromUtf8(envKey).trimmed());
   }
 
-  MainWindow w;
-  KaCrashGuard::logLine(QStringLiteral("[boot] 메인창 구성 %1 ms").arg(bootTimer.elapsed()));
-  w.show();
-  if (splash) {
-    splash->showMessage(QStringLiteral("준비 완료"), Qt::AlignBottom | Qt::AlignHCenter,
-                        QColor(200, 206, 214));
-    // 창은 0.8초면 준비된다(실측). 예전 4.5초는 시작 시간의 80%가 이 대기였다.
-    // 저작권·라이선스 전문은 도움말 → 정보에 있고 GPL 준수는 거기서 이뤄진다.
-    // 스플래시는 제작처를 알아볼 정도만 보이면 된다.
-    holdSplashThenFinish(splash, &w, 1800);
-    splash = nullptr;
-  }
-  KaCrashGuard::logLine(QStringLiteral("[boot] 창 표시 %1 ms").arg(bootTimer.elapsed()));
-  if (demoSurvey && openGpkg.isEmpty()) {
-    const QString dir = QDir::temp().filePath(QStringLiteral("ka-hgis-survey-verify"));
-    QDir().mkpath(dir);
-    QString err;
-    openGpkg = SurveyProjectFactory::createNewSurvey(dir, QStringLiteral("verify1"), &err,
-                                                     QStringLiteral("EPSG:5186"));
-    if (openGpkg.isEmpty())
-      qWarning() << "demo-survey create failed:" << err;
-  }
-  if (!openGpkg.isEmpty()) {
-    if (!w.openSurveyGpkg(openGpkg))
-      qWarning() << "Failed to open survey gpkg:" << openGpkg;
-    else {
-      qInfo() << "Opened survey gpkg:" << openGpkg << "legend domain layers:" << w.domainLayerCount();
-      if (demoSeed) {
-        const int seeded = w.seedDemoFieldData();
-        qInfo() << "Demo seed (explicit --demo-seed) features:" << seeded;
+  int qaCode = 0;
+  int code = 0;
+  {
+    MainWindow w;
+    KaCrashGuard::logLine(QStringLiteral("[boot] 메인창 구성 %1 ms").arg(bootTimer.elapsed()));
+    w.show();
+    if (splash) {
+      splash->showMessage(QStringLiteral("준비 완료"), Qt::AlignBottom | Qt::AlignHCenter,
+                          QColor(200, 206, 214));
+      // 창은 0.8초면 준비된다(실측). 예전 4.5초는 시작 시간의 80%가 이 대기였다.
+      // 저작권·라이선스 전문은 도움말 → 정보에 있고 GPL 준수는 거기서 이뤄진다.
+      // 스플래시는 제작처를 알아볼 정도만 보이면 된다.
+      holdSplashThenFinish(splash, &w, 1800);
+      splash = nullptr;
+    }
+    KaCrashGuard::logLine(QStringLiteral("[boot] 창 표시 %1 ms").arg(bootTimer.elapsed()));
+    if (demoSurvey && openGpkg.isEmpty()) {
+      const QString dir = QDir::temp().filePath(QStringLiteral("ka-hgis-survey-verify"));
+      QDir().mkpath(dir);
+      QString err;
+      openGpkg = SurveyProjectFactory::createNewSurvey(dir, QStringLiteral("verify1"), &err,
+                                                       QStringLiteral("EPSG:5186"));
+      if (openGpkg.isEmpty())
+        qWarning() << "demo-survey create failed:" << err;
+    }
+    if (!openGpkg.isEmpty()) {
+      if (!w.openSurveyGpkg(openGpkg))
+        qWarning() << "Failed to open survey gpkg:" << openGpkg;
+      else {
+        qInfo() << "Opened survey gpkg:" << openGpkg << "legend domain layers:" << w.domainLayerCount();
+        if (demoSeed) {
+          const int seeded = w.seedDemoFieldData();
+          qInfo() << "Demo seed (explicit --demo-seed) features:" << seeded;
+        }
       }
     }
-  }
 
-  int qaCode = 0;
-  if (qaPhase1 || smokeQuit) {
-    // 상호작용 실행에서는 배경지도를 이벤트 루프로 미뤄 창을 먼저 띄운다.
-    // 자동 QA·스모크는 그 전에 끝나 버리므로, 여기서 직접 끝내 검사 범위를 지킨다.
-    w.loadBootBasemaps();
-  }
-  if (qaPhase1) {
-    const QString out = QDir(QCoreApplication::applicationDirPath())
-                            .filePath(QStringLiteral("../qa/phase1-e2e.json"));
-    const QString out2 = QStringLiteral("build/qa/phase1-e2e.json");
-    QDir().mkpath(QStringLiteral("build/qa"));
-    qaCode = writePhase1Qa(&w, out2);
-    if (qaCode != 0)
-      writePhase1Qa(&w, out);
-    QMetaObject::invokeMethod(&app, &QCoreApplication::quit, Qt::QueuedConnection);
-  } else if (smokeQuit) {
-    QMetaObject::invokeMethod(&app, &QCoreApplication::quit, Qt::QueuedConnection);
-  }
+    if (qaPhase1 || smokeQuit) {
+      // 자동 QA·스모크에서는 최근 작업 복원을 건너뛰고 기본 부팅 상태만 검사한다.
+      w.setRestoreLastSurveyEnabled(false);
+      // 상호작용 실행에서는 배경지도를 이벤트 루프로 미뤄 창을 먼저 띄운다.
+      // 자동 QA·스모크는 그 전에 끝나 버리므로, 여기서 직접 끝내 검사 범위를 지킨다.
+      w.loadBootBasemaps();
+    }
+    if (qaPhase1) {
+      const QString out = QDir(QCoreApplication::applicationDirPath())
+                              .filePath(QStringLiteral("../qa/phase1-e2e.json"));
+      const QString out2 = QStringLiteral("build/qa/phase1-e2e.json");
+      QDir().mkpath(QStringLiteral("build/qa"));
+      qaCode = writePhase1Qa(&w, out2);
+      if (qaCode != 0)
+        writePhase1Qa(&w, out);
+      QMetaObject::invokeMethod(&app, &QCoreApplication::quit, Qt::QueuedConnection);
+    } else if (smokeQuit) {
+      QMetaObject::invokeMethod(&app, &QCoreApplication::quit, Qt::QueuedConnection);
+    }
 
-  const int code = app.exec();
+    code = app.exec();
+  }
 #if KA_HGIS_HAS_QGIS
   QgsApplication::exitQgis();
 #endif

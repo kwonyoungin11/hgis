@@ -63,6 +63,9 @@
 #include <qgshillshaderenderer.h>
 #include <qgsrasterbandstats.h>
 #include <cpl_conv.h>
+#include <cpl_error.h>
+#include <gdal.h>
+#include <gdal_utils.h>
 #include <qgsnetworkaccessmanager.h>
 #include <qgslayertreegroup.h>
 #include <qgsprojectviewsettings.h>
@@ -167,6 +170,19 @@ bool LayerOps::applyDomainDrawStyle(QgsVectorLayer* layer, const QString& layerK
     fill = QColor(220, 38, 38, 18);
     stroke = QColor(220, 38, 38, 255);
     strokeW = 0.5;
+  }
+
+  const QString savedStroke = layer->customProperty(QStringLiteral("ka_hgis/style_stroke")).toString();
+  const QString savedFill = layer->customProperty(QStringLiteral("ka_hgis/style_fill")).toString();
+  const double savedWidth = layer->customProperty(QStringLiteral("ka_hgis/style_width_mm")).toDouble();
+  if (!savedStroke.isEmpty() && QColor(savedStroke).isValid()) {
+    stroke = QColor(savedStroke);
+  }
+  if (!savedFill.isEmpty() && QColor(savedFill).isValid()) {
+    fill = QColor(savedFill);
+  }
+  if (savedWidth > 0.05) {
+    strokeW = savedWidth;
   }
 
   QgsSymbol* sym = nullptr;
@@ -802,6 +818,18 @@ bool LayerOps::mergePolygonFeatures(QgsVectorLayer* layer, QString* errorOut) {
     if (errorOut) *errorOut = QStringLiteral("Invalid layer");
     return false;
   }
+  const QgsFeatureIds sel = layer->selectedFeatureIds();
+  if (sel.size() >= 2) {
+    return mergePolygonFeatures(layer, sel, errorOut);
+  }
+  return mergePolygonFeatures(layer, QgsFeatureIds(), errorOut);
+}
+
+bool LayerOps::mergePolygonFeatures(QgsVectorLayer* layer, const QgsFeatureIds& featureIds, QString* errorOut) {
+  if (!layer || !layer->isValid()) {
+    if (errorOut) *errorOut = QStringLiteral("Invalid layer");
+    return false;
+  }
   if (layer->geometryType() != Qgis::GeometryType::Polygon) {
     if (errorOut) *errorOut = QStringLiteral("폴리곤 레이어만 묶을 수 있습니다");
     return false;
@@ -812,7 +840,9 @@ bool LayerOps::mergePolygonFeatures(QgsVectorLayer* layer, QString* errorOut) {
   QgsFeature first;
   bool hasFirst = false;
   QgsFeature f;
-  QgsFeatureIterator it = layer->getFeatures();
+  const bool useSpecificIds = !featureIds.isEmpty();
+  QgsFeatureIterator it = useSpecificIds ? layer->getFeatures(QgsFeatureRequest().setFilterFids(featureIds))
+                                         : layer->getFeatures();
   while (it.nextFeature(f)) {
     if (!f.hasGeometry() || f.geometry().isEmpty()) continue;
     QgsGeometry g = f.geometry();
@@ -827,13 +857,14 @@ bool LayerOps::mergePolygonFeatures(QgsVectorLayer* layer, QString* errorOut) {
     }
   }
   if (geoms.size() < 2) {
-    if (errorOut) *errorOut = QStringLiteral("묶을 폴리곤이 2개 이상 필요합니다 (현재 %1개)").arg(geoms.size());
+    if (errorOut) *errorOut = QStringLiteral("묶을 폴리곤이 2개 이상 필요합니다 (선택: %1개)").arg(geoms.size());
     return false;
   }
 
-  QgsGeometry multi = QgsGeometry::collectGeometry(geoms);
-  if (multi.isEmpty())
-    multi = QgsGeometry::unaryUnion(geoms);
+  QgsGeometry multi = QgsGeometry::unaryUnion(geoms);
+  if (multi.isEmpty() || !multi.isGeosValid()) {
+    multi = QgsGeometry::collectGeometry(geoms);
+  }
   if (multi.isEmpty()) {
     if (errorOut) *errorOut = QStringLiteral("폴리곤 결합 실패");
     return false;
@@ -864,6 +895,83 @@ bool LayerOps::mergePolygonFeatures(QgsVectorLayer* layer, QString* errorOut) {
     layer->rollBack();
     return false;
   }
+  layer->triggerRepaint();
+  return true;
+}
+
+bool LayerOps::explodeMultipartFeatures(QgsVectorLayer* layer, const QgsFeatureIds& featureIds, QString* errorOut) {
+  if (!layer || !layer->isValid()) {
+    if (errorOut) *errorOut = QStringLiteral("올바른 레이어가 아닙니다.");
+    return false;
+  }
+  if (layer->geometryType() != Qgis::GeometryType::Polygon) {
+    if (errorOut) *errorOut = QStringLiteral("폴리곤 레이어만 나눌 수 있습니다.");
+    return false;
+  }
+
+  QgsFeatureIds targetIds = featureIds;
+  if (targetIds.isEmpty()) {
+    targetIds = layer->selectedFeatureIds();
+  }
+
+  QgsFeature f;
+  QgsFeatureIterator it = !targetIds.isEmpty() ? layer->getFeatures(QgsFeatureRequest().setFilterFids(targetIds))
+                                              : layer->getFeatures();
+
+  int explodedPartsCount = 0;
+  QgsFeatureIds toDelete;
+  QVector<QgsFeature> newFeatures;
+
+  while (it.nextFeature(f)) {
+    if (!f.hasGeometry() || f.geometry().isEmpty()) continue;
+    QgsGeometry g = f.geometry();
+    if (!g.isGeosValid()) g = g.makeValid();
+
+    if (g.isMultipart()) {
+      const QVector<QgsGeometry> parts = g.asGeometryCollection();
+      if (parts.size() > 1) {
+        toDelete.insert(f.id());
+        for (const QgsGeometry& part : parts) {
+          if (part.isEmpty()) continue;
+          QgsFeature nf(layer->fields());
+          nf.setAttributes(f.attributes());
+          nf.setGeometry(part);
+          newFeatures.append(nf);
+          explodedPartsCount++;
+        }
+      }
+    }
+  }
+
+  if (newFeatures.isEmpty() || toDelete.isEmpty()) {
+    if (errorOut) *errorOut = QStringLiteral("선택한 폴리곤 중 묶여 있는 그룹(멀티폴리곤)이 없습니다.\n단일 폴리곤을 나누려면 분할선을 그어 자르거나 겹친 두 도형을 선택하세요.");
+    return false;
+  }
+
+  const bool startedHere = !layer->isEditable();
+  if (startedHere && !layer->startEditing()) {
+    if (errorOut) *errorOut = QStringLiteral("편집 모드 시작 실패");
+    return false;
+  }
+
+  if (!layer->deleteFeatures(toDelete)) {
+    if (errorOut) *errorOut = QStringLiteral("기존 멀티폴리곤 삭제 실패");
+    if (startedHere) layer->rollBack();
+    return false;
+  }
+
+  if (!layer->addFeatures(newFeatures)) {
+    if (errorOut) *errorOut = QStringLiteral("분할된 단일 폴리곤 피처 추가 실패");
+    if (startedHere) layer->rollBack();
+    return false;
+  }
+
+  if (startedHere && !layer->commitChanges()) {
+    if (errorOut) *errorOut = layer->commitErrors().join(QLatin1Char(';'));
+    layer->rollBack();
+    return false;
+  }
+
   layer->triggerRepaint();
   return true;
 }
@@ -1124,55 +1232,70 @@ bool LayerOps::splitTwoOverlappingFeatures(QgsVectorLayer* layer1, qint64 fid1,
   }
   if (!interGeom.isGeosValid()) interGeom = interGeom.makeValid();
 
+  QgsGeometry diff1 = g1.difference(g2);
+  if (!diff1.isEmpty() && !diff1.isGeosValid()) diff1 = diff1.makeValid();
+
+  QgsGeometry diff2 = g2.difference(g1);
+  if (!diff2.isEmpty() && !diff2.isGeosValid()) diff2 = diff2.makeValid();
+
+  const bool crossLayer = (layer1 != layer2);
+  if (crossLayer && layer1->crs().isValid() && layer2->crs().isValid() && layer1->crs() != layer2->crs() && !diff2.isEmpty()) {
+    QgsCoordinateTransform invXf(layer1->crs(), layer2->crs(),
+                                 QgsProject::instance() ? QgsProject::instance()->transformContext()
+                                                        : QgsCoordinateTransformContext());
+    invXf.setBallparkTransformsAreAppropriate(true);
+    try {
+      diff2.transform(invXf);
+    } catch (...) {
+    }
+  }
+
   QgsVectorLayer* targetLayer = layer1;
   QgsFeature targetFeat = f1;
-  QgsGeometry cutterGeom = g2;
-
   const QString k1 = layerKeyOf(layer1);
   if (k1 == QLatin1String("survey_area") || layer1->name().contains(QStringLiteral("바운더리"))) {
     targetLayer = layer2;
     targetFeat = f2;
-    cutterGeom = f1.geometry();
-    if (layer1->crs() != layer2->crs()) {
-      QgsCoordinateTransform xf(layer1->crs(), layer2->crs(),
-                                QgsProject::instance() ? QgsProject::instance()->transformContext()
-                                                       : QgsCoordinateTransformContext());
-      xf.setBallparkTransformsAreAppropriate(true);
-      cutterGeom.transform(xf);
-    }
-    if (!cutterGeom.isGeosValid()) cutterGeom = cutterGeom.makeValid();
   }
 
-  QgsGeometry targetGeom = targetFeat.geometry();
-  if (!targetGeom.isGeosValid()) targetGeom = targetGeom.makeValid();
-
-  QgsGeometry targetInter = targetGeom.intersection(cutterGeom);
-  if (targetInter.isEmpty()) {
-    if (errorOut) *errorOut = QStringLiteral("대상 도형의 교차 영역이 비어 있습니다.");
+  const bool started1 = !layer1->isEditable();
+  if (started1 && !layer1->startEditing()) {
+    if (errorOut) *errorOut = QStringLiteral("레이어1 편집 모드 시작 실패");
+    return false;
+  }
+  const bool started2 = (crossLayer && !layer2->isEditable());
+  if (started2 && !layer2->startEditing()) {
+    if (errorOut) *errorOut = QStringLiteral("레이어2 편집 모드 시작 실패");
+    if (started1) layer1->rollBack();
     return false;
   }
 
-  const bool startedHere = !targetLayer->isEditable();
-  if (startedHere && !targetLayer->startEditing()) {
-    if (errorOut) *errorOut = QStringLiteral("편집 모드 시작 실패");
-    return false;
-  }
+  // 원본 A·B는 그대로 두고 교차 영역만 새 피처로 분리한다.
+  Q_UNUSED(diff1);
+  Q_UNUSED(diff2);
 
   const QgsFeatureIds beforeIds = targetLayer->allFeatureIds();
 
-  // 원본 도형(targetFeat)은 원형 그대로 100% 보존하고, 겹치는 교차 영역만 새 피처로 추가합니다.
+  // 중첩된 교차 구간(A ∩ B)을 새 피처로 추가
   QgsFeature newF(targetLayer->fields());
   newF.setAttributes(targetFeat.attributes());
-  newF.setGeometry(targetInter);
+  newF.setGeometry(interGeom);
   if (!targetLayer->addFeature(newF)) {
     if (errorOut) *errorOut = QStringLiteral("분할된 교차 피처 추가 실패");
-    if (startedHere) targetLayer->rollBack();
+    if (started1) layer1->rollBack();
+    if (started2) layer2->rollBack();
     return false;
   }
 
-  if (startedHere && !targetLayer->commitChanges()) {
-    if (errorOut) *errorOut = targetLayer->commitErrors().join(QLatin1Char(';'));
-    targetLayer->rollBack();
+  if (started1 && !layer1->commitChanges()) {
+    if (errorOut) *errorOut = layer1->commitErrors().join(QLatin1Char(';'));
+    layer1->rollBack();
+    if (started2) layer2->rollBack();
+    return false;
+  }
+  if (started2 && !layer2->commitChanges()) {
+    if (errorOut) *errorOut = layer2->commitErrors().join(QLatin1Char(';'));
+    layer2->rollBack();
     return false;
   }
 
@@ -1190,7 +1313,8 @@ bool LayerOps::splitTwoOverlappingFeatures(QgsVectorLayer* layer1, qint64 fid1,
   if (outCreatedFid) *outCreatedFid = addedId;
   if (outTargetLayer) *outTargetLayer = targetLayer;
 
-  targetLayer->triggerRepaint();
+  layer1->triggerRepaint();
+  if (crossLayer) layer2->triggerRepaint();
   return true;
 }
 
@@ -1437,6 +1561,55 @@ bool LayerOps::isBasemapLayer(const QgsMapLayer* layer) {
   return p == QLatin1String("wms") || p == QLatin1String("xyz") || p == QLatin1String("vectortile");
 }
 
+bool LayerOps::isReferenceOrBasemapLayer(const QgsMapLayer* layer) {
+  if (!layer) return false;
+  // 조사 도메인 레이어(survey_area, feature_poly, feature_line 등)는 절대 배경지도가 아니다.
+  if (!layerKeyOf(layer).isEmpty()) return false;
+
+  // 명시적 참조 역할
+  if (layer->customProperty(QString::fromUtf8(kPropLayerRole)).toString() ==
+      QLatin1String(kRoleReference))
+    return true;
+
+  // 기존 isBasemapLayer 또는 isReferenceLayer 확인
+  if (isBasemapLayer(layer) || isReferenceLayer(layer))
+    return true;
+
+  // 레이어 트리의 "참조 지도" 그룹 소속 여부 확인
+  if (auto* proj = QgsProject::instance()) {
+    if (auto* root = proj->layerTreeRoot()) {
+      if (auto* node = root->findLayer(layer->id())) {
+        auto* parent = node->parent();
+        while (parent) {
+          if (parent->name() == QString::fromUtf8(kGroupReference) ||
+              parent->name().contains(QStringLiteral("참조"))) {
+            return true;
+          }
+          parent = parent->parent();
+        }
+      }
+    }
+  }
+
+  // 지질도, 토양도, 수계도, 고지형, 음영기복, 위성, 지적, DEM 등 명칭 또는 소스 검사
+  const QString n = layer->name();
+  if (n.contains(QStringLiteral("지질")) || n.contains(QStringLiteral("토양")) ||
+      n.contains(QStringLiteral("수계")) || n.contains(QStringLiteral("음영")) ||
+      n.contains(QStringLiteral("단면")) || n.contains(QStringLiteral("배경")) ||
+      n.contains(QStringLiteral("정사")) || n.contains(QStringLiteral("위성")) ||
+      n.contains(QStringLiteral("지적")) || n.contains(QStringLiteral("DEM")) ||
+      n.contains(QStringLiteral("지형")) || n.contains(QStringLiteral("등고"))) {
+    return true;
+  }
+
+  // 도메인 키가 없는 모든 래스터 레이어는 배경/참조 지도로 간주
+  if (layer->type() == Qgis::LayerType::Raster) {
+    return true;
+  }
+
+  return false;
+}
+
 QgsVectorLayer* LayerOps::findByLayerKey(QgsProject* project, const QString& layerKey) {
   if (!project || layerKey.isEmpty()) return nullptr;
   for (QgsMapLayer* l : project->mapLayers()) {
@@ -1498,6 +1671,134 @@ void LayerOps::pruneEmptyLegendGroups(QgsProject* project) {
     if (g->children().isEmpty())
       root->removeChildNode(g);
   }
+}
+
+QList<QgsVectorLayer*> LayerOps::surveyAreaLayers(QgsProject* project) {
+  QList<QgsVectorLayer*> res;
+  if (!project) return res;
+  for (QgsMapLayer* l : project->mapLayers()) {
+    auto* vl = qobject_cast<QgsVectorLayer*>(l);
+    if (!vl || !vl->isValid()) continue;
+    const QString key = layerKeyOf(vl);
+    const QString name = vl->name();
+    const bool isSa = (key == QLatin1String("survey_area")) ||
+                      key.startsWith(QLatin1String("survey_area_")) ||
+                      vl->customProperty(QStringLiteral("ka_hgis/is_survey_area")).toBool() ||
+                      name == QLatin1String("survey_area") ||
+                      name == QStringLiteral("조사구역") ||
+                      vl->source().contains(QLatin1String("layername=survey_area"));
+    if (isSa && !res.contains(vl)) {
+      res.append(vl);
+    }
+  }
+  return res;
+}
+
+QgsVectorLayer* LayerOps::createSurveyAreaLayer(QgsProject* project, const QString& gpkgPath,
+                                                const QString& titleKo, const QColor& stroke,
+                                                const QColor& fill, double widthMm,
+                                                QString* errorOut) {
+  if (!project) {
+    if (errorOut) *errorOut = QStringLiteral("프로젝트가 없습니다.");
+    return nullptr;
+  }
+  if (gpkgPath.isEmpty() || !QFile::exists(gpkgPath)) {
+    if (errorOut) *errorOut = QStringLiteral("먼저 「새 조사」로 저장 경로를 만드세요.");
+    return nullptr;
+  }
+
+  const auto existingSas = surveyAreaLayers(project);
+  QSet<QString> usedTables;
+  for (auto* sa : existingSas) {
+    const QString src = sa->source();
+    const int idx = src.indexOf(QStringLiteral("layername="));
+    if (idx >= 0) {
+      usedTables.insert(src.mid(idx + 10));
+    }
+  }
+
+  QString tableName = QStringLiteral("survey_area");
+  bool canReuseDefault = false;
+  if (!usedTables.contains(tableName)) {
+    auto* testVl = new QgsVectorLayer(QStringLiteral("%1|layername=survey_area").arg(gpkgPath),
+                                      titleKo, QStringLiteral("ogr"));
+    if (testVl && testVl->isValid() && testVl->featureCount() == 0) {
+      canReuseDefault = true;
+      delete testVl;
+    } else {
+      delete testVl;
+    }
+  }
+
+  QgsVectorLayer* vl = nullptr;
+  if (canReuseDefault) {
+    vl = new QgsVectorLayer(QStringLiteral("%1|layername=survey_area").arg(gpkgPath),
+                            titleKo, QStringLiteral("ogr"));
+  } else {
+    int counter = 2;
+    tableName = QStringLiteral("survey_area_%1").arg(counter);
+    while (usedTables.contains(tableName)) {
+      counter++;
+      tableName = QStringLiteral("survey_area_%1").arg(counter);
+    }
+
+    const QgsCoordinateReferenceSystem crs = project->crs().isValid()
+        ? project->crs()
+        : QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186"));
+    const QString memUri = QStringLiteral("Polygon?crs=%1").arg(crs.authid());
+    QgsVectorLayer mem(memUri, titleKo, QStringLiteral("memory"));
+    if (!mem.isValid()) {
+      if (errorOut) *errorOut = QStringLiteral("레이어 메모리 생성 실패");
+      return nullptr;
+    }
+    QgsFields fields;
+    fields.append(QgsField(QStringLiteral("name"), QMetaType::Type::QString));
+    fields.append(QgsField(QStringLiteral("survey_id"), QMetaType::Type::QString));
+    fields.append(QgsField(QStringLiteral("area_m2"), QMetaType::Type::Double));
+    fields.append(QgsField(QStringLiteral("note"), QMetaType::Type::QString));
+    mem.dataProvider()->addAttributes(fields.toList());
+    mem.updateFields();
+    mem.setCrs(crs);
+
+    QgsVectorFileWriter::SaveVectorOptions opts;
+    opts.driverName = QStringLiteral("GPKG");
+    opts.layerName = tableName;
+    opts.fileEncoding = QStringLiteral("UTF-8");
+    opts.actionOnExistingFile = QgsVectorFileWriter::CreateOrOverwriteLayer;
+    QString errMsg, newFn, newLayer;
+    if (QgsVectorFileWriter::writeAsVectorFormatV3(
+            &mem, gpkgPath, project->transformContext(), opts, &errMsg, &newFn, &newLayer) !=
+        QgsVectorFileWriter::NoError) {
+      if (errorOut) *errorOut = errMsg;
+      return nullptr;
+    }
+    vl = new QgsVectorLayer(QStringLiteral("%1|layername=%2").arg(gpkgPath, tableName),
+                            titleKo, QStringLiteral("ogr"));
+  }
+
+  if (!vl || !vl->isValid()) {
+    if (errorOut) *errorOut = vl ? vl->error().message() : QStringLiteral("레이어를 열 수 없습니다.");
+    delete vl;
+    return nullptr;
+  }
+
+  vl->setName(titleKo);
+  markSurveyLayer(vl, QStringLiteral("survey_area"));
+  vl->setCustomProperty(QStringLiteral("ka_hgis/is_survey_area"), true);
+  vl->setCustomProperty(QStringLiteral("ka_hgis/survey_table"), tableName);
+  vl->setCustomProperty(QStringLiteral("ka_hgis/style_stroke"), stroke.name(QColor::HexRgb));
+  vl->setCustomProperty(QStringLiteral("ka_hgis/style_fill"), fill.name(QColor::HexArgb));
+  vl->setCustomProperty(QStringLiteral("ka_hgis/style_width_mm"), widthMm);
+
+  applySimpleVectorStyle(vl, fill, stroke, widthMm, 3.5);
+  applyLegendCrsLabel(vl);
+  applyAreaM2Labels(vl);
+
+  project->addMapLayer(vl, true);
+  placeInLegendGroup(project, vl, QString::fromUtf8(kGroupSurveyData));
+  pruneEmptyLegendGroups(project);
+  ensureSatelliteAtBottom(project);
+  return vl;
 }
 
 QgsVectorLayer* LayerOps::ensureDomainLayer(QgsProject* project, const QString& gpkgPath,
@@ -1648,8 +1949,87 @@ QgsVectorLayer* LayerOps::createUserPolygonLayer(QgsProject* project, const QStr
   return vl;
 }
 
+void LayerOps::pruneDuplicateSatelliteLayers(QgsProject* project) {
+  if (!project) return;
+  static bool inPrune = false;
+  if (inPrune) return;
+  struct Guard {
+    bool& flag;
+    explicit Guard(bool& f) : flag(f) { flag = true; }
+    ~Guard() { flag = false; }
+  } guard(inPrune);
+
+  // 1. 프로젝트 맵 레이어 중 "위성" 레이어 목록 수집
+  QList<QgsMapLayer*> satLayers;
+  for (QgsMapLayer* l : project->mapLayers()) {
+    if (!l) continue;
+    const QString n = l->name();
+    if (n.contains(QStringLiteral("위성")) ||
+        (n.contains(QStringLiteral("Satellite"), Qt::CaseInsensitive) && isReferenceLayer(l))) {
+      satLayers.append(l);
+    }
+  }
+
+  // 2. 위성 레이어가 2개 이상이면 유효한 1개(keep)만 남기고 나머지 project에서 안전하게 제거
+  QgsMapLayer* keep = nullptr;
+  if (!satLayers.isEmpty()) {
+    for (QgsMapLayer* l : satLayers) {
+      if (l && l->isValid()) {
+        if (!keep || isLayerVisible(project, l->name())) {
+          keep = l;
+        }
+      }
+    }
+    if (!keep)
+      keep = satLayers.first();
+
+    for (QgsMapLayer* l : satLayers) {
+      if (l && l != keep) {
+        project->removeMapLayer(l->id());
+      }
+    }
+  }
+
+  // 3. 레이어 트리에서 댕글링(삭제된) 노드 및 중복 위성 노드 정리
+  if (QgsLayerTree* root = project->layerTreeRoot()) {
+    QList<QgsLayerTreeNode*> toRemove;
+    bool foundKeepNode = false;
+    std::function<void(QgsLayerTreeGroup*)> cleanGroup = [&](QgsLayerTreeGroup* grp) {
+      if (!grp) return;
+      for (QgsLayerTreeNode* child : grp->children()) {
+        if (auto* lnode = qobject_cast<QgsLayerTreeLayer*>(child)) {
+          QgsMapLayer* l = lnode->layer();
+          if (!l) {
+            toRemove.append(child);
+            continue;
+          }
+          const QString name = lnode->name().isEmpty() ? l->name() : lnode->name();
+          if (l == keep || name.contains(QStringLiteral("위성")) ||
+              (name.contains(QStringLiteral("Satellite"), Qt::CaseInsensitive) && isReferenceLayer(l))) {
+            if (foundKeepNode) {
+              toRemove.append(child);
+            } else {
+              foundKeepNode = true;
+            }
+          }
+        } else if (auto* subGrp = qobject_cast<QgsLayerTreeGroup*>(child)) {
+          cleanGroup(subGrp);
+        }
+      }
+    };
+    cleanGroup(root);
+    for (auto* node : toRemove) {
+      if (node && node->parent()) {
+        if (auto* pgrp = QgsLayerTree::toGroup(node->parent()))
+          pgrp->removeChildNode(node);
+      }
+    }
+  }
+}
+
 void LayerOps::ensureSatelliteAtBottom(QgsProject* project) {
   if (!project) return;
+  pruneDuplicateSatelliteLayers(project);
   static bool inReorder = false;
   if (inReorder) return;
   struct Guard {
@@ -1661,6 +2041,7 @@ void LayerOps::ensureSatelliteAtBottom(QgsProject* project) {
   QgsLayerTree* root = project->layerTreeRoot();
   if (!root) return;
 
+  // 1. 루트 직속 레이어 중 "위성" 레이어를 맨 뒤로 안전하게 정렬 (reorderGroupLayers 사용)
   QList<QgsMapLayer*> nonSat;
   QList<QgsMapLayer*> sat;
 
@@ -1677,28 +2058,53 @@ void LayerOps::ensureSatelliteAtBottom(QgsProject* project) {
     }
   }
 
-  if (sat.isEmpty()) return;
+  if (!sat.isEmpty()) {
+    bool needReorder = false;
+    bool seenSat = false;
+    for (QgsLayerTreeNode* child : root->children()) {
+      if (auto* lnode = qobject_cast<QgsLayerTreeLayer*>(child)) {
+        if (QgsMapLayer* l = lnode->layer()) {
+          const QString name = lnode->name().isEmpty() ? l->name() : lnode->name();
+          if (name.contains(QStringLiteral("위성"))) {
+            seenSat = true;
+          } else if (seenSat) {
+            needReorder = true;
+            break;
+          }
+        }
+      }
+    }
 
-  bool needReorder = false;
-  bool seenSat = false;
+    if (needReorder) {
+      const QList<QgsMapLayer*> newOrder = nonSat + sat;
+      root->reorderGroupLayers(newOrder);
+    }
+  }
+
+  // 2. "참조 지도" 그룹 내부에서도 위성 레이어가 최하단에 오도록 안전하게 reorderGroupLayers 호출
   for (QgsLayerTreeNode* child : root->children()) {
-    if (auto* lnode = qobject_cast<QgsLayerTreeLayer*>(child)) {
-      if (QgsMapLayer* l = lnode->layer()) {
-        const QString name = lnode->name().isEmpty() ? l->name() : lnode->name();
-        if (name.contains(QStringLiteral("위성"))) {
-          seenSat = true;
-        } else if (seenSat) {
-          needReorder = true;
-          break;
+    if (auto* grp = qobject_cast<QgsLayerTreeGroup*>(child)) {
+      if (grp->name() == QStringLiteral("참조 지도") || grp->name().contains(QStringLiteral("참조"))) {
+        QList<QgsMapLayer*> grpNonSat;
+        QList<QgsMapLayer*> grpSat;
+        for (QgsLayerTreeNode* gc : grp->children()) {
+          if (auto* lnode = qobject_cast<QgsLayerTreeLayer*>(gc)) {
+            if (QgsMapLayer* l = lnode->layer()) {
+              const QString name = lnode->name().isEmpty() ? l->name() : lnode->name();
+              if (name.contains(QStringLiteral("위성"))) {
+                grpSat.append(l);
+              } else {
+                grpNonSat.append(l);
+              }
+            }
+          }
+        }
+        if (!grpSat.isEmpty() && !grpNonSat.isEmpty()) {
+          grp->reorderGroupLayers(grpNonSat + grpSat);
         }
       }
     }
   }
-
-  if (!needReorder) return;
-
-  const QList<QgsMapLayer*> newOrder = nonSat + sat;
-  root->reorderGroupLayers(newOrder);
 }
 
 QList<QgsMapLayer*> LayerOps::visibleLayersPaintOrder(QgsProject* project) {
@@ -1916,6 +2322,65 @@ bool LayerOps::zoomToLayerMax(QgsMapCanvas* canvas, QgsMapLayer* layer) {
     clampCanvasToKorea(canvas);
   refreshCanvasIfIdle(canvas);
   return true;
+}
+
+bool LayerOps::zoomToProjectDataLayers(QgsMapCanvas* canvas, QgsProject* project) {
+  if (!canvas || !project) return false;
+  QgsRectangle totalExt;
+  bool found = false;
+  const QgsCoordinateReferenceSystem mapCrs = canvas->mapSettings().destinationCrs().isValid()
+                                                  ? canvas->mapSettings().destinationCrs()
+                                                  : project->crs();
+  const QString mapAuth = mapCrs.isValid() ? mapCrs.authid() : QStringLiteral("EPSG:5186");
+  const QgsRectangle kr = koreaExtentForCrs(mapAuth);
+
+  for (QgsMapLayer* l : project->mapLayers()) {
+    if (!l || !l->isValid() || isBasemapLayer(l)) continue;
+    const QString n = l->name();
+    if (n.contains(QStringLiteral("위성")) || n.contains(QStringLiteral("지적"))) continue;
+    auto* vl = qobject_cast<QgsVectorLayer*>(l);
+    if (!vl || vl->featureCount() == 0) continue;
+    QgsRectangle ext = vectorFeatureExtent(vl);
+    if (!extentUsable(ext)) continue;
+    // Skip unreasonable world/whole-korea bounds for a single survey vector layer
+    if (!kr.isEmpty() && kr.isFinite() && (ext.width() > kr.width() * 0.95 || ext.height() > kr.height() * 0.95))
+      continue;
+    if (vl->crs().isValid() && mapCrs.isValid() && vl->crs() != mapCrs) {
+      try {
+        QgsCoordinateTransform xf(vl->crs(), mapCrs, project->transformContext());
+        xf.setBallparkTransformsAreAppropriate(true);
+        ext = xf.transformBoundingBox(ext);
+      } catch (...) {
+        continue;
+      }
+    }
+    if (extentUsable(ext)) {
+      if (!found) {
+        totalExt = ext;
+        found = true;
+      } else {
+        totalExt.combineExtentWith(ext);
+      }
+    }
+  }
+
+  if (found && extentUsable(totalExt)) {
+    const double minW = mapCrs.isGeographic() ? 0.004 : 100.0;
+    if (totalExt.width() < minW || totalExt.height() < minW) {
+      const QgsPointXY c = totalExt.center();
+      const double pad = minW * 0.5;
+      totalExt = QgsRectangle(c.x() - pad, c.y() - pad, c.x() + pad, c.y() + pad);
+    }
+    totalExt.scale(1.2);
+    canvas->setExtent(totalExt);
+    canvas->zoomToFeatureExtent(totalExt);
+    clampCanvasToKorea(canvas);
+    if (canvas->scale() > 80000.0)
+      canvas->zoomScale(5000.0, true);
+    refreshCanvasIfIdle(canvas);
+    return true;
+  }
+  return false;
 }
 
 bool LayerOps::isolateAndZoomToLayer(QgsProject* project, QgsMapCanvas* canvas, QgsMapLayer* layer,
@@ -2163,6 +2628,21 @@ void LayerOps::refreshXyzBasemapTiles(QgsMapCanvas* canvas) {
 }
 
 bool LayerOps::addVworldSatelliteMap(QgsProject* project, QgsMapCanvas* canvas, const QString& apiKey, QString* errorOut) {
+  if (!project) return false;
+  pruneDuplicateSatelliteLayers(project);
+  for (QgsMapLayer* l : project->mapLayers()) {
+    if (l && l->isValid() && l->name().contains(QStringLiteral("위성"))) {
+      ensureSatelliteAtBottom(project);
+      if (canvas) {
+        const QString workAuth = project->crs().isValid()
+                                     ? project->crs().authid()
+                                     : QStringLiteral("EPSG:5186");
+        LayerOps::ensureOtfEnabled(project, canvas, workAuth);
+        refreshXyzBasemapTiles(canvas);
+      }
+      return true;
+    }
+  }
   const QString key = apiKey.trimmed();
   QStringList uris;
   if (!key.isEmpty()) {
@@ -2499,6 +2979,15 @@ QString LayerOps::copernicusCogUriForWgs84(double latDeg, double lonDeg) {
   return copernicusCogVsicurl(latFloor, lonFloor);
 }
 
+// 화면에 보이는 범위를 덮는 Copernicus 1°x1° 타일을 모두 모아 VRT 한 장으로 붙인다.
+// 예전에는 화면 한가운데 칸 하나만 올려서, 조금만 옮기면 DEM이 사라졌다.
+// 넓게 보고 있을 때 수십 장을 원격으로 여는 것은 느리므로 상한을 두고,
+// 화면 한가운데에서 가까운 칸부터 채운다.
+static constexpr int kDemMosaicMaxTiles = 24;
+
+// 이 DEM이 덮고 있는 경위도 범위. 다시 만들지 판단할 때 쓴다.
+static const char* kDemCoverProp = "ka_hgis/dem_cover_wgs84";
+
 static bool tryAddCopernicusViewDem(QgsProject* project, QgsMapCanvas* canvas, QString* errorOut) {
   if (!project || !canvas) return false;
   try {
@@ -2515,18 +3004,97 @@ static bool tryAddCopernicusViewDem(QgsProject* project, QgsMapCanvas* canvas, Q
         return false;
       }
     }
-    const QgsPointXY c = wgsExt.center();
-    int latFloor = static_cast<int>(std::floor(c.y()));
-    int lonFloor = static_cast<int>(std::floor(c.x()));
-    if (latFloor < -90 || latFloor > 89 || lonFloor < -180 || lonFloor > 179)
+    wgsExt = wgsExt.intersect(QgsRectangle(-180.0, -90.0, 180.0, 90.0));
+    if (wgsExt.isEmpty() || !wgsExt.isFinite()) return false;
+
+    const int lonFrom = static_cast<int>(std::floor(wgsExt.xMinimum()));
+    const int lonTo = static_cast<int>(std::floor(wgsExt.xMaximum()));
+    const int latFrom = static_cast<int>(std::floor(wgsExt.yMinimum()));
+    const int latTo = static_cast<int>(std::floor(wgsExt.yMaximum()));
+    if (latFrom < -90 || latTo > 89 || lonFrom < -180 || lonTo > 179)
       return false;
+
+    const QgsPointXY c = wgsExt.center();
+    struct DemCell {
+      int lat;
+      int lon;
+      double dist2;
+    };
+    QVector<DemCell> cells;
+    for (int la = latFrom; la <= latTo; ++la) {
+      for (int lo = lonFrom; lo <= lonTo; ++lo) {
+        const double dx = (lo + 0.5) - c.x();
+        const double dy = (la + 0.5) - c.y();
+        cells.append({la, lo, dx * dx + dy * dy});
+      }
+    }
+    if (cells.isEmpty()) return false;
+    std::sort(cells.begin(), cells.end(),
+              [](const DemCell& a, const DemCell& b) { return a.dist2 < b.dist2; });
+    const int askedTiles = cells.size();
+    if (askedTiles > kDemMosaicMaxTiles)
+      cells.resize(kDemMosaicMaxTiles);
+
     CPLSetConfigOption("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR");
-    const QString uri = copernicusCogVsicurl(latFloor, lonFloor);
-    auto* rl = new QgsRasterLayer(uri, QStringLiteral("DEM"), QStringLiteral("gdal"));
+    // 바다 칸은 Copernicus 버킷에 파일 자체가 없다. 열리는 것만 골라 담는다.
+    CPLPushErrorHandler(CPLQuietErrorHandler);
+    QVector<GDALDatasetH> sources;
+    QgsRectangle covered;
+    for (const DemCell& cell : cells) {
+      const QString uri = copernicusCogVsicurl(cell.lat, cell.lon);
+      GDALDatasetH ds = GDALOpenEx(uri.toUtf8().constData(),
+                                   GDAL_OF_RASTER | GDAL_OF_READONLY, nullptr, nullptr, nullptr);
+      if (!ds) continue;
+      sources.append(ds);
+      const QgsRectangle one(cell.lon, cell.lat, cell.lon + 1.0, cell.lat + 1.0);
+      if (covered.isEmpty())
+        covered = one;
+      else
+        covered.combineExtentWith(one);
+    }
+    CPLPopErrorHandler();
+    if (sources.isEmpty()) {
+      if (errorOut)
+        *errorOut = QStringLiteral("이 범위에는 받아올 수 있는 DEM 자료가 없습니다(바다이거나 제공되지 않는 구역).");
+      return false;
+    }
+
+    // 같은 파일에 덮어쓰면 이미 올라가 있는 레이어가 붙들고 있어 실패한다. 매번 새 이름.
+    static int mosaicSerial = 0;
+    const QString vrtPath =
+        QDir(QDir::tempPath())
+            .filePath(QStringLiteral("ka-hgis-dem-%1.vrt").arg(++mosaicSerial));
+    char* argv[] = {const_cast<char*>("-resolution"), const_cast<char*>("highest"), nullptr};
+    GDALBuildVRTOptions* vrtOpts = GDALBuildVRTOptionsNew(argv, nullptr);
+    GDALDatasetH vrt = GDALBuildVRT(vrtPath.toUtf8().constData(), sources.size(), sources.data(),
+                                    nullptr, vrtOpts, nullptr);
+    if (vrtOpts) GDALBuildVRTOptionsFree(vrtOpts);
+    if (vrt) GDALClose(vrt);
+    for (GDALDatasetH ds : sources) GDALClose(ds);
+    if (!vrt || !QFile::exists(vrtPath)) {
+      if (errorOut)
+        *errorOut = QStringLiteral("DEM 타일을 하나로 붙이지 못했습니다.");
+      return false;
+    }
+
+    auto* rl = new QgsRasterLayer(vrtPath, QStringLiteral("DEM"), QStringLiteral("gdal"));
     if (!rl->isValid() || rl->bandCount() < 1) {
       if (errorOut) *errorOut = rl->error().message();
       delete rl;
       return false;
+    }
+    rl->setCustomProperty(QString::fromLatin1(kDemCoverProp),
+                          QStringLiteral("%1,%2,%3,%4")
+                              .arg(covered.xMinimum(), 0, 'f', 6)
+                              .arg(covered.yMinimum(), 0, 'f', 6)
+                              .arg(covered.xMaximum(), 0, 'f', 6)
+                              .arg(covered.yMaximum(), 0, 'f', 6));
+    if (errorOut && askedTiles > cells.size()) {
+      // 조용히 잘라 내면 「전체가 덮였다」고 오해한다. 몇 칸만 채웠는지 알린다.
+      *errorOut = QStringLiteral("화면이 넓어 가운데 %1칸만 DEM으로 채웠습니다(전체 %2칸). "
+                                 "조금 확대한 뒤 DEM을 다시 누르면 그 범위가 채워집니다.")
+                      .arg(cells.size())
+                      .arg(askedTiles);
     }
     QgsRectangle statsExt;
     if (rl->crs().isValid() && canvasCrs.isValid() && rl->crs() != canvasCrs) {
@@ -2552,6 +3120,44 @@ static bool tryAddCopernicusViewDem(QgsProject* project, QgsMapCanvas* canvas, Q
     if (errorOut) *errorOut = QStringLiteral("원격 DEM 접근 중 예외가 발생했습니다.");
     return false;
   }
+}
+
+bool LayerOps::demCoversCanvas(QgsProject* project, QgsMapCanvas* canvas) {
+  if (!project || !canvas) return false;
+  QgsRasterLayer* dem = nullptr;
+  for (QgsMapLayer* ml : project->mapLayers()) {
+    if (ml && ml->name() == QLatin1String("DEM")) {
+      dem = qobject_cast<QgsRasterLayer*>(ml);
+      if (dem) break;
+    }
+  }
+  if (!dem) return false;
+  const QString cover = dem->customProperty(QString::fromLatin1(kDemCoverProp)).toString();
+  const QStringList parts = cover.split(QLatin1Char(','), Qt::SkipEmptyParts);
+  if (parts.size() != 4) return false;  // 옛 방식(한 칸짜리)으로 올라온 DEM은 다시 만든다.
+  bool ok = true;
+  double v[4] = {0, 0, 0, 0};
+  for (int i = 0; i < 4; ++i) {
+    bool one = false;
+    v[i] = parts.at(i).toDouble(&one);
+    ok = ok && one;
+  }
+  if (!ok) return false;
+  const QgsRectangle covered(v[0], v[1], v[2], v[3]);
+
+  QgsRectangle ext = canvas->extent();
+  if (ext.isEmpty() || !ext.isFinite()) return true;
+  const QgsCoordinateReferenceSystem wgs(QStringLiteral("EPSG:4326"));
+  const QgsCoordinateReferenceSystem canvasCrs = canvas->mapSettings().destinationCrs();
+  if (canvasCrs.isValid() && canvasCrs != wgs) {
+    try {
+      const QgsCoordinateTransform tr(canvasCrs, wgs, QgsCoordinateTransformContext());
+      ext = tr.transformBoundingBox(ext);
+    } catch (...) {
+      return true;
+    }
+  }
+  return covered.contains(ext);
 }
 
 double LayerOps::demElevationClassStep(double zMin, double zMax) {
@@ -3067,12 +3673,29 @@ bool LayerOps::setLayerOpacity(QgsProject* project, QgsMapCanvas* canvas, const 
   if (layers.isEmpty()) return false;
   const double op = qBound(0.0, opacity, 1.0);
   for (QgsMapLayer* l : layers) {
-    if (auto* rl = qobject_cast<QgsRasterLayer*>(l)) {
-      rl->setOpacity(op);
+    if (l && isReferenceOrBasemapLayer(l)) {
+      l->setOpacity(op);
+      l->triggerRepaint();
     }
   }
   refreshCanvasIfIdle(canvas);
   return true;
+}
+
+bool LayerOps::setMapLayerOpacity(QgsMapLayer* layer, double opacity, QgsMapCanvas* canvas) {
+  if (!layer || !isReferenceOrBasemapLayer(layer)) return false;
+  const double op = qBound(0.0, opacity, 1.0);
+  layer->setOpacity(op);
+  layer->triggerRepaint();
+  if (canvas) {
+    refreshCanvasIfIdle(canvas);
+  }
+  return true;
+}
+
+double LayerOps::mapLayerOpacity(const QgsMapLayer* layer) {
+  if (!layer) return 1.0;
+  return layer->opacity();
 }
 
 bool LayerOps::toggleLayerVisibility(QgsProject* project, QgsMapCanvas* canvas, const QString& name, bool visible) {

@@ -4,6 +4,9 @@
 #include "KaBeginnerRibbon.h"
 #include "core/LayoutService.h"
 #include "core/LayerOps.h"
+#include "core/GeorefService.h"
+#include "KaFileBrowserPanel.h"
+#include "MainWindow.h"
 
 #include <algorithm>
 #include <cmath>
@@ -381,12 +384,15 @@ QToolButton* makeRailTile(QWidget* parent, const QIcon& icon, const QString& tex
   auto* b = new QToolButton(parent);
   b->setIcon(icon);
   b->setIconSize(iconSize);
-  b->setText(KaBeginnerRibbon::twoLine(text));
+  const QString displayText = (text.size() <= 5 && !text.contains(QLatin1Char('\n')))
+                                  ? text
+                                  : KaBeginnerRibbon::twoLine(text);
+  b->setText(displayText);
   b->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   b->setAutoRaise(true);
   b->setCursor(Qt::PointingHandCursor);
   b->setToolTip(text);
-  b->setMinimumHeight(52);
+  b->setMinimumHeight(54);
   b->setProperty("class", QStringLiteral("sampleTile"));
   return b;
 }
@@ -796,16 +802,118 @@ KaDrawingStudio::KaDrawingStudio(QgsProject* project, QgsMapCanvas* mapCanvas,
   addAction(undoAct);
 }
 
-void KaDrawingStudio::resetPaper(double widthMm, double heightMm) {
+void KaDrawingStudio::openPaperSettingsDialog() {
+  double w = m_paperW;
+  double h = m_paperH;
+  if (!promptPaper(this, &w, &h))
+    return;
+  resetPaper(w, h, true);
+}
+
+void KaDrawingStudio::resetPaper(double widthMm, double heightMm, bool preserveExisting) {
+  auto* ly = layout();
+  QgsLayoutItemMap* map = ly ? mapItem() : nullptr;
+
+  if (!preserveExisting || !ly || !map) {
+    m_paperW = widthMm;
+    m_paperH = heightMm;
+    endActivateMap();
+    ensureBlankLayout();
+    m_paperFitPending = true;
+    zoomPaperVisible();
+    autoPlaceDefaultSheet();
+    if (m_status)
+      m_status->setText(QStringLiteral("용지에 지도를 올려 두었습니다. 축척을 맞추거나 그린곳 가운데를 누르세요."));
+    return;
+  }
+
+  // ── 기존 도면 요소 및 지도 범위 보존하면서 용지 크기/방향 전환 ──
+  endActivateMap();
+
+  const double oldW = m_paperW;
+  const double oldH = m_paperH;
   m_paperW = widthMm;
   m_paperH = heightMm;
-  endActivateMap();
-  ensureBlankLayout();
+
+  const double dw = m_paperW - oldW;
+  const double dh = m_paperH - oldH;
+
+  // 1. QGIS Layout 페이지 크기 변경
+  if (ly->pageCollection() && ly->pageCollection()->pageCount() > 0) {
+    ly->pageCollection()->page(0)->setPageSize(
+        QgsLayoutSize(m_paperW, m_paperH, Qgis::LayoutUnit::Millimeters));
+  }
+
+  // 2. 지도 중심 좌표, 축척, CRS 보존
+  const QgsRectangle curExt = map->extent();
+  const QgsPointXY mapCenter = curExt.center();
+  const double mapScale = map->scale();
+  const QgsCoordinateReferenceSystem mapCrs = map->crs();
+
+  // 3. 지도 프레임 위치 및 크기를 새 용지 마진에 맞춰 재계산
+  const QRectF newMapRect = defaultMapRect();
+  map->attemptSetSceneRect(newMapRect);
+
+  // 지도 중심과 축척 복원
+  if (mapCrs.isValid()) map->setCrs(mapCrs);
+  const QgsRectangle nextExt(mapCenter.x() - curExt.width() * 0.5,
+                             mapCenter.y() - curExt.height() * 0.5,
+                             mapCenter.x() + curExt.width() * 0.5,
+                             mapCenter.y() + curExt.height() * 0.5);
+  map->zoomToExtent(nextExt);
+  if (mapScale > 1.0)
+    map->setScale(mapScale, true);
+  map->invalidateCache();
+  map->refresh();
+
+  // 4. 부속 장식 요소 (방위표, 축척자, 범례, 축척 라벨, 좌표계 라벨 등) 상대 이동 및 클램핑
+  for (QGraphicsItem* gi : ly->items()) {
+    auto* item = dynamic_cast<QgsLayoutItem*>(gi);
+    if (!item || item == map) continue;
+
+    const QRectF itemBox = itemPaperRect(item);
+    const QPointF pos = itemBox.topLeft();
+    const QSizeF sz = itemBox.size();
+
+    double newX = pos.x();
+    double newY = pos.y();
+
+    // 하단 영역(oldH의 55% 이상 위치)에 있던 아이템은 Y 오프셋(dh)만큼 아래로 이동
+    if (pos.y() > oldH * 0.55) {
+      newY += dh;
+    }
+    // 우측 영역(oldW의 50% 이상 위치)에 있던 아이템은 X 오프셋(dw)만큼 우측으로 이동
+    if (pos.x() > oldW * 0.5) {
+      newX += dw;
+    }
+
+    // 용지 영역 벗어남 방지 (클램핑)
+    const double maxX = std::max(0.0, m_paperW - sz.width() - 4.0);
+    const double maxY = std::max(0.0, m_paperH - sz.height() - 4.0);
+    newX = std::clamp(newX, 4.0, maxX);
+    newY = std::clamp(newY, 4.0, maxY);
+
+    item->attemptSetSceneRect(QRectF(QPointF(newX, newY), sz));
+  }
+
+  // 5. 좌표점 콜아웃 재계산 (있을 경우)
+  if (!m_coordMapPts.isEmpty()) {
+    relayoutCoordCallouts();
+  }
+
+  // 6. 뷰 및 외곽선 갱신
   m_paperFitPending = true;
+  updatePageOutline();
   zoomPaperVisible();
-  autoPlaceDefaultSheet();
-  if (m_status)
-    m_status->setText(QStringLiteral("용지에 지도를 올려 두었습니다. 축척을 맞추거나 그린곳 가운데를 누르세요."));
+  relinkDecorations();
+  syncScaleDecorations();
+  ly->refresh();
+
+  if (m_status) {
+    m_status->setText(QStringLiteral("용지 전환 완료: %1×%2 mm — 기존 지도 범위와 배치가 유지되었습니다.")
+                          .arg(qRound(m_paperW))
+                          .arg(qRound(m_paperH)));
+  }
 }
 
 void KaDrawingStudio::ensureBlankLayout() {
@@ -867,13 +975,18 @@ void KaDrawingStudio::buildUi() {
 
   auto* leftCol = new QFrame(root);
   leftCol->setObjectName(QStringLiteral("studioLeftCol"));
-  leftCol->setMinimumWidth(220);
-  leftCol->setMaximumWidth(280);
+  leftCol->setMinimumWidth(240);
+  leftCol->setMaximumWidth(320);
   auto* leftLay = new QVBoxLayout(leftCol);
-  leftLay->setContentsMargins(10, 10, 10, 10);
-  leftLay->setSpacing(6);
+  leftLay->setContentsMargins(6, 6, 6, 6);
+  leftLay->setSpacing(4);
 
-  auto* layerBox = new QFrame(leftCol);
+  auto* leftSplit = new QSplitter(Qt::Vertical, leftCol);
+  leftSplit->setObjectName(QStringLiteral("studioLeftSplit"));
+  leftSplit->setHandleWidth(8);
+  leftSplit->setChildrenCollapsible(false);
+
+  auto* layerBox = new QFrame(leftSplit);
   layerBox->setObjectName(QStringLiteral("layersCard"));
   auto* layerLay = new QVBoxLayout(layerBox);
   layerLay->setContentsMargins(8, 8, 8, 8);
@@ -882,14 +995,45 @@ void KaDrawingStudio::buildUi() {
   leftCap->setObjectName(QStringLiteral("cardCaption"));
   m_layerModel = new QgsLayerTreeModel(QgsProject::instance()->layerTreeRoot(), this);
   m_layerModel->setFlag(QgsLayerTreeModel::AllowNodeChangeVisibility, true);
+  m_layerModel->setFlag(QgsLayerTreeModel::AllowNodeReorder, true);
+  m_layerModel->setFlag(QgsLayerTreeModel::AllowNodeRename, false);
   m_layerTree = new QgsLayerTreeView(layerBox);
   m_layerTree->setObjectName(QStringLiteral("layoutLayerTree"));
   m_layerTree->setModel(m_layerModel);
   m_layerTree->setMinimumWidth(160);
   m_layerTree->setSelectionMode(QAbstractItemView::ExtendedSelection);
+  m_layerTree->setDragDropMode(QAbstractItemView::InternalMove);
+  m_layerTree->setDefaultDropAction(Qt::MoveAction);
+  m_layerTree->setDragEnabled(true);
+  m_layerTree->setAcceptDrops(true);
+  m_layerTree->setDropIndicatorShown(true);
+  m_layerTree->installEventFilter(this);
+  if (m_layerTree->viewport())
+    m_layerTree->viewport()->installEventFilter(this);
+  m_layerTree->setContextMenuPolicy(Qt::CustomContextMenu);
+  connect(m_layerTree, &QWidget::customContextMenuRequested, this, [this](const QPoint& pt) {
+    auto* mainWin = qobject_cast<MainWindow*>(window());
+    if (mainWin) {
+      mainWin->showLayerTreeContextMenu(m_layerTree, pt);
+    } else {
+      QMenu menu(this);
+      menu.addAction(QStringLiteral("레이어 삭제"), this, &KaDrawingStudio::removeSelectedLayers);
+      menu.exec(m_layerTree->viewport()->mapToGlobal(pt));
+    }
+  });
+  connect(m_layerTree, &QTreeView::doubleClicked, this, [this](const QModelIndex&) {
+    auto* mainWin = qobject_cast<MainWindow*>(window());
+    if (mainWin) {
+      mainWin->editCurrentLayerStyle(m_layerTree->currentLayer());
+    }
+  });
+
   connect(m_layerTree->selectionModel(), &QItemSelectionModel::selectionChanged,
           this, &KaDrawingStudio::syncMapFromLayers);
   connect(m_layerModel, &QAbstractItemModel::dataChanged, this, &KaDrawingStudio::syncMapFromLayers);
+  connect(m_layerModel, &QAbstractItemModel::rowsMoved, this, &KaDrawingStudio::syncMapFromLayers);
+  connect(m_layerModel, &QAbstractItemModel::modelReset, this, &KaDrawingStudio::syncMapFromLayers);
+  connect(m_layerModel, &QAbstractItemModel::layoutChanged, this, &KaDrawingStudio::syncMapFromLayers);
   if (QgsLayerTree* tree = QgsProject::instance()->layerTreeRoot()) {
     connect(tree, &QgsLayerTreeNode::visibilityChanged, this,
             [this](QgsLayerTreeNode*) { syncMapFromLayers(); });
@@ -914,11 +1058,34 @@ void KaDrawingStudio::buildUi() {
   connect(QgsProject::instance(), &QgsProject::layersRemoved, this,
           [syncEmpty](const QStringList&) { syncEmpty(); });
   syncEmpty();
+  leftSplit->addWidget(layerBox);
+
+  auto* mainWin = qobject_cast<MainWindow*>(parentWidget());
+  if (!mainWin) mainWin = qobject_cast<MainWindow*>(parent());
+
+  m_filesPanel = new KaFileBrowserPanel(leftSplit);
+  m_filesPanel->setObjectName(QStringLiteral("studioFilesPanel"));
+  connect(m_filesPanel, &KaFileBrowserPanel::fileActivated, this, [this, mainWin](const QString& path) {
+    if (mainWin) {
+      const bool raster = GeorefService::isImagePath(path);
+      if (raster ? mainWin->addRasterFromPath(path) : mainWin->addVectorFromPath(path)) {
+        syncMapFromLayers();
+      }
+    }
+  });
+  connect(m_filesPanel, &KaFileBrowserPanel::statusMessage, this, [this](const QString& msg) {
+    if (m_status) m_status->setText(msg);
+  });
+  leftSplit->addWidget(m_filesPanel);
+
+  leftSplit->setStretchFactor(0, 3);
+  leftSplit->setStretchFactor(1, 2);
+  leftSplit->setSizes({340, 240});
+  leftLay->addWidget(leftSplit, 1);
 
   m_inspector = nullptr;
   m_inspectorCap = nullptr;
   m_legendProps = nullptr;
-  leftLay->addWidget(layerBox, 1);
 
   auto* right = new QWidget(root);
   auto* rightLay = new QVBoxLayout(right);
@@ -1007,8 +1174,12 @@ void KaDrawingStudio::buildUi() {
                               QStringLiteral("PDF로 내보낼까?"), QSize(22, 22));
   pdfBtn->setObjectName(QStringLiteral("btnPrimary"));
   pdfBtn->setToolTip(QStringLiteral("지금 용지를 PDF 파일로 저장합니다"));
-  connect(pdfBtn, &QToolButton::clicked, this, &KaDrawingStudio::savePdf);
+  auto* paperBtn = makeRailTile(m_cardLegend, KaIcons::icon(QStringLiteral("layout_map_frame")),
+                                QStringLiteral("용지/방향"), QSize(22, 22));
+  paperBtn->setToolTip(QStringLiteral("A4/A3 용지 크기 및 가로/세로 방향을 전환합니다"));
+  connect(paperBtn, &QToolButton::clicked, this, &KaDrawingStudio::openPaperSettingsDialog);
   legendRow->addWidget(legendBtn, 1);
+  legendRow->addWidget(paperBtn, 1);
   legendRow->addWidget(pdfBtn, 1);
   legendLay->addLayout(legendRow);
   m_legendTitle = new QLineEdit(m_cardLegend);
@@ -1197,6 +1368,9 @@ void KaDrawingStudio::buildUi() {
                              KaBeginnerRibbon::twoLine(QStringLiteral("항목을 옮겨볼까?")),
                              QStringLiteral("좌표 상자를 끌어 옮깁니다"),
                              &KaDrawingStudio::useSelectTool));
+  btLay->addWidget(addBottom(QStringLiteral("layout_map_frame"), QStringLiteral("용지/방향"),
+                             QStringLiteral("용지 크기(A4/A3) 및 방향(가로/세로)을 전환합니다"),
+                             &KaDrawingStudio::openPaperSettingsDialog));
   side->setMinimumWidth(300);
   side->setMaximumWidth(360);
   rootLay->addWidget(leftCol, 0);
@@ -1225,9 +1399,11 @@ void KaDrawingStudio::beginDrawMapFrame() {
 }
 
 QRectF KaDrawingStudio::defaultMapRect() const {
-  const double left = 22.0;
+  // 좌·우 여백은 같아야 한다(예전 22/16은 눈에 띄게 왼쪽이 넓었다).
+  // 아래는 축척막대·좌표계·방위표가 들어가는 자리라 넓게 둔다.
+  const double left = 18.0;
   const double top = 12.0;
-  const double right = 16.0;
+  const double right = 18.0;
   const double bottom = 38.0;
   return QRectF(left, top, std::max(40.0, m_paperW - left - right),
                 std::max(40.0, m_paperH - top - bottom));
@@ -2762,7 +2938,65 @@ void KaDrawingStudio::deleteSelectedItems() {
   }
 }
 
+void KaDrawingStudio::removeSelectedLayers() {
+  if (!m_layerTree) return;
+  QSet<QString> ids;
+  for (QgsMapLayer* l : m_layerTree->selectedLayers()) {
+    if (l) ids.insert(l->id());
+  }
+  if (ids.isEmpty() && m_layerTree->selectionModel()) {
+    const auto idxs = m_layerTree->selectionModel()->selectedIndexes();
+    auto* model = qobject_cast<QgsLayerTreeModel*>(m_layerTree->model());
+    for (const auto& idx : idxs) {
+      if (!idx.isValid() || !model) continue;
+      auto* node = model->index2node(idx);
+      if (node && QgsLayerTree::isLayer(node)) {
+        if (auto* l = QgsLayerTree::toLayer(node)->layer())
+          ids.insert(l->id());
+      }
+    }
+  }
+  if (ids.isEmpty()) {
+    if (auto* l = m_layerTree->currentLayer())
+      ids.insert(l->id());
+  }
+  if (ids.isEmpty()) {
+    if (m_status)
+      m_status->setText(QStringLiteral("삭제할 레이어를 먼저 선택하세요."));
+    return;
+  }
+
+  auto* proj = m_project ? m_project.data() : QgsProject::instance();
+  if (!proj) return;
+
+  const auto ans = QMessageBox::question(
+      this, QStringLiteral("레이어 삭제"),
+      QStringLiteral("선택한 레이어 %1개를 도면/프로젝트에서 삭제할까요?").arg(ids.size()),
+      QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+  if (ans != QMessageBox::Yes) return;
+
+  for (const QString& id : ids) {
+    proj->removeMapLayer(id);
+  }
+  syncMapFromLayers();
+  if (m_status)
+    m_status->setText(QStringLiteral("레이어 %1개를 삭제했습니다.").arg(ids.size()));
+}
+
 bool KaDrawingStudio::eventFilter(QObject* watched, QEvent* event) {
+  const bool onTree = m_layerTree && event && (watched == m_layerTree || watched == m_layerTree->viewport());
+  if (onTree && event->type() == QEvent::KeyPress) {
+    auto* ke = static_cast<QKeyEvent*>(event);
+    if (ke->matches(QKeySequence::Undo) ||
+        ((ke->modifiers() & Qt::ControlModifier) && ke->key() == Qt::Key_Z)) {
+      undoLastChange();
+      return true;
+    }
+    if (ke->key() == Qt::Key_Delete || ke->key() == Qt::Key_Backspace) {
+      removeSelectedLayers();
+      return true;
+    }
+  }
   const bool onView = m_view && event && (watched == m_view || watched == m_view->viewport());
   if (onView && event->type() == QEvent::Resize && m_keepPaperCentered && !m_mmbPanning) {
     const QSize now = m_view->viewport() ? m_view->viewport()->size() : QSize();
@@ -2864,6 +3098,11 @@ void KaDrawingStudio::keyPressEvent(QKeyEvent* event) {
     return;
   }
   if (event && (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace)) {
+    if (m_layerTree && (m_layerTree->hasFocus() || (m_layerTree->viewport() && m_layerTree->viewport()->hasFocus()))) {
+      removeSelectedLayers();
+      event->accept();
+      return;
+    }
     if (isPlacingCoordPoint())
       undoLastCoordCallout();
     else

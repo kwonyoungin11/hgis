@@ -1,4 +1,4 @@
-﻿#include "ProjectStateBuilder.h"
+#include "ProjectStateBuilder.h"
 #include "LayerOps.h"
 #include "LayoutService.h"
 #include <QJsonObject>
@@ -44,12 +44,21 @@ QJsonObject ProjectStateBuilder::fromProject(QgsProject* project) {
 
   st.insert(QStringLiteral("project_crs_set"), project->crs().isValid());
 
-  auto* sa = LayerOps::findByLayerKey(project, QStringLiteral("survey_area"));
+  auto sas = LayerOps::surveyAreaLayers(project);
+  if (sas.isEmpty()) {
+    if (auto* fallback = LayerOps::findByLayerKey(project, QStringLiteral("survey_area"))) {
+      sas.append(fallback);
+    }
+  }
+  auto* sa = sas.isEmpty() ? nullptr : sas.first();
   auto* fp = LayerOps::findByLayerKey(project, QStringLiteral("feature_poly"));
   auto* fl = LayerOps::findByLayerKey(project, QStringLiteral("feature_line"));
   auto* cp = LayerOps::findByLayerKey(project, QStringLiteral("control_points"));
 
-  const int saCount = sa ? int(sa->featureCount()) : 0;
+  int saCount = 0;
+  for (auto* saLayer : sas) {
+    saCount += int(saLayer->featureCount());
+  }
   const int fpCount = fp ? int(fp->featureCount()) : 0;
   const int flCount = fl ? int(fl->featureCount()) : 0;
   const int cpCount = cp ? int(cp->featureCount()) : 0;
@@ -62,8 +71,9 @@ QJsonObject ProjectStateBuilder::fromProject(QgsProject* project) {
   bool geosValid = true;
   QgsRectangle surveyExtent;
   bool hasSurveyExt = false;
-  if (sa && saCount > 0) {
-    QgsFeatureIterator it = sa->getFeatures();
+  for (auto* saLayer : sas) {
+    if (saLayer->featureCount() <= 0) continue;
+    QgsFeatureIterator it = saLayer->getFeatures();
     QgsFeature f;
     while (it.nextFeature(f)) {
       const QgsGeometry g = f.geometry();

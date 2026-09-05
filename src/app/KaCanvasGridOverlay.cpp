@@ -120,7 +120,10 @@ void KaCanvasGridOverlay::paintProjected(QPainter* p) {
     return;
   QFont f(QStringLiteral("Malgun Gothic"), m_cfg.fontPt);
   p->setFont(f);
-  p->setPen(QPen(QColor(30, 41, 59, 220), 0));
+  // 좌표 글씨도 격자 선 색을 따라간다. 다만 흐린 색이라도 읽히도록 불투명하게.
+  QColor labelColor = m_cfg.color;
+  labelColor.setAlpha(255);
+  p->setPen(QPen(labelColor.darker(115), 0));
   auto fmt = [&](double v) {
     if (step >= 1000.0)
       return QStringLiteral("%1 km").arg(v / 1000.0, 0, 'f', 0);
@@ -216,7 +219,10 @@ void KaCanvasGridOverlay::paintGeographic(QPainter* p) {
     return;
   QFont f(QStringLiteral("Malgun Gothic"), m_cfg.fontPt);
   p->setFont(f);
-  p->setPen(QPen(QColor(30, 41, 59, 220), 0));
+  // 좌표 글씨도 격자 선 색을 따라간다. 다만 흐린 색이라도 읽히도록 불투명하게.
+  QColor labelColor = m_cfg.color;
+  labelColor.setAlpha(255);
+  p->setPen(QPen(labelColor.darker(115), 0));
   auto dms = [](double v, bool lat) {
     const bool neg = v < 0;
     v = std::abs(v);

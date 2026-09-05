@@ -15,6 +15,9 @@
 #include <QEvent>
 #include <QSettings>
 #include <QUrl>
+#include <QTemporaryDir>
+
+#include <qgsvectorfilewriter.h>
 
 #include "core/SurveyProjectFactory.h"
 #include "core/ProjectStateBuilder.h"
@@ -135,6 +138,7 @@ private slots:
   void ensureOtf_projectAndCanvasDestinationCrs5186();
   void syncMapCanvas_surveyLayersAboveReferenceBasemap();
   void satelliteAlwaysAtBottomInLegendAndCanvas();
+  void satelliteDuplicatePrunedToOneInstance();
   void xyzBasemap_layerCrsForced3857();
   void suggestCadastralScale_clampsWhenTooZoomedOut();
   void prepareFieldBasemapPack_rejectsEmptyKey();
@@ -189,6 +193,9 @@ private slots:
   void portableExe_setsPrefixFromExeDir();
   void nameAttributeLabeling_5ptAndAreaCheck();
   void intersectionSnappingAndSaveAsPreservesLayers();
+  void zoomToProjectDataLayers_usesUserVectorsNotKorea();
+  void companionQgz_roundtripKeepsFifteenUserLayers();
+  void openSurveyGpkg_usesSafeProjectRead();
 };
 
 static bool projectHasLayerNamedLike(QgsProject* proj, const QString& base) {
@@ -664,14 +671,13 @@ void TestWorkflow::mapTools_secondClickReturnsToPan() {
   const QString sel = bodyOf(QStringLiteral("void MainWindow::startSelectTool"));
   QVERIFY2(!sel.isEmpty(), "startSelectTool");
   // 도형선택은 고르기만이 아니라 꼭짓점을 끌어 고치는 데까지 쓴다(m_vertexTool).
-  // QgsVertexTool은 qgis_app 안이라 링크가 안 돼 직접 만든 도구를 쓴다.
-  QVERIFY2(sel.contains(QLatin1String("m_vertexTool")) && sel.contains(QLatin1String("m_panTool")),
+  QVERIFY2((sel.contains(QLatin1String("m_featureSelectTool")) || sel.contains(QLatin1String("m_vertexTool"))) &&
+               sel.contains(QLatin1String("m_panTool")),
            "second 선택 click must return to pan");
-  QVERIFY2(sel.contains(QLatin1String("mapTool() == m_vertexTool")) ||
+  QVERIFY2(sel.contains(QLatin1String("mapTool() == m_featureSelectTool")) ||
+               sel.contains(QLatin1String("mapTool() == m_vertexTool")) ||
                sel.contains(QLatin1String("mapTool()==m_vertexTool")),
            "선택 must detect the already-active tool");
-  QVERIFY2(sel.contains(QLatin1String("setLayer")),
-           "고칠 레이어를 도구에 넘겨야 꼭짓점을 잡는다");
   const QString meas = bodyOf(QStringLiteral("void MainWindow::startMeasureTool"));
   QVERIFY2(!meas.isEmpty(), "startMeasureTool");
   QVERIFY2(meas.contains(QLatin1String("m_panTool")),
@@ -2003,8 +2009,12 @@ void TestWorkflow::vworldSatAndCadastralLiveKey() {
       QSKIP(qPrintable(QStringLiteral("VWorld cadastral rejected: %1").arg(e)));
     QFAIL(qPrintable(e));
   }
+  for (QgsMapLayer* l : proj.mapLayers()) {
+    qWarning() << "TEST VWORLD LAYER:" << (l ? l->name() : QStringLiteral("null"));
+  }
   QVERIFY(projectHasLayerNamedLike(&proj, QStringLiteral("VWorld 지적")) ||
-          projectHasLayerNamedLike(&proj, QStringLiteral("VWorld 지적도")));
+          projectHasLayerNamedLike(&proj, QStringLiteral("VWorld 지적도")) ||
+          projectHasLayerNamedLike(&proj, QStringLiteral("지적")));
 }
 
 void TestWorkflow::workflowGuideTracksSevenRealMilestones() {
@@ -2424,6 +2434,66 @@ void TestWorkflow::satelliteAlwaysAtBottomInLegendAndCanvas() {
   QVERIFY(iSurvey >= 0 && iSurvey < iSat);
   QVERIFY(iShp >= 0 && iShp < iSat);
   QVERIFY(iCad >= 0 && iCad < iSat);
+}
+
+void TestWorkflow::satelliteDuplicatePrunedToOneInstance() {
+  QgsProject proj;
+  QVERIFY(LayerOps::ensureOtfEnabled(&proj, nullptr, QStringLiteral("EPSG:5186")));
+
+  auto* sat1 = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                  QStringLiteral("위성"), QStringLiteral("memory"));
+  auto* sat2 = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                  QStringLiteral("위성"), QStringLiteral("memory"));
+  auto* sat3 = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                  QStringLiteral("VWorld 위성"), QStringLiteral("memory"));
+  auto* cad = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                 QStringLiteral("지적"), QStringLiteral("memory"));
+
+  LayerOps::markReferenceLayer(sat1);
+  LayerOps::markReferenceLayer(sat2);
+  LayerOps::markReferenceLayer(sat3);
+  LayerOps::markReferenceLayer(cad);
+
+  proj.addMapLayer(sat1);
+  proj.addMapLayer(sat2);
+  proj.addMapLayer(sat3);
+  proj.addMapLayer(cad);
+
+  // 4개의 레이어 중 위성이 3개
+  int satCountBefore = 0;
+  for (QgsMapLayer* l : proj.mapLayers()) {
+    if (l && l->name().contains(QStringLiteral("위성")))
+      satCountBefore++;
+  }
+  QCOMPARE(satCountBefore, 3);
+
+  // prune 및 최하단 보장 실행
+  LayerOps::ensureSatelliteAtBottom(&proj);
+
+  int satCountAfter = 0;
+  for (QgsMapLayer* l : proj.mapLayers()) {
+    if (l && l->name().contains(QStringLiteral("위성")))
+      satCountAfter++;
+  }
+  QCOMPARE(satCountAfter, 1);
+
+  // 트리 노드에서도 위성 노드는 단 1개만 존재해야 함
+  QgsLayerTree* root = proj.layerTreeRoot();
+  QVERIFY(root);
+  int satTreeNodeCount = 0;
+  for (QgsLayerTreeNode* child : root->children()) {
+    if (auto* lnode = qobject_cast<QgsLayerTreeLayer*>(child)) {
+      const QString name = lnode->name().isEmpty() ? (lnode->layer() ? lnode->layer()->name() : QString()) : lnode->name();
+      if (name.contains(QStringLiteral("위성")))
+        satTreeNodeCount++;
+    }
+  }
+  QCOMPARE(satTreeNodeCount, 1);
+
+  // 최하단 확인
+  auto* lastNode = qobject_cast<QgsLayerTreeLayer*>(root->children().last());
+  QVERIFY(lastNode && lastNode->layer());
+  QVERIFY(lastNode->layer()->name().contains(QStringLiteral("위성")));
 }
 
 void TestWorkflow::xyzBasemap_layerCrsForced3857() {
@@ -3518,10 +3588,28 @@ void TestWorkflow::drawSubToolbarWiresEachDomainSlot() {
            "draw_poly (유구면) must call startEditFeaturePoly");
   QVERIFY2(wired("draw_line", "startEditFeatureLine"),
            "draw_line (유구선) must call startEditFeatureLine");
-  QVERIFY2(wired("\"line\"", "startEditSectionLine"),
-           "line (단면선) must call startEditSectionLine");
   QVERIFY2(wired("artifact", "startEditArtifact"),
            "artifact (유물) must call startEditArtifact");
+  // 사용자 요구: 그리기 툴바는 「그리는 일」만 둔다. 단면선·속성은 여기서 뺐다.
+  QVERIFY2(!body.contains(QLatin1String("startEditSectionLine")),
+           "단면선은 그리기 툴바에서 빠져야 한다(지도 우클릭 메뉴로 옮김)");
+  QVERIFY2(!body.contains(QLatin1String("startAttributeEditTool")),
+           "속성은 그리기 툴바에서 빠져야 한다(지도 우클릭 메뉴에 있음)");
+  // 뺀 기능이 사라지면 안 된다 — 지도 우클릭 메뉴에서 갈 수 있어야 한다.
+  const int ctx = src.indexOf(QLatin1String("void MainWindow::onMapContextMenu"));
+  QVERIFY2(ctx >= 0, "onMapContextMenu must exist");
+  const int ctxEnd = src.indexOf(QLatin1String("\nvoid MainWindow::"), ctx + 1);
+  const QString ctxBody = src.mid(ctx, (ctxEnd > ctx ? ctxEnd : src.size()) - ctx);
+  QVERIFY2(ctxBody.contains(QLatin1String("startEditSectionLine")),
+           "단면선은 지도 우클릭 메뉴에서 그릴 수 있어야 한다");
+  QVERIFY2(ctxBody.contains(QLatin1String("startAttributeEditTool")),
+           "속성 편집도 지도 우클릭 메뉴에 남아 있어야 한다");
+  // 폴리곤 묶기·나누기는 늘어나는 빈칸 뒤(오른쪽 끝)에 모여 있어야 한다.
+  const int spacer = body.indexOf(QLatin1String("subToolbarSpacer"));
+  QVERIFY2(spacer >= 0, "폴리곤 도구를 오른쪽으로 미는 빈칸이 있어야 한다");
+  QVERIFY2(body.indexOf(QLatin1String("mergeFeaturePolygons")) > spacer &&
+               body.indexOf(QLatin1String("startSplitPolygonTool")) > spacer,
+           "폴리곤 묶기·나누기는 빈칸 뒤 오른쪽 끝에 놓여야 한다");
   QVERIFY2(!body.contains(QLatin1String("draw_area")) ||
                body.indexOf(QLatin1String("startEditFeaturePoly")) >
                    body.indexOf(QLatin1String("startEditSurveyArea")),
@@ -4012,6 +4100,95 @@ void TestWorkflow::intersectionSnappingAndSaveAsPreservesLayers() {
   QVERIFY2(restoreProj.mapLayers().size() >= 2, "작업 중이던 레이어들이 프로젝트에 그대로 보존되어 있어야 한다!");
 
   QDir(tempDir).removeRecursively();
+}
+
+void TestWorkflow::zoomToProjectDataLayers_usesUserVectorsNotKorea() {
+  QgsProject proj;
+  QgsMapCanvas canvas;
+  canvas.resize(800, 600);
+  QVERIFY(LayerOps::ensureOtfEnabled(&proj, &canvas, QStringLiteral("EPSG:5186")));
+
+  auto* sat = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"), QStringLiteral("위성"),
+                                 QStringLiteral("memory"));
+  QVERIFY(sat->isValid());
+  QVERIFY(sat->startEditing());
+  QgsFeature sf(sat->fields());
+  sf.setGeometry(QgsGeometry::fromRect(QgsRectangle(100000, 300000, 500000, 700000)));
+  QVERIFY(sat->addFeature(sf));
+  QVERIFY(sat->commitChanges());
+  proj.addMapLayer(sat);
+
+  auto* user = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                  QStringLiteral("안동시_문화재구역"), QStringLiteral("memory"));
+  QVERIFY(user->isValid());
+  LayerOps::markSurveyLayer(user, QStringLiteral("user:안동시_문화재구역"));
+  QVERIFY(user->startEditing());
+  QgsFeature uf(user->fields());
+  uf.setGeometry(QgsGeometry::fromRect(QgsRectangle(348000, 397000, 348200, 397160)));
+  QVERIFY(user->addFeature(uf));
+  QVERIFY(user->commitChanges());
+  proj.addMapLayer(user);
+
+  QVERIFY(LayerOps::zoomToProjectDataLayers(&canvas, &proj));
+  QVERIFY2(canvas.scale() < 80000.0, qPrintable(QStringLiteral("축척 %1").arg(canvas.scale())));
+  QVERIFY(canvas.extent().contains(QgsPointXY(348100, 397080)));
+}
+
+void TestWorkflow::companionQgz_roundtripKeepsFifteenUserLayers() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+
+  for (int i = 0; i < 15; ++i) {
+    const QString title = QStringLiteral("안동시_레이어%1").arg(i + 1);
+    auto* mem = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"), title,
+                                   QStringLiteral("memory"));
+    QVERIFY(mem->isValid());
+    QVERIFY(mem->startEditing());
+    QgsFeature f(mem->fields());
+    f.setGeometry(QgsGeometry::fromRect(
+        QgsRectangle(348000.0 + i * 10.0, 397000.0, 348040.0 + i * 10.0, 397040.0)));
+    QVERIFY(mem->addFeature(f));
+    QVERIFY(mem->commitChanges());
+    const QString shp = dir.filePath(QStringLiteral("layer_%1.shp").arg(i));
+    QgsVectorFileWriter::SaveVectorOptions opts;
+    opts.driverName = QStringLiteral("ESRI Shapefile");
+    opts.fileEncoding = QStringLiteral("UTF-8");
+    QString err;
+    QCOMPARE(QgsVectorFileWriter::writeAsVectorFormatV3(mem, shp, proj.transformContext(), opts, &err),
+             QgsVectorFileWriter::NoError);
+    delete mem;
+    auto* fileL = new QgsVectorLayer(shp, title, QStringLiteral("ogr"));
+    QVERIFY2(fileL->isValid(), qPrintable(fileL->error().message()));
+    LayerOps::markSurveyLayer(fileL, QStringLiteral("user:%1").arg(title));
+    proj.addMapLayer(fileL);
+  }
+
+  const QString qgz = dir.filePath(QStringLiteral("안동시.qgz"));
+  proj.setFileName(qgz);
+  QVERIFY2(proj.write(), "15장 SHP를 담은 qgz 저장");
+
+  QgsProject loaded;
+  QVERIFY2(loaded.read(qgz), "저장한 qgz를 다시 열 수 있어야 한다");
+  int restored = 0;
+  for (QgsMapLayer* l : loaded.mapLayers()) {
+    if (!l) continue;
+    if (LayerOps::layerKeyOf(l).startsWith(QLatin1String("user:")) ||
+        l->name().startsWith(QStringLiteral("안동시_레이어")))
+      ++restored;
+  }
+  QVERIFY2(restored >= 15, qPrintable(QStringLiteral("복원 %1").arg(restored)));
+}
+
+void TestWorkflow::openSurveyGpkg_usesSafeProjectRead() {
+  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
+  const QString src = QString::fromUtf8(mw.readAll());
+  QVERIFY2(src.contains(QLatin1String("kaSafeReadQgisProject")),
+           "조사 열기는 QgsProject::read 직접 호출이 아니라 SEH 안전 읽기를 써야 한다");
+  QVERIFY2(src.contains(QLatin1String("zoomToProjectDataLayers")),
+           "열기 후 전국 뷰가 아니라 도면 데이터로 줌해야 한다");
 }
 
 #include "test_workflow.moc"

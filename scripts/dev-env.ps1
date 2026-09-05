@@ -30,5 +30,8 @@ $gdalData = Join-Path $OSGEO "apps\gdal-dev\share\gdal"
 if (Test-Path $gdalData) { $env:GDAL_DATA = $gdalData }
 $proj = Join-Path $OSGEO "share\proj"
 if (Test-Path $proj) { $env:PROJ_DATA = $proj; $env:PROJ_LIB = $proj }
+$env:CMAKE_BUILD_PARALLEL_LEVEL = "$([Environment]::ProcessorCount)"
+$env:CTEST_PARALLEL_LEVEL = "$([Environment]::ProcessorCount)"
 Write-Host "OSGEO4W_ROOT=$env:OSGEO4W_ROOT"
 Write-Host "QGIS_PREFIX_PATH=$env:QGIS_PREFIX_PATH"
+Write-Host "PARALLEL_JOBS=$env:CMAKE_BUILD_PARALLEL_LEVEL (CPU cores)"

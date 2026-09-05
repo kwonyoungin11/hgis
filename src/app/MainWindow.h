@@ -1,4 +1,5 @@
 #pragma once
+#include <QColor>
 #include <QMainWindow>
 #include <QJsonObject>
 #include <QPair>
@@ -18,6 +19,7 @@ class QLineEdit;
 class QComboBox;
 class QCheckBox;
 class QDoubleSpinBox;
+class QSlider;
 class QEvent;
 class QShowEvent;
 class QCloseEvent;
@@ -80,6 +82,12 @@ public:
   int lastChecklistErrorCount() const;
   // 부팅 때 미뤄 둔 배경지도 로딩을 지금 끝낸다(자동 QA·스모크가 결정적으로 돌게).
   void loadBootBasemaps();
+  void setRestoreLastSurveyEnabled(bool enabled) { m_restoreLastSurveyEnabled = enabled; }
+  bool addVectorFromPath(const QString& path);
+  bool addRasterFromPath(const QString& path);
+  void showLayerTreeContextMenu(QgsLayerTreeView* treeView, const QPoint& pos);
+  void editCurrentLayerStyle(QgsMapLayer* layer = nullptr);
+  void editCurrentLayerAttributes(QgsMapLayer* layer = nullptr);
 
 private slots:
   void newSurvey();
@@ -101,12 +109,11 @@ private slots:
   void clipOverlappingLayers();
   void startSplitPolygonTool();
   void onWorkControlClicked(QListWidgetItem* item);
+  void updateLayerOpacityControl();
   void refreshWorkPanel();
   void saveEdits();
   void stopEdits();
   void startAttributeEditTool();
-  void editCurrentLayerAttributes();
-  void editCurrentLayerStyle();
   void addUserLayer();
   void addControlPoint();
   void importControlCsv();
@@ -144,6 +151,9 @@ private slots:
   void startTrenchGridEdit();   // 개별 편집 모드(그래픽식 선택·이동·삭제)
   void activateTrenchTool(bool single);
   void toggleMapGrid();
+  // 격자 선 색을 바꾸고(빨강·파랑·검정·직접 고르기) 눌린 단추를 맞춘다.
+  void setMapGridColor(const QColor& color);
+  void syncMapGridColorButtons();
   void addBasemapVworld();
   void addBasemapVworldSat();
   void addBasemapVworldCadastral();
@@ -167,7 +177,7 @@ private slots:
   static QString resolvedDesktopPath();
   void onMapContextMenu(const QPoint& pos);
   void onLayerTreeContextMenu(const QPoint& pos);
-  void renameSelectedLayer();
+  void renameSelectedLayer(QgsMapLayer* layer = nullptr);
   void onLayerTreeDoubleClicked(const QModelIndex& index);
   void zoomMapToFullMax();
   void zoomSelectedLayerMax();
@@ -206,8 +216,6 @@ private:
   void updateNextActionStatus();
   void setupFileBrowser();
   void clearSubToolbar();
-  bool addVectorFromPath(const QString& path);
-  bool addRasterFromPath(const QString& path);
   bool addSectionGeoTiffFromPath(const QString& path, const QString& crsAuthId);
   bool tryAddDroppedUrls(const QList<QUrl>& urls);
   bool tryAddDroppedPaths(const QStringList& paths);
@@ -276,6 +284,7 @@ private:
   QSplitter* m_leftSplit = nullptr;
   QFrame* m_layersCard = nullptr;
   QFrame* m_filesCard = nullptr;
+  class KaFileBrowserPanel* m_filesPanel = nullptr;
   QListWidget* m_fileBrowser = nullptr;
   QString m_browserPath;
   ChecklistEngine* m_checklist = nullptr;
@@ -318,7 +327,12 @@ private:
   QDoubleSpinBox* m_mapGridRot = nullptr;
   QDoubleSpinBox* m_mapGridWidth = nullptr;
   QComboBox* m_mapGridDash = nullptr;
+  QColor m_mapGridColor = QColor(51, 65, 85, 210);
+  QVector<QToolButton*> m_mapGridColorBtns;
   KaAttributeMapTool* m_attributeTool = nullptr;
+  QWidget* m_layerOpacityWidget = nullptr;
+  QSlider* m_layerOpacitySlider = nullptr;
+  QLabel* m_layerOpacityLabel = nullptr;
   KaAlignMapTool* m_alignTool = nullptr;
   KaAlignPickTool* m_alignPickTool = nullptr;
   KaImageView* m_alignImage = nullptr;
@@ -354,6 +368,9 @@ private:
   bool m_locationSearchBusy = false;
   bool m_startupViewApplied = false;
   bool m_basemapBootPending = false;
+  bool m_restoreLastSurveyEnabled = false;
+  bool m_isLoadingBasemaps = false;
+  bool m_isOpeningSurvey = false;
   bool m_mapScreenBound = false;
   QTimer* m_displayRefresh = nullptr;
   QTimer* m_autosaveTimer = nullptr;

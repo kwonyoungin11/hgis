@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <qgsmaptool.h>
 #include <qgsmapmouseevent.h>
@@ -35,8 +35,12 @@ public:
 signals:
   void selectionChanged(int totalSelected);
   void statusMessage(const QString& msg);
+  void requestMerge();
+  void requestSplit();
+  void requestClip();
 
 private:
+  void handleContextMenu(QgsMapMouseEvent* e);
   void selectAtPoint(const QgsPointXY& mapPt, bool addToSelection);
   void selectInRect(const QgsRectangle& mapRect, bool addToSelection);
 
