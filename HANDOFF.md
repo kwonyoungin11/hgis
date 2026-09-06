@@ -28,6 +28,16 @@ Launch for the field user (do **not** start `ka-hgis.exe` raw):
 
 Other PC first time: `docs/other-pc-setup.md` · `.\scripts\bootstrap-dev-pc.ps1`  
 VWorld key is **local only** (`VworldSettings` / 도움말 → API 키). Never commit `config/secrets.ini`.
+Key stores, in the order `loadApiKey()` reads them — a stale entry in an earlier one hides the rest:
+
+1. `%LOCALAPPDATA%\ka-hgis\ka-hgis-vworld.ini` — SSOT, what the app writes (**not** `%APPDATA%`)
+2. `HKCU\Software\ka-hgis\ka-hgis` (NativeFormat), then env `VWORLD_API_KEY`
+3. `config/secrets.ini` — **the place to put a dev key**; gitignored (`**/secrets.ini`)
+
+Saved surveys bake the key into the layer URL (`req/wmts/1.0.0/<KEY>/`, `KEY=<KEY>`), so a renewed key
+does nothing for an old file until `LayerOps::refreshVworldApiKeyInLayers` swaps it on open
+(`ensureDefaultBasemaps`). An expired key answers **HTTP 200 with an XML error**, not an HTTP error —
+tiles just come out blank with nothing in the log.
 
 ---
 
@@ -38,7 +48,7 @@ Korean field archaeology HGIS (C++20/Qt6 + OSGeo4W `qgis-dev`, Architecture B, n
 1. GPKG survey store; **legend empty until draw/import** (`LayerOps::ensureDomainLayer` only). **새 조사** drops every non-basemap layer (keep WMS/XYZ 지적·위성 only)
 2. Domain keys: `survey_area`, `feature_poly`, `feature_line`, `section_line`, `control_points`, `artifact_point`
 3. **참조 지도** (위성/지적) vs **조사 데이터**
-4. Digitize: startEditing → addFeature → commit (keep tool). After a polygon is finished, drag a saved vertex to reshape. **Ctrl+Z** undoes last vertex, then last saved feature. Close/20s timer = `persistSurveyWork`; `저장` also brings external vectors into the survey GPKG. Both commit edits before saving the embedded workspace. Failed commits retain the edit buffer and stop workspace saving. No QGZ dialog on 저장.
+4. Digitize: startEditing → addFeature → commit (keep tool). After a polygon is finished, drag a saved vertex to reshape. **Ctrl+Z** undoes last vertex, then last saved feature. **No autosave** — `persistSurveyWork` runs only from `저장` (Ctrl+S) and from the close prompt (저장 / 저장 안 함 / 취소, `surveyHasUnsavedChanges`). Unsaved work shows as ` *` after the window title. `저장` also brings external vectors into the survey GPKG. Both commit edits before saving the embedded workspace. Failed commits retain the edit buffer and stop workspace saving. No QGZ dialog on 저장. 새 조사·다른 이름으로 저장 start in `preferredSurveyDir()` (last survey folder), never the Desktop — a Desktop redirected into OneDrive is what put field data there.
 4a. **저장·다시 열기**: the GPKG contains survey vectors and an embedded QGIS workspace; the companion QGZ is a secondary copy. Reopening restores missing legend nodes while preserving existing visibility, names and styles. **다른 이름으로 저장** includes committed SQLite WAL changes and keeps each layer's actual table name (including `survey_area_2`). External photos/rasters still require their source files. A failed workspace restore suppresses automatic workspace overwrite and routes explicit saving to a different file.
 5. **도면 만들기** = `KaDrawingStudio` (not QGIS Layout Designer). Samples for north/scale/legend/CRS. **Ctrl+Z** removes last placed item. 좌표점은 지도 칸만, 우클릭/Delete/Ctrl+Z로 마지막 점 삭제. 축척·이동 후 땅 XY에서 다시 앉힘. 자석은 조사 벡터 꼭짓점·선(지적 WMS 그림은 불가). 전문 도곽(+ 십자·테두리 좌표 자)은 **격자 설정에서 켤 때만**. 도면만들기 기본·PDF는 맵 테두리만(축척자·방위·CRS는 유지). 자동 도면(`fillLayout`)은 표제란(도면명·조사명·축척·좌표계·작성일) 포함. 도면의 래스터(위성·지적·지질)는 조각 렌더 없이 한 번에 그린다(`LayoutService::applySingleRasterPassRendering`) — QGIS 기본 조각 렌더는 조각 하나가 비면 위성이 반만 나온 것처럼 보인다
 5c. **단면도** = `KaSectionDrawingStudio` 전용 탭. 열면 A3/A4 용지와 표고·거리 눈금이 이미 있다. 좌측 **GeoTIFF 추가**만 쓰고 위성·지적·조사 벡터는 목록에 넣지 않는다. CRS는 EPSG:5187/5186 선택(재투영 없음, 거리×표고 m). PDF는 `SectionLayoutService::exportSectionPdf`(300 DPI, forceVector, AlwaysText)
@@ -50,6 +60,7 @@ Korean field archaeology HGIS (C++20/Qt6 + OSGeo4W `qgis-dev`, Architecture B, n
 5e. **레이어 글자** = 벡터 우클릭 「글자 끄기/켜기」(`LayerOps::setLabelsVisible`). 지적 WMS의 지번 글자는 그림에 박혀 있어 레이어를 통째로 꺼야 함.
 5f. **시굴격자 비율** = 조사구역 레이어 우클릭 → 시굴격자 → 시굴(10%) / 표본(2%). 폭 2 m 고정, 길이·간격 배분(`buildForTargetRatio`). 선택한(없으면 마지막) 구역만.
 6. Work CRS default **EPSG:5187 (동부)**; 5186 also OK. **export SHP+PDF+MANIFEST = EPSG:5179**. Checklist error hard-blocks 제출
+7a. **축척 칸은 하나** — 편집 가능한 `scaleCombo` 하나뿐(입력줄이 그 안의 `scaleEdit`). 예전의 별도 QLineEdit + 프리셋 QComboBox 두 개 구성으로 되돌리지 말 것. `MainWindow::scaleDenominatorFromUi` 가 "2000"·"1:2000" 을 모두 읽는다. 프리셋은 1:100 부터.
 7. 초보자 리본 6그룹(조사파일/기록/배경/정합·분석/산출/찾기). 질문형 짧은 라벨. Text menu bar **hidden**. **파일함은 기본 표시**(더보기로 숨길 수 있음). 작업 제어 dock은 더보기. 조판 위 「보기」 리본 없음 — 줌·이동은 마우스, 용지 맞춤은 열 때 자동.
 
 ---
@@ -59,7 +70,7 @@ Korean field archaeology HGIS (C++20/Qt6 + OSGeo4W `qgis-dev`, Architecture B, n
 | Area | Notes |
 | --- | --- |
 | VWorld 위성 | Stored API key → `api.vworld.kr` WMTS **first**; xdworld only if no key |
-| VWorld 지적 | Frozen tiled WMS `crs=EPSG:3857` + KEY/DOMAIN. Do not put 5186/5187/5179 in WMS CRS list |
+| VWorld 지적 | Frozen tiled WMS `crs=EPSG:3857` + KEY. **`DOMAIN` 은 보내지 않는다** — 붙이면 같은 키·같은 Referer 라도 `INCORRECT_KEY`. 인증은 Referer 헤더가 한다(`KaApplication` requestPreprocessor + `http-header:referer`). 같은 이유로 수계도 WFS 에서도 뺐다. Do not put 5186/5187/5179 in WMS CRS list. GDAL_WMS 설정은 `%LOCALAPPDATA%\ka-hgisworld-cadastral.xml` (임시폴더 아님 — 비워지면 레이어가 깨졌다) |
 | Digitize / attrs | `KaCaptureMapTool`, `KaAttributeMapTool`, `ensureDomainLayer`. 그리기: 조사구역/유구면/유구선/단면선/기준점. 레이어 삭제·그린 도형 삭제는 `purgeCommittedFeatures`(GPKG 비움). 도형수정 자석=`snapToMap`, 선 우클릭 점추가/점삭제. 시굴격자 자동배치는 **선택한(없으면 마지막) survey_area만** — leftover union 금지. 자석은 벡터 꼭짓점·선만(지적 WMS 그림에는 안 붙음) |
 | Layout studio | `src/app/KaDrawingStudio.*` — 160 mm scale bar, PNG north = sample, CRS label |
 | Section studio | `src/app/KaSectionDrawingStudio.*` + `src/core/SectionLayoutService.*` — A3/A4 landscape, GeoTIFF body, elevation/distance ticks, vector PDF |

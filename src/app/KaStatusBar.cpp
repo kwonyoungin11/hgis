@@ -44,22 +44,31 @@ KaStatusBar::KaStatusBar(QWidget* parent) : QStatusBar(parent) {
   scaleLabel->setObjectName(QStringLiteral("scaleLabel"));
   addPermanentWidget(scaleLabel);
 
-  m_scaleEdit = new QLineEdit(this);
-  m_scaleEdit->setObjectName(QStringLiteral("scaleEdit"));
-  m_scaleEdit->setPlaceholderText(QStringLiteral("예: 1000"));
-  m_scaleEdit->setFixedWidth(96);
-  m_scaleEdit->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-  m_scaleEdit->setToolTip(QStringLiteral("축척 분모를 입력하고 Enter를 누르세요. 1000이면 1:1000입니다."));
-  addPermanentWidget(m_scaleEdit);
-
+  // 축척 입력칸은 하나다. 예전에는 자유 입력 QLineEdit 과 프리셋 QComboBox 두 개가
+  // 나란히 있어서, 같은 축척인데도 어느 쪽으로 넣었느냐에 따라 화면이 달라 보였다.
+  // 편집 가능한 콤보 하나로 합쳐 입력과 프리셋이 같은 경로를 타게 한다.
   m_scaleCombo = new QComboBox(this);
   m_scaleCombo->setObjectName(QStringLiteral("scaleCombo"));
-  m_scaleCombo->setEditable(false);
-  m_scaleCombo->setToolTip(QStringLiteral("자주 쓰는 축척"));
-  const QList<int> presets = {500, 1000, 2000, 5000, 10000, 25000, 50000, 100000, 250000, 500000};
+  m_scaleCombo->setEditable(true);
+  m_scaleCombo->setInsertPolicy(QComboBox::NoInsert);
+  m_scaleCombo->setMinimumWidth(120);
+  m_scaleCombo->setToolTip(
+      QStringLiteral("축척을 고르거나 직접 입력하고 Enter를 누르세요. 1000 · 1:1000 둘 다 됩니다."));
+  // 발굴·시굴 도면은 1:100~1:500 을 쓴다. 예전 목록은 1:500 이 최소여서 그 아래는
+  // 프리셋으로 갈 수 없었다.
+  const QList<int> presets = {100,  200,   250,   500,    1000,   2000,  5000,
+                              10000, 25000, 50000, 100000, 250000, 500000};
   for (int s : presets)
     m_scaleCombo->addItem(QStringLiteral("1:%1").arg(s), s);
-  m_scaleCombo->setCurrentIndex(5);
+  const int defaultIdx = m_scaleCombo->findData(25000);
+  m_scaleCombo->setCurrentIndex(defaultIdx >= 0 ? defaultIdx : 0);
+  m_scaleEdit = m_scaleCombo->lineEdit();
+  if (m_scaleEdit) {
+    // 스타일시트(#scaleEdit)와 기존 호출부가 그대로 붙도록 이름을 물려준다.
+    m_scaleEdit->setObjectName(QStringLiteral("scaleEdit"));
+    m_scaleEdit->setPlaceholderText(QStringLiteral("예: 1000"));
+    m_scaleEdit->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+  }
   addPermanentWidget(m_scaleCombo);
 
   addPermanentWidget(makeSeparator(this));

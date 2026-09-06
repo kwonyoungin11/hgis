@@ -88,6 +88,8 @@ public:
   bool addVectorFromPath(const QString& path);
   bool addRasterFromPath(const QString& path);
   void showLayerTreeContextMenu(QgsLayerTreeView* treeView, const QPoint& pos);
+  // "2000" 과 "1:2000" 을 모두 분모 2000 으로 읽는다. 0 이면 숫자가 아니다.
+  static double scaleDenominatorFromUi(const QString& raw);
   void editCurrentLayerStyle(QgsMapLayer* layer = nullptr);
   void editCurrentLayerAttributes(QgsMapLayer* layer = nullptr);
 
@@ -100,6 +102,9 @@ private slots:
   void downloadRiverMap();
   void saveProject();
   void saveProjectAs();
+  // 작업공간을 조사 파일에 쓴다. 20초 타이머로 자동 호출하던 것을 없앴으므로,
+  // 이제 「저장」과 닫기 확인에서만 불린다. 테스트도 이 이름으로 직접 부른다.
+  bool persistSurveyWork();
   void openProject();
   void startEditSurveyArea();
   void startEditFeaturePoly();
@@ -271,7 +276,21 @@ private:
   static QString attributeFieldLabelKo(const QString& fieldName);
 #endif
   bool commitSurveyEdits(int* committedCount = nullptr);
-  bool persistSurveyWork();
+  // 저장하지 않은 작업이 있는가. 프로젝트 dirty 플래그 + 커밋 안 된 편집 버퍼.
+  bool surveyHasUnsavedChanges() const;
+  // 저장 직후·열기 직후 호출해 "깨끗한 상태"로 되돌린다.
+  void markSurveySaved();
+  // 새 조사·다른 이름으로 저장이 처음 여는 폴더. 바탕화면이 OneDrive 로 리디렉션된
+  // PC에서 기본값이 그리로 향하지 않도록, 마지막에 쓴 조사 폴더를 먼저 쓴다.
+  QString preferredSurveyDir() const;
+  void rememberSurveyDir(const QString& path);
+  void refreshWindowTitle();
+  // 레이어 점호. 직전과 달라졌으면 무엇이 사라졌는지 세션 로그에 적고 되살린다.
+  void auditLayerHealth();
+  void logLayerCensus(const QString& tag);
+  // 화면에 실제로 무엇이 그려졌는지. 확대했을 때 위성이 비는 현상을 잡기 위한 계측 —
+  // 캔버스가 그리기로 잡고 있는 레이어 목록과 축척을, 목록이 바뀔 때만 기록한다.
+  void logCanvasPaintState();
   void restoreLastSurvey();
 
   // Non-blocking feedback on the canvas. Reserve QMessageBox for questions and
@@ -383,7 +402,13 @@ private:
   bool m_surveySessionReady = false;
   bool m_mapScreenBound = false;
   QTimer* m_displayRefresh = nullptr;
-  QTimer* m_autosaveTimer = nullptr;
+  // 20초 자동 저장은 없앴다. 저장은 사용자가 「저장」을 누를 때만 일어나고,
+  // 저장 안 된 작업은 창 제목 뒤 * 와 닫기 확인창으로 알린다.
+  // 레이어 사라짐 추적. 직전 점호 결과와 다를 때만 로그를 남긴다.
+  QTimer* m_layerWatchTimer = nullptr;
+  QString m_lastLayerCensus;
+  QString m_lastCanvasPaintState;
+  QStringList m_lastLayerKeys;
   QToolBar* m_subToolbar = nullptr;
   QString m_subToolsMode;
   bool m_snapEnabled = true;

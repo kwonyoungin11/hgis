@@ -13,7 +13,7 @@ private slots:
   void lastPath_isNewestRemembered();
   void takeSkipAutoRestore_clearsOneShot();
   void bootStaysOnHome_doesNotAutoOpenLastSurvey();
-  void closeEvent_persistsSurveyWork();
+  void closeEvent_asksBeforeDiscardingUnsavedWork();
   void captureTool_dragsSavedPolygonVertex();
 };
 
@@ -88,25 +88,44 @@ void TestRecent::bootStaysOnHome_doesNotAutoOpenLastSurvey() {
            "자동 복원 기본값은 켜짐(GPKG 전용)");
 }
 
-void TestRecent::closeEvent_persistsSurveyWork() {
+// 20초 자동 저장은 없앴다. 저장은 사용자가 「저장」을 누를 때만 일어난다.
+// 그래서 창을 끌 때 말없이 저장해서도, 말없이 버려서도 안 된다 — 물어야 한다.
+void TestRecent::closeEvent_asksBeforeDiscardingUnsavedWork() {
   QFile f(QStringLiteral("src/app/MainWindow.cpp"));
   QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
   const QString src = QString::fromUtf8(f.readAll());
+
+  QVERIFY2(!src.contains(QLatin1String("m_autosaveTimer")),
+           "20초 자동 저장 타이머는 없어야 한다");
+
   const int close = src.indexOf(QLatin1String("void MainWindow::closeEvent"));
   QVERIFY2(close >= 0, "closeEvent");
-  const QString fn = src.mid(close, 500);
+  const QString fn = src.mid(close, 1200);
+  QVERIFY2(fn.contains(QLatin1String("surveyHasUnsavedChanges")),
+           "닫기 전에 저장 안 된 작업이 있는지 봐야 한다");
+  QVERIFY2(fn.contains(QLatin1String("QMessageBox::Save")) &&
+               fn.contains(QLatin1String("QMessageBox::Discard")) &&
+               fn.contains(QLatin1String("QMessageBox::Cancel")),
+           "저장 / 저장 안 함 / 취소를 물어야 한다");
   QVERIFY2(fn.contains(QLatin1String("persistSurveyWork")),
-           "창을 끄면 조사 편집을 자동 저장해야 한다");
+           "저장을 고르면 실제로 저장해야 한다");
+  QVERIFY2(fn.contains(QLatin1String("event->ignore()")),
+           "취소를 고르면 창이 닫히면 안 된다");
+
   QVERIFY2(src.contains(QLatin1String("bool MainWindow::persistSurveyWork()")),
            "persistSurveyWork");
   const int persist = src.indexOf(QLatin1String("bool MainWindow::persistSurveyWork()"));
   const QString body = src.mid(persist, 900);
   QVERIFY2(body.contains(QLatin1String("commitSurveyEdits")),
-           "자동저장은 편집 버퍼를 GPKG에 써야 한다");
+           "저장은 편집 버퍼를 GPKG에 써야 한다");
   QVERIFY2(src.contains(QLatin1String("lastPath")),
            "최근 목록용 lastPath는 유지한다");
   QVERIFY2(src.contains(QLatin1String("m_surveySessionReady")),
            "열기에 실패한 홈 화면이 조사 파일을 덮어쓰면 안 된다");
+
+  // 바탕화면이 OneDrive 로 리디렉션된 PC에서 새 조사가 그리로 가지 않아야 한다.
+  QVERIFY2(src.contains(QLatin1String("preferredSurveyDir()")),
+           "새 조사·다른 이름으로 저장은 마지막에 쓴 조사 폴더에서 시작해야 한다");
 }
 
 void TestRecent::captureTool_dragsSavedPolygonVertex() {

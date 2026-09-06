@@ -266,9 +266,22 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 MainWindow::~MainWindow() = default;
 
 void MainWindow::closeEvent(QCloseEvent* event) {
-  if (!persistSurveyWork()) {
-    event->ignore();
-    return;
+  // 예전에는 여기서 말없이 저장했다. 이제 저장은 사용자가 시키는 것이므로,
+  // 저장 안 한 작업이 있으면 묻고 답에 따른다. 묻지 않고 버리면 조용히 잃는다.
+  if (surveyHasUnsavedChanges()) {
+    const auto answer = QMessageBox::question(
+        this, QStringLiteral("조사 닫기"),
+        QStringLiteral("저장하지 않은 작업이 있습니다.\n\n%1\n\n저장할까요?")
+            .arg(QFileInfo(m_surveyPath).fileName()),
+        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
+    if (answer == QMessageBox::Cancel) {
+      event->ignore();
+      return;
+    }
+    if (answer == QMessageBox::Save && !persistSurveyWork()) {
+      event->ignore();
+      return;
+    }
   }
   QSettings st = RecentSurveys::userSettings();
   st.setValue(QStringLiteral("MainWindow/geometry"), saveGeometry());
@@ -316,6 +329,12 @@ void MainWindow::finishOpenedProject(const QString& gpkgPath, const QString& sou
           .arg(elapsedMs)
           .arg(sourceLabel)
           .arg(QgsProject::instance()->mapLayers().size()));
+  rememberSurveyDir(gpkgPath);
+  markSurveySaved();
+  // 방금 연 상태를 기준선으로 남긴다. 세션 도중 사라진 레이어는 이 줄과 비교해서 찾는다.
+  logLayerCensus(QStringLiteral("열기직후"));
+  m_lastLayerKeys.clear();
+  auditLayerHealth();
 #else
   Q_UNUSED(gpkgPath); Q_UNUSED(sourceLabel); Q_UNUSED(elapsedMs);
 #endif
@@ -475,6 +494,11 @@ bool MainWindow::openSurveyGpkg(const QString& gpkgPath, OpenSurveyMode mode) {
   KaCrashGuard::logLine(
       QStringLiteral("[open] 조사 열기 %1 ms — %2").arg(t.elapsed()).arg(gpkgPath));
 #if KA_HGIS_HAS_QGIS
+  rememberSurveyDir(gpkgPath);
+  markSurveySaved();
+  logLayerCensus(QStringLiteral("열기직후"));
+  m_lastLayerKeys.clear();
+  auditLayerHealth();
   if (m_workspaceRestoreFailed) {
     m_workspaceRestoreFailed = false;
     QMessageBox::warning(
@@ -1410,6 +1434,7 @@ void MainWindow::buildUi() {
   connect(m_canvas, &QgsMapCanvas::renderComplete, this, [this](QPainter*) {
     if (m_subToolsMode == QLatin1String("align"))
       updateAlignOverlay();
+    logCanvasPaintState();
   });
   connect(QgsProject::instance(), &QgsProject::layersAdded, this, [this](const QList<QgsMapLayer*>&) {
     if (m_isOpeningSurvey) return;
@@ -1568,11 +1593,12 @@ void MainWindow::buildUi() {
   m_scaleEdit = m_status->scaleEdit();
   m_scaleCombo = m_status->scaleCombo();
   connect(m_scaleEdit, &QLineEdit::returnPressed, this, &MainWindow::applyMapScaleFromUi);
+  // 프리셋 선택과 직접 입력이 완전히 같은 경로를 타야 결과가 같다.
   connect(m_scaleCombo, QOverload<int>::of(&QComboBox::activated), this, [this](int idx) {
     if (!m_scaleCombo || !m_scaleEdit) return;
     const int s = m_scaleCombo->itemData(idx).toInt();
     if (s > 0) {
-      m_scaleEdit->setText(QString::number(s));
+      m_scaleEdit->setText(QStringLiteral("1:%1").arg(s));
       applyMapScaleFromUi();
     }
   });
@@ -1742,10 +1768,19 @@ void MainWindow::buildUi() {
   });
   m_viewTabs->setCurrentWidget(m_startPage);
   setCentralWidget(m_viewTabs);
-  m_autosaveTimer = new QTimer(this);
-  m_autosaveTimer->setInterval(20000);
-  connect(m_autosaveTimer, &QTimer::timeout, this, &MainWindow::persistSurveyWork);
-  m_autosaveTimer->start();
+  // 자동 저장 없음. 저장은 사용자가 「저장」(Ctrl+S)을 누를 때만 일어난다.
+  // 저장 안 한 작업은 창 제목의 * 로 보이고, 닫을 때 한 번 물어본다.
+  if (QgsProject* proj = QgsProject::instance()) {
+    connect(proj, &QgsProject::isDirtyChanged, this, [this](bool) { refreshWindowTitle(); });
+  }
+  // 레이어가 세션 도중 사라지는 일을 잡기 위한 감시. 레이어 상태를 세어 직전과 다르면
+  // 무엇이 어떻게 달라졌는지 세션 로그에 남긴다. 사용자가 "사라졌다"고 말한 시각과
+  // 로그를 맞춰 볼 수 있는 유일한 근거다. 파일에 쓰지 않으므로 저장과 무관하다.
+  m_layerWatchTimer = new QTimer(this);
+  m_layerWatchTimer->setObjectName(QStringLiteral("layerWatchTimer"));
+  m_layerWatchTimer->setInterval(30000);
+  connect(m_layerWatchTimer, &QTimer::timeout, this, &MainWindow::auditLayerHealth);
+  m_layerWatchTimer->start();
   // 마지막 조사는 GPKG 테이블+위성만 복원한다. 내장/.qgz 읽기는 부팅에서 하지 않는다.
   QTimer::singleShot(0, this, &MainWindow::restoreLastSurvey);
 #endif
@@ -2284,7 +2319,8 @@ void MainWindow::newSurvey() {
     return;
   }
   m_workCrs = btn5187->isChecked() ? QStringLiteral("EPSG:5187") : QStringLiteral("EPSG:5186");
-  const QString dir = QFileDialog::getExistingDirectory(this, QStringLiteral("저장 폴더"));
+  const QString dir =
+      QFileDialog::getExistingDirectory(this, QStringLiteral("저장 폴더"), preferredSurveyDir());
   if (dir.isEmpty()) return;
 #if KA_HGIS_HAS_QGIS
   // 새 조사는 빈 프로젝트에서 시작한다. removeSurveyDomainLayers만 부르던 예전 코드는
@@ -2337,6 +2373,8 @@ void MainWindow::newSurvey() {
   setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(name));
   m_surveySessionReady = true;
   rememberSurvey(path, name);
+  rememberSurveyDir(path);
+  markSurveySaved();
   showMapWorkspace();
   updateNextActionStatus();
   refreshWorkPanel();
@@ -2384,11 +2422,25 @@ void MainWindow::ensureDefaultBasemaps() {
 #if KA_HGIS_HAS_QGIS
   QgsProject* proj = QgsProject::instance();
   if (!proj) return;
+  // 저장된 조사의 위성·지적 주소에는 그때 쓰던 인증키가 박혀 있다. 키를 새로 받아도
+  // 예전 조사를 열면 만료된 키로 타일을 받아 배경지도가 소리 없이 백지가 됐다.
+  {
+    QStringList swapped;
+    const int n = LayerOps::refreshVworldApiKeyInLayers(proj, VworldSettings::loadApiKey(), &swapped);
+    if (n > 0)
+      KaCrashGuard::logLine(QStringLiteral("[basemap] 저장된 VWorld 인증키를 현재 키로 교체 %1개 — %2")
+                                .arg(n)
+                                .arg(swapped.join(QStringLiteral(", "))));
+  }
   LayerOps::pruneDuplicateSatelliteLayers(proj);
   bool hasSat = false;
   bool hasCad = false;
   for (QgsMapLayer* l : proj->mapLayers()) {
     if (!l) continue;
+    // 이름만 보고 "이미 있다"고 판단하면, 원본이 깨진 배경지도가 이름만 남아 영영
+    // 다시 만들어지지 않는다(지적 설정 파일이 지워진 경우가 그랬다). 살아 있는
+    // 레이어만 있다고 친다.
+    if (!l->isValid()) continue;
     const QString n = l->name();
     if (n.contains(QStringLiteral("위성")))
       hasSat = true;
@@ -4194,39 +4246,44 @@ void MainWindow::onCanvasScaleChanged(double scale) {
 #if KA_HGIS_HAS_QGIS
   if (m_scaleUiGuard || !m_scaleEdit) return;
   m_scaleUiGuard = true;
-  m_scaleEdit->setText(QString::number(scale, 'f', 0));
-  if (m_scaleCombo) {
-    const int s = qRound(scale);
-    int best = -1;
-    int bestDiff = 0;
-    for (int i = 0; i < m_scaleCombo->count(); ++i) {
-      const int v = m_scaleCombo->itemData(i).toInt();
-      const int d = qAbs(v - s);
-      if (best < 0 || d < bestDiff) {
-        best = i;
-        bestDiff = d;
-      }
-    }
-    if (best >= 0 && bestDiff <= qMax(50, s / 20))
-      m_scaleCombo->setCurrentIndex(best);
-  }
+  // 축척 칸은 콤보의 입력줄 하나뿐이다. 여기에 현재 축척을 그대로 보여 준다.
+  // 예전에는 가까운 프리셋으로 setCurrentIndex 까지 했는데, 그러면 1:1873 을
+  // 1:2000 으로 바꿔 적어 화면과 글자가 어긋났다.
+  m_scaleEdit->setText(QStringLiteral("1:%1").arg(scale, 0, 'f', 0));
   m_scaleUiGuard = false;
 #else
   Q_UNUSED(scale);
 #endif
 }
 
+// 축척 칸에 적힌 값을 분모로 읽는다. 콤보 프리셋은 "1:2000", 직접 입력은 "2000" 이라
+// 두 모양을 다 받아야 한다. 예전에는 "1:2000" 이 숫자로 안 읽혀 조용히 무시됐다.
+double MainWindow::scaleDenominatorFromUi(const QString& raw) {
+  QString t = raw.trimmed();
+  t.remove(QLatin1Char(','));
+  t.remove(QLatin1Char(' '));
+  if (t.startsWith(QLatin1String("1:")))
+    t = t.mid(2);
+  else if (t.contains(QLatin1Char(':')))
+    t = t.section(QLatin1Char(':'), -1);
+  bool ok = false;
+  const double v = t.toDouble(&ok);
+  return (ok && v > 0.0) ? v : 0.0;
+}
+
 void MainWindow::applyMapScaleFromUi() {
 #if KA_HGIS_HAS_QGIS
   if (!m_canvas || !m_scaleEdit) return;
-  bool ok = false;
-  double s = m_scaleEdit->text().trimmed().remove(QLatin1Char(',')).toDouble(&ok);
-  if (!ok || s <= 0) {
+  const double s = scaleDenominatorFromUi(m_scaleEdit->text());
+  if (s <= 0.0) {
     statusBar()->showMessage(QStringLiteral("축척 숫자를 입력하세요 (예: 1000 → 1:1000)"), 5000);
     return;
   }
   m_scaleUiGuard = true;
   m_canvas->zoomScale(s, true);
+  // 입력을 "1:2000" 한 가지 모양으로 되돌려 놓는다. 프리셋으로 고르든 직접 치든
+  // 칸에 남는 글자가 같아야 다음 Enter 가 같은 결과를 낸다.
+  m_scaleEdit->setText(QStringLiteral("1:%1").arg(s, 0, 'f', 0));
   LayerOps::refreshCanvasIfIdle(m_canvas);
   m_scaleUiGuard = false;
   statusBar()->showMessage(QStringLiteral("축척 적용 1:%1").arg(s, 0, 'f', 0), 4000);
@@ -7150,13 +7207,13 @@ bool MainWindow::persistSurveyWork() {
   QScopedValueRollback<bool> saving(m_isOpeningSurvey, true);
   int n = 0;
   if (!commitSurveyEdits(&n)) return false;
-  // 작업공간을 못 읽고 열린 상태다. 지금 화면에는 외부 SHP가 빠져 있으므로 자동 저장이
-  // 이것을 덮어쓰면 그 레이어들이 파일에서 영구히 사라진다(실제로 23개 → 8개가 되었다).
+  // 작업공간을 못 읽고 열린 상태다. 지금 화면에는 외부 SHP가 빠져 있으므로 여기서
+  // 덮어쓰면 그 레이어들이 파일에서 영구히 사라진다(실제로 23개 → 8개가 되었다).
   // 복원된 데이터 편집만 커밋하고 원래 작업공간은 유지한다.
   if (m_workspaceRestoreSuppressesAutosave) {
     if (n > 0 && statusBar())
       statusBar()->showMessage(
-          QStringLiteral("조사 데이터만 자동 저장했습니다. 작업공간(.qgz)은 복원에 실패해 "
+          QStringLiteral("조사 데이터만 저장했습니다. 작업공간(.qgz)은 복원에 실패해 "
                          "덮어쓰지 않습니다."),
           4000);
     return true;
@@ -7167,10 +7224,12 @@ bool MainWindow::persistSurveyWork() {
                                                QStringLiteral(".qgz"));
     // 주 저장소는 조사 파일 안이다. SQLite 트랜잭션이라 도중에 죽어도 반쯤 쓰인 상태가
     // 남지 않는다. 레이어를 .gpkg 안으로 들여오는 것은 사용자가 「저장」을 누를 때만 한다.
-    LayerOps::pruneDuplicateSatelliteLayers(QgsProject::instance());
+    //
+    // 여기서 pruneDuplicateSatelliteLayers를 부르지 않는다. 저장이 레이어를 지우면
+    // 사용자가 손대지 않은 레이어가 사라질 수 있다. 정리는 배경지도를 올리는 곳에서만.
     QString serr;
     if (!SurveyStorage::writeEmbedded(QgsProject::instance(), m_surveyPath, &serr)) {
-      KaCrashGuard::logLine(QStringLiteral("[autosave] 내장 작업공간 저장 실패 — %1").arg(serr));
+      KaCrashGuard::logLine(QStringLiteral("[save] 내장 작업공간 저장 실패 — %1").arg(serr));
       notify(Notice::Warning, QStringLiteral("저장 실패"),
              QStringLiteral("조사 파일에 작업공간을 저장하지 못했습니다."), serr);
       return false;
@@ -7182,14 +7241,175 @@ bool MainWindow::persistSurveyWork() {
     // 원자적으로 바꿔 넣는다.
     QString werr;
     if (!kaWriteQgisProjectAtomic(QgsProject::instance(), qgzPath, &werr))
-      KaCrashGuard::logLine(QStringLiteral("[autosave] 동반 .qgz 저장 실패 — %1").arg(werr));
+      KaCrashGuard::logLine(QStringLiteral("[save] 동반 .qgz 저장 실패 — %1").arg(werr));
     else
       kaClearQgisProjectUnsafeMark(qgzPath);
   }
+  markSurveySaved();
   if (n > 0 && statusBar())
-    statusBar()->showMessage(QStringLiteral("자동 저장했습니다."), 2500);
+    statusBar()->showMessage(QStringLiteral("저장했습니다."), 2500);
+  // 방금 같은 .gpkg에 썼다. 쓰는 동안 공급자 핸들이 끊긴 레이어가 있으면 화면 목록에서
+  // 조용히 빠진 채로 남는다(= 재시작 전까지 사라짐). 저장 직후 한 번 점호해 되살린다.
+  QTimer::singleShot(0, this, [this]() { auditLayerHealth(); });
 #endif
   return true;
+}
+
+// 레이어 점호. 상태가 직전과 다르면 무엇이 어떻게 달라졌는지 로그에 남기고,
+// 원본이 잠깐 끊겨 무효가 된 것은 다시 연다.
+void MainWindow::auditLayerHealth() {
+#if KA_HGIS_HAS_QGIS
+  QgsProject* proj = QgsProject::instance();
+  if (!proj || m_isOpeningSurvey) return;
+
+  QStringList revived;
+  QStringList broken;
+  const int back = LayerOps::reviveInvalidLayers(proj, &revived, &broken);
+  if (back > 0)
+    KaCrashGuard::logLine(QStringLiteral("[layers] 끊겼던 레이어 %1개 되살림 — %2")
+                              .arg(back)
+                              .arg(revived.join(QStringLiteral(", "))));
+  if (!broken.isEmpty())
+    KaCrashGuard::logLine(
+        QStringLiteral("[layers] 원본을 못 여는 레이어 %1개 — %2")
+            .arg(broken.size())
+            .arg(broken.join(QStringLiteral(", "))));
+
+  // 사라짐은 세 가지 모습으로 온다: 등록에서 빠짐 / 범례 노드가 빠짐 / 무효가 됨.
+  // 셋 다 한 줄에 담아 두고, 직전 줄과 다를 때만 기록한다.
+  QStringList keys;
+  QgsLayerTree* root = proj->layerTreeRoot();
+  for (QgsMapLayer* l : proj->mapLayers()) {
+    if (!l) continue;
+    const bool node = root && root->findLayer(l->id());
+    keys << QStringLiteral("%1|%2|%3|%4").arg(l->id(), l->name()).arg(l->isValid()).arg(node);
+  }
+  keys.sort();
+  if (!m_lastLayerKeys.isEmpty() && keys != m_lastLayerKeys) {
+    QStringList gone;
+    for (const QString& k : m_lastLayerKeys)
+      if (!keys.contains(k)) gone << k.section(QLatin1Char('|'), 1);
+    QStringList fresh;
+    for (const QString& k : keys)
+      if (!m_lastLayerKeys.contains(k)) fresh << k.section(QLatin1Char('|'), 1);
+    KaCrashGuard::logLine(QStringLiteral("[layers] 변화 %1→%2 · 빠짐[%3] · 새로[%4]")
+                              .arg(m_lastLayerKeys.size())
+                              .arg(keys.size())
+                              .arg(gone.join(QStringLiteral(", ")),
+                                   fresh.join(QStringLiteral(", "))));
+    logLayerCensus(QStringLiteral("변화후"));
+  }
+  m_lastLayerKeys = keys;
+#endif
+}
+
+bool MainWindow::surveyHasUnsavedChanges() const {
+#if KA_HGIS_HAS_QGIS
+  if (m_isOpeningSurvey || !m_surveySessionReady || m_surveyPath.isEmpty())
+    return false;
+  QgsProject* proj = QgsProject::instance();
+  if (!proj) return false;
+  if (proj->isDirty()) return true;
+  // 커밋 안 된 그리기 버퍼도 저장 안 된 작업이다.
+  for (QgsMapLayer* l : proj->mapLayers()) {
+    auto* v = qobject_cast<QgsVectorLayer*>(l);
+    if (v && v->isEditable() && v->isModified()) return true;
+  }
+#endif
+  return false;
+}
+
+void MainWindow::markSurveySaved() {
+#if KA_HGIS_HAS_QGIS
+  if (QgsProject* proj = QgsProject::instance())
+    proj->setDirty(false);
+#endif
+  refreshWindowTitle();
+}
+
+// 제목 뒤 " *" 하나로 "아직 저장 안 됨"을 보여 준다. 제목을 세우는 곳이 아홉 군데라
+// 별도 필드를 두지 않고 현재 제목에서 표식만 떼었다 붙인다.
+void MainWindow::refreshWindowTitle() {
+  QString base = windowTitle();
+  if (base.endsWith(QLatin1String(" *"))) base.chop(2);
+  if (base.isEmpty()) return;
+  const QString wanted = base + (surveyHasUnsavedChanges() ? QStringLiteral(" *") : QString());
+  if (windowTitle() != wanted)
+    QMainWindow::setWindowTitle(wanted);
+}
+
+QString MainWindow::preferredSurveyDir() const {
+  // 1) 마지막으로 조사를 저장한 폴더
+  QSettings st = RecentSurveys::userSettings();
+  const QString remembered = st.value(QStringLiteral("Survey/LastDir")).toString();
+  if (!remembered.isEmpty() && QFileInfo(remembered).isDir())
+    return remembered;
+  // 2) 지금 열려 있는 조사의 폴더
+  if (!m_surveyPath.isEmpty()) {
+    const QString here = QFileInfo(m_surveyPath).absolutePath();
+    if (QFileInfo(here).isDir()) return here;
+  }
+  // 3) 최근 조사 목록의 맨 위
+  const QString last = RecentSurveys::lastPath(st);
+  if (!last.isEmpty()) {
+    const QString dir = QFileInfo(last).absolutePath();
+    if (QFileInfo(dir).isDir()) return dir;
+  }
+  // 4) 그래도 없으면 바탕화면. 이 PC의 바탕화면은 OneDrive 폴더 안이라 마지막 수단이다.
+  return resolvedDesktopPath();
+}
+
+void MainWindow::rememberSurveyDir(const QString& path) {
+  if (path.isEmpty()) return;
+  const QString dir = QFileInfo(path).absolutePath();
+  if (dir.isEmpty() || !QFileInfo(dir).isDir()) return;
+  QSettings st = RecentSurveys::userSettings();
+  st.setValue(QStringLiteral("Survey/LastDir"), dir);
+}
+
+// 캔버스가 "지금 그리는 중"이라고 잡고 있는 레이어와 축척을 남긴다. 헤드리스 렌더로는
+// 재현이 안 되는(레이어·좌표계·확대한계 모두 정상인) 화면 전용 현상을 추적하기 위한 것.
+// 목록이 직전과 같으면 아무것도 쓰지 않는다 — 팬·줌마다 로그가 폭주하지 않도록.
+void MainWindow::logCanvasPaintState() {
+#if KA_HGIS_HAS_QGIS
+  if (!m_canvas || m_isOpeningSurvey) return;
+  QgsProject* proj = QgsProject::instance();
+  if (!proj) return;
+
+  QStringList onCanvas;
+  for (QgsMapLayer* l : m_canvas->layers())
+    if (l) onCanvas << l->name();
+
+  // 범례에서 켜져 있는데 캔버스 목록에는 없는 레이어 = 화면에서 사라진 것.
+  QStringList missing;
+  if (QgsLayerTree* root = proj->layerTreeRoot()) {
+    for (QgsMapLayer* l : proj->mapLayers()) {
+      if (!l || !l->isValid()) continue;
+      QgsLayerTreeLayer* node = root->findLayer(l->id());
+      if (node && node->itemVisibilityChecked() && !m_canvas->layers().contains(l))
+        missing << l->name();
+    }
+  }
+
+  const QString state = QStringLiteral("그림[%1] 켰는데없음[%2]")
+                            .arg(onCanvas.join(QStringLiteral(", ")),
+                                 missing.join(QStringLiteral(", ")));
+  if (state == m_lastCanvasPaintState) return;
+  m_lastCanvasPaintState = state;
+  KaCrashGuard::logLine(QStringLiteral("[canvas] 1:%1 · %2")
+                            .arg(m_canvas->scale(), 0, 'f', 0)
+                            .arg(state));
+#endif
+}
+
+void MainWindow::logLayerCensus(const QString& tag) {
+#if KA_HGIS_HAS_QGIS
+  const QString census = LayerOps::layerCensus(QgsProject::instance());
+  m_lastLayerCensus = census;
+  KaCrashGuard::logLine(QStringLiteral("[layers/%1] %2").arg(tag, census));
+#else
+  Q_UNUSED(tag);
+#endif
 }
 
 void MainWindow::restoreLastSurvey() {
@@ -7279,6 +7499,8 @@ void MainWindow::saveProject() {
     notify(Notice::Info, QStringLiteral("저장"), lines.join(QLatin1Char('\n')));
   }
   rememberSurvey(m_surveyPath, sfi.completeBaseName());
+  rememberSurveyDir(m_surveyPath);
+  markSurveySaved();
   statusBar()->showMessage(QStringLiteral("저장했습니다: %1").arg(sfi.fileName()), 4000);
   notify(Notice::Success, QStringLiteral("저장"),
          QStringLiteral("조사 데이터와 레이어 구성을 저장했습니다:\n%1").arg(QDir::toNativeSeparators(m_surveyPath)));
@@ -7297,7 +7519,7 @@ void MainWindow::saveProjectAs() {
     QFileInfo fi(m_surveyPath);
     defaultPath = fi.dir().filePath(fi.completeBaseName() + QStringLiteral("_복사본.gpkg"));
   } else {
-    defaultPath = QDir(resolvedDesktopPath()).filePath(QStringLiteral("새조사.gpkg"));
+    defaultPath = QDir(preferredSurveyDir()).filePath(QStringLiteral("새조사.gpkg"));
   }
 
   const QString selected = QFileDialog::getSaveFileName(
@@ -7401,6 +7623,8 @@ void MainWindow::saveProjectAs() {
   // 3. 윈도우 타이틀 및 최근 조사 갱신
   setWindowTitle(QStringLiteral("필드고고학GIS — %1").arg(newFi.completeBaseName()));
   rememberSurvey(targetGpkg, newFi.completeBaseName());
+  rememberSurveyDir(targetGpkg);
+  markSurveySaved();
 
   const QString msg = QStringLiteral("조사 데이터와 레이어 구성을 새 파일로 저장했습니다:\n%1").arg(QDir::toNativeSeparators(targetGpkg));
   statusBar()->showMessage(QStringLiteral("다른 이름으로 저장했습니다: %1").arg(newFi.fileName()), 5000);

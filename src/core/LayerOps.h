@@ -198,6 +198,21 @@ public:
   static void zoomToKorea(QgsMapCanvas* canvas, const QString& epsgAuthId, bool refresh = true);
   static void syncMapCanvas(QgsProject* project, QgsMapCanvas* canvas, bool zoomKorea = true);
   static QList<QgsMapLayer*> visibleLayersPaintOrder(QgsProject* project);
+  // 진단: 레이어 하나하나의 상태를 한 줄로 적는다. 세션 로그에서 "언제 사라졌나"를
+  // 되짚을 수 있는 유일한 근거다. id|이름|유효|범례노드|체크|피처수 순.
+  static QString layerCensus(QgsProject* project);
+  // 데이터 원본이 잠깐 끊겨 무효가 된 레이어를 같은 원본으로 다시 연다. GPKG에 쓰는
+  // 동안(자동 저장·스타일 기록)이나 OneDrive가 파일을 바꿔치기할 때 생긴다.
+  // 되살린 레이어 이름은 revived에, 끝내 못 살린 것은 stillBroken에 담는다.
+  static int reviveInvalidLayers(QgsProject* project, QStringList* revived = nullptr,
+                                 QStringList* stillBroken = nullptr);
+  // 저장된 작업공간의 VWorld 주소에는 그때 쓰던 인증키가 통째로 박혀 있다. 키를 새로
+  // 발급받아도 예전 조사를 열면 만료된 키로 타일을 받아 배경지도가 백지가 된다.
+  // 여는 순간 현재 키로 갈아 끼운다. 바꾼 레이어 수를 돌려준다.
+  static int refreshVworldApiKeyInLayers(QgsProject* project, const QString& currentKey,
+                                         QStringList* changed = nullptr);
+  // 위 함수가 쓰는 순수 문자열 치환. 테스트에서 직접 부른다.
+  static QString withVworldApiKey(const QString& source, const QString& currentKey);
   static void ensureSatelliteAtBottom(QgsProject* project);
   static void pruneDuplicateSatelliteLayers(QgsProject* project);
   static bool zoomToLayerMax(QgsMapCanvas* canvas, QgsMapLayer* layer);

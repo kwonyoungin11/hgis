@@ -1,4 +1,6 @@
 #include <QtTest>
+#include <QComboBox>
+#include <QLineEdit>
 #include <QImage>
 #include <QFileDialog>
 #include <QSettings>
@@ -78,10 +80,19 @@ private:
     if (!file.open(QIODevice::ReadOnly)) return {};
     return file.readAll();
   }
-  static QTimer* autosaveTimer(MainWindow& window) {
+  // 20초 자동 저장은 없앴다. 저장은 「저장」을 누를 때만 일어난다. 예전에는 이 타이머를
+  // 찾아 timeout 을 쏘아 자동 저장을 흉내 냈지만, 이제 저장 경로를 직접 부른다.
+  static bool saveNow(MainWindow& window) {
+    bool ok = false;
+    return QMetaObject::invokeMethod(&window, "persistSurveyWork", Qt::DirectConnection,
+                                     Q_RETURN_ARG(bool, ok)) && ok;
+  }
+  static bool hasNoAutosaveTimer(MainWindow& window) {
     for (auto* timer : window.findChildren<QTimer*>(QString(), Qt::FindDirectChildrenOnly))
-      if (timer->interval() == 20000) return timer;
-    return nullptr;
+      if (timer->isActive() && timer->objectName() != QLatin1String("layerWatchTimer") &&
+          timer->interval() > 0 && timer->interval() <= 60000)
+        return false;
+    return true;
   }
 private slots:
   void cleanup() { QgsProject::instance()->clear(); }
@@ -132,6 +143,35 @@ private slots:
              "Registry-only survey must be restored to the legend");
     QVERIFY(window.findChild<QgsMapCanvas*>()->layers().contains(layer));
   }
+  // 축척 칸은 하나뿐이어야 한다. 예전에는 자유 입력 QLineEdit 과 프리셋 QComboBox 가
+  // 따로 있어서 같은 축척인데도 어느 쪽으로 넣었느냐에 따라 화면이 달랐다.
+  void scaleControl_isSingleWidgetAcceptingBothForms() {
+    MainWindow window;
+    disableRendering(window);
+    auto* combo = window.findChild<QComboBox*>(QStringLiteral("scaleCombo"));
+    QVERIFY2(combo, "축척 콤보가 없다");
+    QVERIFY2(combo->isEditable(), "축척 콤보는 직접 입력이 돼야 한다");
+    QVERIFY2(combo->lineEdit(), "콤보에 입력줄이 있어야 한다");
+
+    // 입력줄은 콤보의 것 하나뿐 — 따로 떠 있는 축척 칸이 있으면 안 된다.
+    int standalone = 0;
+    for (auto* e : window.findChildren<QLineEdit*>(QStringLiteral("scaleEdit")))
+      if (e != combo->lineEdit()) ++standalone;
+    QCOMPARE(standalone, 0);
+
+    // 발굴 도면 축척이 프리셋에 있어야 한다.
+    QVERIFY2(combo->findData(200) >= 0, "1:200 프리셋이 없다");
+    QVERIFY2(combo->findData(500) >= 0, "1:500 프리셋이 없다");
+
+    // "2000" 과 "1:2000" 이 같은 값으로 읽혀야 한 칸으로 합친 의미가 있다.
+    QCOMPARE(MainWindow::scaleDenominatorFromUi(QStringLiteral("2000")), 2000.0);
+    QCOMPARE(MainWindow::scaleDenominatorFromUi(QStringLiteral("1:2000")), 2000.0);
+    QCOMPARE(MainWindow::scaleDenominatorFromUi(QStringLiteral(" 1 : 2,000 ")), 2000.0);
+    QCOMPARE(MainWindow::scaleDenominatorFromUi(QStringLiteral("1:200")), 200.0);
+    QCOMPARE(MainWindow::scaleDenominatorFromUi(QStringLiteral("메롱")), 0.0);
+    QCOMPARE(MainWindow::scaleDenominatorFromUi(QString()), 0.0);
+  }
+
   void open_blocksNestedOpenAndAutosave() {
     const QString first = makeSurvey(QStringLiteral("이전조사"));
     const QString second = makeSurvey(QStringLiteral("다음조사"));
@@ -143,20 +183,20 @@ private slots:
     QVERIFY(!before.isEmpty());
     bool invoked = false;
     bool nestedOpened = true;
-    auto* autosave = autosaveTimer(window);
-    QVERIFY(autosave);
-    bool autosaveInvoked = false;
+    // 주기적으로 파일에 쓰는 타이머가 남아 있으면 안 된다.
+    QVERIFY2(hasNoAutosaveTimer(window), "20초 자동 저장 타이머가 아직 살아 있다");
+    bool saveDuringRead = true;
     const auto connection = connect(QgsProject::instance(), &QgsProject::readProject,
         &window, [&](const QDomDocument&) {
           if (invoked) return;
           invoked = true;
-          autosaveInvoked = QMetaObject::invokeMethod(autosave, "timeout", Qt::DirectConnection);
+          saveDuringRead = saveNow(window);
           nestedOpened = window.openSurveyGpkg(first);
         });
     const bool opened = window.openSurveyGpkg(second);
     disconnect(connection);
     QVERIFY(invoked);
-    QVERIFY(autosaveInvoked);
+    QVERIFY2(!saveDuringRead, "프로젝트를 읽는 중에는 저장이 끼어들면 안 된다");
     QVERIFY(opened);
     QVERIFY2(!nestedOpened, "A nested open must not replace a project being read");
     QCOMPARE(contents(first), before);
@@ -231,8 +271,6 @@ private slots:
     disableRendering(window);
     QVERIFY(window.openSurveyGpkg(path));
     const QStringList layerIds = QgsProject::instance()->mapLayers().keys();
-    auto* autosave = autosaveTimer(window);
-    QVERIFY(autosave);
     QgsProject::instance()->setTitle(QStringLiteral("열기 실패 후 유지한 작업"));
     const QString invalid = m_files.filePath(QStringLiteral("잘못된.gpkg"));
     QFile file(invalid);
@@ -250,7 +288,7 @@ private slots:
     QVERIFY2(!opened, "Invalid survey must not be reported as opened");
     QCOMPARE(QgsProject::instance()->mapLayers().keys(), layerIds);
     QCOMPARE(QgsProject::instance()->title(), QStringLiteral("열기 실패 후 유지한 작업"));
-    QVERIFY(QMetaObject::invokeMethod(autosave, "timeout", Qt::DirectConnection));
+    QVERIFY(saveNow(window));
     QgsProject saved;
     QVERIFY(saved.read(SurveyStorage::projectUri(path),
                         Qgis::ProjectReadFlag::DontResolveLayers | Qgis::ProjectReadFlag::DontLoadLayouts));

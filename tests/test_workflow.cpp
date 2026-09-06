@@ -210,6 +210,8 @@ private slots:
   void emptyEmbeddedWorkspace_reopenStillShowsCommittedSurveyArea();
   void emptyEmbeddedWorkspace_reopenStillShowsUserPolygonLayer();
   void invalidWorkspaceLayer_isReplacedFromGpkgTable();
+  void renamedSurvey_repointsImportedLayersInsteadOfDuplicating();
+  void savedVworldUrl_swapsExpiredKeyForCurrentOne();
   void savedGpkgWorkspace_restoresLegendMembership_data();
   void savedGpkgWorkspace_restoresLegendMembership();
   void savedGpkgWorkspace_sameKeyKeepsDistinctTables_data();
@@ -4343,6 +4345,129 @@ void TestWorkflow::invalidWorkspaceLayer_isReplacedFromGpkgTable() {
   auto* restored = LayerOps::findByLayerKey(&back, QStringLiteral("survey_area"));
   QVERIFY2(restored && restored->isValid(), "깨진 작업공간 레이어는 GPKG 테이블로 바꿔야 한다");
   QCOMPARE(int(restored->featureCount()), 1);
+}
+
+// 조사 파일 이름을 바꾸거나 다른 폴더로 복사하면, 내장 작업공간이 적어 둔 경로가
+// 어긋나 저장된 벡터가 전부 invalid 로 열린다. 예전에는 layer_key 가 테이블 이름과
+// 똑같은 도메인 레이어만 자리를 물려받아서, 들여온 SHP(layer_key="user:이름")는
+// 죽은 채 범례에 남고 그 옆에 같은 이름의 새 레이어가 하나 더 생겼다. 실제 현장
+// 파일에서 15장이 25장(그중 11장 invalid)이 됐다.
+void TestWorkflow::renamedSurvey_repointsImportedLayersInsteadOfDuplicating() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  QString error;
+  const QString gpkg =
+      SurveyProjectFactory::createNewSurvey(dir.path(), QStringLiteral("이름바꾼조사"), &error);
+  QVERIFY2(!gpkg.isEmpty(), qPrintable(error));
+
+  // 들여온 SHP 한 장을 흉내 낸다: .gpkg 안의 테이블 + "user:" 접두 layer_key.
+  const QString table = QStringLiteral("문화유적분포지도");
+  {
+    QgsVectorLayer mem(QStringLiteral("Polygon?crs=EPSG:5187&field=name:string"), table,
+                       QStringLiteral("memory"));
+    QVERIFY(mem.isValid());
+    QVERIFY(mem.startEditing());
+    QgsFeature f(mem.fields());
+    f.setGeometry(QgsGeometry::fromRect(QgsRectangle(205000, 455000, 205080, 455080)));
+    QVERIFY(mem.addFeature(f));
+    QVERIFY(mem.commitChanges());
+    QgsVectorFileWriter::SaveVectorOptions opt;
+    opt.driverName = QStringLiteral("GPKG");
+    opt.layerName = table;
+    opt.actionOnExistingFile = QgsVectorFileWriter::CreateOrOverwriteLayer;
+    QgsProject scratch;
+    QString werr;
+    QCOMPARE(QgsVectorFileWriter::writeAsVectorFormatV3(&mem, gpkg, scratch.transformContext(),
+                                                        opt, &werr),
+             QgsVectorFileWriter::NoError);
+  }
+
+  // 파일 이름을 바꾼다 — 사용자가 "안동시.gpkg"를 "안동시_복사본.gpkg"로 복사한 상황.
+  const QString renamed = dir.filePath(QStringLiteral("이름바꾼조사_복사본.gpkg"));
+  QVERIFY(QFile::copy(gpkg, renamed));
+
+  // 저장된 작업공간이 적어 둔 옛 경로. 이름이 바뀐 뒤 열면 정확히 이 모습이 된다.
+  const QString oldPath = dir.filePath(QStringLiteral("이름바꾸기전.gpkg"));
+  QVERIFY(!QFileInfo::exists(oldPath));
+  QgsProject project;
+  auto* saved = new QgsVectorLayer(QStringLiteral("%1|layername=%2").arg(oldPath, table),
+                                   QStringLiteral("문화유적분포지도"), QStringLiteral("ogr"));
+  QVERIFY(!saved->isValid());
+  LayerOps::markSurveyLayer(saved, QStringLiteral("user:%1").arg(table));
+  project.addMapLayer(saved);
+  const QString savedId = saved->id();
+
+  QVERIFY(LayerOps::addNonEmptySavedGpkgLayers(&project, renamed) >= 1);
+
+  // 같은 레이어 객체가 새 파일을 가리켜야 한다. 이름·스타일·범례 자리가 그대로 남는다.
+  auto* repointed = qobject_cast<QgsVectorLayer*>(project.mapLayer(savedId));
+  QVERIFY2(repointed, "이름이 바뀐 조사 파일에서도 저장된 레이어 객체가 살아 있어야 한다");
+  QVERIFY2(repointed->isValid(), "옛 경로가 깨진 레이어는 새 경로로 다시 물려야 한다");
+  QCOMPARE(repointed->featureCount(), 1LL);
+  QVERIFY(project.layerTreeRoot()->findLayer(savedId));
+
+  // 같은 이름의 죽은 짝이 생기면 안 된다.
+  int sameName = 0;
+  for (QgsMapLayer* l : project.mapLayers()) {
+    QVERIFY(l);
+    if (l->name() == QStringLiteral("문화유적분포지도")) ++sameName;
+    QVERIFY2(l->isValid(),
+             qPrintable(QStringLiteral("invalid 레이어가 남았다: %1").arg(l->name())));
+  }
+  QCOMPARE(sameName, 1);
+
+  // 두 번째로 열어도 늘어나지 않는다.
+  const int before = project.mapLayers().size();
+  LayerOps::addNonEmptySavedGpkgLayers(&project, renamed);
+  QCOMPARE(project.mapLayers().size(), before);
+}
+
+// 저장된 조사의 위성·지적 주소에는 그때 쓰던 인증키가 통째로 박혀 있다. 키가 만료돼
+// 새 키를 받아도 예전 조사를 열면 만료된 키로 타일을 받아 배경지도가 백지가 된다.
+// VWorld 는 만료된 키에도 HTTP 200 에 XML 오류를 돌려주므로 오류조차 안 보인다.
+void TestWorkflow::savedVworldUrl_swapsExpiredKeyForCurrentOne() {
+  // 실제 키는 테스트에 넣지 않는다. 모양만 같은 가짜 GUID 두 개면 충분하다.
+  const QString expired = QStringLiteral("00000000-1111-2222-3333-444455556666");
+  const QString fresh = QStringLiteral("11112222-3333-4444-5555-666677778888");
+
+  const QString wmts =
+      QStringLiteral("type=xyz&url=https://api.vworld.kr/req/wmts/1.0.0/%1/Satellite/"
+                     "%7Bz%7D/%7By%7D/%7Bx%7D.jpeg&zmax=19&zmin=6&crs=EPSG:3857")
+          .arg(expired);
+  const QString swappedWmts = LayerOps::withVworldApiKey(wmts, fresh);
+  QVERIFY(swappedWmts.contains(fresh));
+  QVERIFY(!swappedWmts.contains(expired));
+  // 주소의 나머지는 그대로여야 한다 — zmax/crs 를 건드리면 타일이 안 나온다.
+  QVERIFY(swappedWmts.contains(QLatin1String("zmax=19")));
+  QVERIFY(swappedWmts.contains(QLatin1String("crs=EPSG:3857")));
+
+  // WMS 는 url= 안에서 퍼센트 인코딩된 KEY%3D 형태로도 나타난다.
+  const QString wms =
+      QStringLiteral("crs=EPSG:3857&layers=lp_pa_cbnd_bonbun"
+                     "&url=https%3A%2F%2Fapi.vworld.kr%2Freq%2Fwms%3FKEY%3D%1%26DOMAIN%3Dlocalhost")
+          .arg(expired);
+  const QString swappedWms = LayerOps::withVworldApiKey(wms, fresh);
+  QVERIFY(swappedWms.contains(fresh));
+  QVERIFY(!swappedWms.contains(expired));
+  QVERIFY(swappedWms.contains(QLatin1String("%26DOMAIN%3Dlocalhost")));
+
+  // VWorld 가 아닌 주소와 빈 키는 건드리지 않는다.
+  const QString google = QStringLiteral(
+      "type=xyz&url=https://mt1.google.com/vt/lyrs%3Ds%26x%3D%7Bx%7D&zmax=20&crs=EPSG:3857");
+  QCOMPARE(LayerOps::withVworldApiKey(google, fresh), google);
+  QCOMPARE(LayerOps::withVworldApiKey(wmts, QString()), wmts);
+
+  // 프로젝트에 올라간 레이어도 실제로 갈아 끼워야 한다.
+  QgsProject project;
+  auto* sat = new QgsRasterLayer(wmts, QStringLiteral("위성"), QStringLiteral("wms"));
+  project.addMapLayer(sat);
+  QStringList changed;
+  QCOMPARE(LayerOps::refreshVworldApiKeyInLayers(&project, fresh, &changed), 1);
+  QCOMPARE(changed, QStringList{QStringLiteral("위성")});
+  QVERIFY(sat->source().contains(fresh));
+  QVERIFY(!sat->source().contains(expired));
+  // 두 번 불러도 더 바꿀 것이 없다.
+  QCOMPARE(LayerOps::refreshVworldApiKeyInLayers(&project, fresh), 0);
 }
 
 void TestWorkflow::savedGpkgWorkspace_restoresLegendMembership_data() {

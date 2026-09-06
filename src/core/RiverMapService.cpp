@@ -98,7 +98,10 @@ QString fetchRiverGeojson(const QgsRectangle& extent4326, const QString& apiKey,
         QStringLiteral(
             "%1?SERVICE=WFS&REQUEST=GetFeature&VERSION=2.0.0&TYPENAME=%2"
             "&OUTPUT=application/json&SRSNAME=EPSG:4326&MAXFEATURES=%3&STARTINDEX=%4"
-            "&BBOX=%5,%6,%7,%8,urn:ogc:def:crs:EPSG::4326&KEY=%9&DOMAIN=localhost")
+            // DOMAIN 은 보내지 않는다 — VWorld 는 DOMAIN=localhost 가 붙으면 같은 키·같은
+            // Referer 라도 INCORRECT_KEY 로 거절한다(2026-09-06 실측: 붙이면 407바이트
+            // 오류, 빼면 2.4 MB 피처). 인증은 아래 Referer 헤더가 한다.
+            "&BBOX=%5,%6,%7,%8,urn:ogc:def:crs:EPSG::4326&KEY=%9")
             .arg(QLatin1String(kWfsUrl), QLatin1String(kTypeName))
             .arg(kPageSize)
             .arg(page * kPageSize)

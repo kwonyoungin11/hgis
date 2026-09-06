@@ -20,6 +20,7 @@
 #include <QColor>
 #include <QFont>
 #include <QDir>
+#include <QSet>
 #include <QTemporaryFile>
 
 #include <qgis.h>
@@ -69,6 +70,7 @@
 #include <ogr_api.h>
 #include <qgsnetworkaccessmanager.h>
 #include <qgslayertreegroup.h>
+#include <qgsdataprovider.h>
 #include <qgsprojectviewsettings.h>
 #include <qgspallabeling.h>
 #include <qgsvectorlayerlabeling.h>
@@ -1349,7 +1351,7 @@ static void tuneBasemapLayer(QgsRasterLayer* rl, bool crispText = false) {
   const QString src = rl->source();
   if (src.contains(QLatin1String("crs=EPSG:4326"), Qt::CaseInsensitive)) {
     rl->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:4326")));
-  } else if (uriLooksLikeXyz(src) || src.contains(QLatin1String("ka-hgis-vworld-cadastral"), Qt::CaseInsensitive) ||
+  } else if (uriLooksLikeXyz(src) || src.contains(QLatin1String("vworld-cadastral"), Qt::CaseInsensitive) ||
              src.contains(QLatin1String("crs=EPSG:3857"), Qt::CaseInsensitive) ||
              src.contains(QLatin1String("crs=EPSG:900913"), Qt::CaseInsensitive)) {
     rl->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:3857")));
@@ -1952,12 +1954,25 @@ QgsVectorLayer* kaFindExistingSavedLayer(QgsProject* project, const QString& gpk
     if (kaSourcePointsAtGpkgTable(vl, gpkgPath, table))
       return vl;
   }
-  // A moved survey can retain a broken old path. Only its same-table invalid
-  // placeholder may be replaced; a shared domain key does not identify a table.
+  // 조사 파일을 옮기거나 이름을 바꾸면 내장 작업공간이 적어 둔 상대경로(./옛이름.gpkg)가
+  // 깨져 저장된 벡터가 전부 invalid 로 열린다.
+  //
+  // 예전에는 여기서 ka_hgis/layer_key 가 테이블 이름과 똑같을 때만 그 자리를 물려받게
+  // 했다. 도메인 레이어(layer_key="survey_area")만 조건에 맞고, 들여온 SHP는
+  // layer_key 가 "user:문화유적분포지도" 라서 하나도 물려받지 못했다. 그 결과 죽은
+  // 레이어가 범례에 그대로 남고 옆에 같은 이름의 새 레이어가 하나 더 생겼다
+  // (실제 파일에서 15장 → 25장, 그중 11장이 invalid).
+  //
+  // 짝은 원본이 가리키던 GPKG 테이블 이름으로만 짓는다. 테이블 이름은 한 파일 안에서
+  // 유일하므로 이것이 가장 확실한 열쇠다.
   for (QgsMapLayer* ml : project->mapLayers()) {
     auto* vl = qobject_cast<QgsVectorLayer*>(ml);
-    if (vl && !vl->isValid() && LayerOps::layerKeyOf(vl) == table &&
-        kaGpkgLayerNameFromSource(vl->source()).compare(table, Qt::CaseInsensitive) == 0)
+    if (!vl || vl->isValid()) continue;
+    if (vl->providerType().compare(QLatin1String("ogr"), Qt::CaseInsensitive) != 0) continue;
+    const QString src = vl->source();
+    if (!src.section(QLatin1Char('|'), 0, 0).endsWith(QLatin1String(".gpkg"), Qt::CaseInsensitive))
+      continue;
+    if (kaGpkgLayerNameFromSource(src).compare(table, Qt::CaseInsensitive) == 0)
       return vl;
   }
   return nullptr;
@@ -2047,13 +2062,42 @@ int LayerOps::addNonEmptySavedGpkgLayers(QgsProject* project, const QString& gpk
     return 0;
   int added = restoreMissingLayerTreeNodes(project);
   const QStringList domainKeys = domainLayerKeys();
-  for (const QString& table : kaListGpkgFeatureTables(gpkgPath)) {
+  const QStringList tables = kaListGpkgFeatureTables(gpkgPath);
+
+  // 아래 표 순회는 비어 있는 테이블을 건너뛴다. 파일 이름이 바뀌어 깨진 레이어 중
+  // 테이블이 비어 있는 것(예: 아직 도형을 안 넣은 문화유산 목록)은 그러면 영원히
+  // invalid 로 남아 범례에만 있고 지도에는 안 그려진다. 먼저 한 번 다 물려 준다.
+  for (QgsMapLayer* ml : project->mapLayers()) {
+    auto* vl = qobject_cast<QgsVectorLayer*>(ml);
+    if (!vl || vl->isValid()) continue;
+    if (vl->providerType().compare(QLatin1String("ogr"), Qt::CaseInsensitive) != 0) continue;
+    const QString src = vl->source();
+    if (!src.section(QLatin1Char('|'), 0, 0).endsWith(QLatin1String(".gpkg"), Qt::CaseInsensitive))
+      continue;
+    const QString table = kaGpkgLayerNameFromSource(src);
+    if (table.isEmpty() || !tables.contains(table, Qt::CaseInsensitive)) continue;
+    vl->setDataSource(QStringLiteral("%1|layername=%2").arg(gpkgPath, table), vl->name(),
+                      QStringLiteral("ogr"));
+    if (vl->isValid()) {
+      vl->updateExtents();
+      kaEnsureLayerTreeNode(project, vl);
+      ++added;  // 되살린 것도 "올린 레이어"로 센다 — 호출자는 이 수로 복구 여부를 본다.
+    }
+  }
+
+  for (const QString& table : tables) {
     QgsVectorLayer probe(QStringLiteral("%1|layername=%2").arg(gpkgPath, table), table,
                          QStringLiteral("ogr"));
     if (!probe.isValid() || probe.featureCount() <= 0)
       continue;
 
     if (QgsVectorLayer* existing = kaFindExistingSavedLayer(project, gpkgPath, table)) {
+      if (!existing->isValid()) {
+        // 옮겨지거나 이름이 바뀐 조사 파일. 같은 테이블을 새 경로로 다시 물린다.
+        // 지우고 새로 만들면 이름·색·라벨·범례 순서가 전부 공장 기본값으로 돌아간다.
+        existing->setDataSource(QStringLiteral("%1|layername=%2").arg(gpkgPath, table),
+                                existing->name(), QStringLiteral("ogr"));
+      }
       if (existing->isValid()) {
         if (QgsDataProvider* p = existing->dataProvider())
           p->reloadData();
@@ -2179,13 +2223,16 @@ void LayerOps::pruneDuplicateSatelliteLayers(QgsProject* project) {
     ~Guard() { flag = false; }
   } guard(inPrune);
 
-  // 1. 프로젝트 맵 레이어 중 "위성" 레이어 목록 수집
+  // 1. 프로젝트 맵 레이어 중 "위성" 배경지도 목록 수집.
+  //    이름만 보고 지우면 사용자가 들여온 "위성사진_판독" 같은 조사 레이어까지
+  //    같이 지워졌다. 여기서 지워도 되는 것은 우리가 올린 참조/배경 레이어뿐이다.
   QList<QgsMapLayer*> satLayers;
   for (QgsMapLayer* l : project->mapLayers()) {
     if (!l) continue;
+    if (!isReferenceOrBasemapLayer(l)) continue;
     const QString n = l->name();
     if (n.contains(QStringLiteral("위성")) ||
-        (n.contains(QStringLiteral("Satellite"), Qt::CaseInsensitive) && isReferenceLayer(l))) {
+        n.contains(QStringLiteral("Satellite"), Qt::CaseInsensitive)) {
       satLayers.append(l);
     }
   }
@@ -2210,29 +2257,26 @@ void LayerOps::pruneDuplicateSatelliteLayers(QgsProject* project) {
     }
   }
 
-  // 3. 레이어 트리의 중복 위성 노드 정리
+  // 3. 같은 위성 레이어를 두 번 가리키는 범례 노드만 지운다.
+  //    예전 코드는 "이름에 위성이 들어간 첫 노드"를 기준으로 삼아, 그 뒤에 오는
+  //    keep 자신의 노드를 지워 버릴 수 있었다. 레이어는 프로젝트에 남고 범례에서만
+  //    빠지므로 화면에서 사라졌다가 다시 열면 (restoreMissingLayerTreeNodes 덕에)
+  //    되살아나는, 원인 찾기 어려운 증상이 됐다. 이제는 레이어 id로만 판단한다.
   if (QgsLayerTree* root = project->layerTreeRoot()) {
     QList<QgsLayerTreeNode*> toRemove;
-    bool foundKeepNode = false;
+    QSet<QString> seenLayerIds;
     std::function<void(QgsLayerTreeGroup*)> cleanGroup = [&](QgsLayerTreeGroup* grp) {
       if (!grp) return;
       for (QgsLayerTreeNode* child : grp->children()) {
         if (auto* lnode = qobject_cast<QgsLayerTreeLayer*>(child)) {
-          QgsMapLayer* l = lnode->layer();
           // QgsProject reads the tree before resolving its layer references.
           // A null layer here can be a saved survey layer still being loaded.
-          if (!l) {
-            continue;
-          }
-          const QString name = lnode->name().isEmpty() ? l->name() : lnode->name();
-          if (l == keep || name.contains(QStringLiteral("위성")) ||
-              (name.contains(QStringLiteral("Satellite"), Qt::CaseInsensitive) && isReferenceLayer(l))) {
-            if (foundKeepNode) {
-              toRemove.append(child);
-            } else {
-              foundKeepNode = true;
-            }
-          }
+          const QString id = lnode->layerId();
+          if (id.isEmpty() || !lnode->layer()) continue;
+          if (seenLayerIds.contains(id))
+            toRemove.append(child);
+          else
+            seenLayerIds.insert(id);
         } else if (auto* subGrp = qobject_cast<QgsLayerTreeGroup*>(child)) {
           cleanGroup(subGrp);
         }
@@ -2372,6 +2416,109 @@ QList<QgsMapLayer*> LayerOps::visibleLayersPaintOrder(QgsProject* project) {
   return visible;
 }
 
+QString LayerOps::layerCensus(QgsProject* project) {
+  if (!project) return QStringLiteral("(프로젝트 없음)");
+  QgsLayerTree* root = project->layerTreeRoot();
+  QStringList parts;
+  const QList<QgsMapLayer*> ordered =
+      root && !root->layerOrder().isEmpty() ? root->layerOrder() : project->mapLayers().values();
+  QStringList seen;
+  auto describe = [&](QgsMapLayer* l) {
+    if (!l || seen.contains(l->id())) return;
+    seen << l->id();
+    const bool hasNode = root && root->findLayer(l->id()) != nullptr;
+    const bool checked = hasNode && root->findLayer(l->id())->itemVisibilityChecked();
+    QString count = QStringLiteral("-");
+    if (auto* v = qobject_cast<QgsVectorLayer*>(l))
+      count = l->isValid() ? QString::number(v->featureCount()) : QStringLiteral("?");
+    parts << QStringLiteral("%1{%2 valid=%3 node=%4 chk=%5 n=%6}")
+                 .arg(l->name(), l->id().left(12))
+                 .arg(l->isValid() ? 1 : 0)
+                 .arg(hasNode ? 1 : 0)
+                 .arg(checked ? 1 : 0)
+                 .arg(count);
+  };
+  for (QgsMapLayer* l : ordered) describe(l);
+  // 범례에서 빠진 레이어도 빠짐없이 적는다 — 사라짐의 절반은 이 상태다.
+  for (QgsMapLayer* l : project->mapLayers()) describe(l);
+  return QStringLiteral("총 %1 · %2").arg(parts.size()).arg(parts.join(QStringLiteral(" | ")));
+}
+
+int LayerOps::reviveInvalidLayers(QgsProject* project, QStringList* revived,
+                                  QStringList* stillBroken) {
+  if (!project) return 0;
+  int n = 0;
+  for (QgsMapLayer* l : project->mapLayers()) {
+    if (!l || l->isValid()) continue;
+    // 편집 중인 버퍼는 건드리지 않는다. 다시 열면 커밋 안 된 도형이 날아간다.
+    if (auto* v = qobject_cast<QgsVectorLayer*>(l)) {
+      if (v->isEditable()) {
+        if (stillBroken) *stillBroken << l->name();
+        continue;
+      }
+    }
+    if (QgsDataProvider* p = l->dataProvider())
+      p->reloadData();
+    if (!l->isValid()) {
+      // 같은 URI로 다시 연다. GPKG에 쓰는 동안 끊긴 핸들은 이걸로 돌아온다.
+      // 파일 기반이 아닌 원본(xyz/wms)은 파일 존재 검사를 건너뛴다.
+      const QString src = l->source();
+      const QString file = src.section(QLatin1Char('|'), 0, 0);
+      const bool fileBacked = l->providerType().compare(QLatin1String("ogr"), Qt::CaseInsensitive) == 0 ||
+                              l->providerType().compare(QLatin1String("gdal"), Qt::CaseInsensitive) == 0;
+      if (!fileBacked || QFileInfo::exists(file))
+        l->setDataSource(src, l->name(), l->providerType());
+    }
+    if (l->isValid()) {
+      if (auto* v = qobject_cast<QgsVectorLayer*>(l))
+        v->updateExtents();
+      l->triggerRepaint();
+      if (revived) *revived << l->name();
+      ++n;
+    } else if (stillBroken) {
+      *stillBroken << l->name();
+    }
+  }
+  return n;
+}
+
+QString LayerOps::withVworldApiKey(const QString& source, const QString& currentKey) {
+  const QString key = currentKey.trimmed();
+  if (key.isEmpty() || source.isEmpty()) return source;
+  if (!source.contains(QLatin1String("vworld.kr"), Qt::CaseInsensitive)) return source;
+
+  // 키가 들어가는 자리는 두 곳뿐이다.
+  //   WMTS/XYZ : .../req/wmts/1.0.0/<키>/Satellite/{z}/{y}/{x}.jpeg
+  //   WMS      : ...?KEY=<키>&DOMAIN=...   (url= 안에서 퍼센트 인코딩되면 KEY%3D<키>)
+  // 키 모양(8-4-4-4-12)만 바꾼다. 주소의 다른 부분은 건드리지 않는다.
+  static const QString guid =
+      QStringLiteral("[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}");
+  static const QRegularExpression wmts(QStringLiteral("(req/wmts/1\\.0\\.0/)") + guid);
+  static const QRegularExpression wms(QStringLiteral("(KEY(?:=|%3D))") + guid,
+                                      QRegularExpression::CaseInsensitiveOption);
+  QString out = source;
+  out.replace(wmts, QStringLiteral("\\1") + key);
+  out.replace(wms, QStringLiteral("\\1") + key);
+  return out;
+}
+
+int LayerOps::refreshVworldApiKeyInLayers(QgsProject* project, const QString& currentKey,
+                                          QStringList* changed) {
+  if (!project || currentKey.trimmed().isEmpty()) return 0;
+  int n = 0;
+  for (QgsMapLayer* l : project->mapLayers()) {
+    if (!l) continue;
+    const QString src = l->source();
+    const QString fixed = withVworldApiKey(src, currentKey);
+    if (fixed == src) continue;
+    l->setDataSource(fixed, l->name(), l->providerType());
+    l->triggerRepaint();
+    if (changed) *changed << l->name();
+    ++n;
+  }
+  return n;
+}
+
 void LayerOps::applyCanvasScreenDpi(QgsMapCanvas* canvas) {
   if (!canvas) return;
   // FHD 100% → 4K 150–200% (DPR 1.0–2.0). PassThrough 배율 그대로 쓴다.
@@ -2405,6 +2552,11 @@ void LayerOps::syncMapCanvas(QgsProject* project, QgsMapCanvas* canvas, bool zoo
   if (!project || !canvas) return;
   knockOutProjectRasterPaper(project);
   applyCanvasScreenDpi(canvas);
+
+  // visibleLayersPaintOrder는 무효한 레이어를 화면 목록에서 뺀다. GPKG에 쓰는 동안
+  // 잠깐 끊긴 레이어가 여기서 빠지면 다시 넣어 주는 곳이 없어 재시작 전까지 사라진
+  // 채로 남는다. 목록을 만들기 전에 되살릴 수 있는 것은 되살린다.
+  reviveInvalidLayers(project);
 
   QList<QgsMapLayer*> visible = visibleLayersPaintOrder(project);
   const bool layersChanged = (visible != canvas->layers());
@@ -2900,8 +3052,14 @@ static QString makeVworldWmsUri(const QString& apiKey, const QString& layers, co
   const QString key = apiKey.trimmed();
   const QString crs = crsAuthId.trimmed().isEmpty() ? QStringLiteral("EPSG:3857") : crsAuthId.trimmed();
   // GitHub baseline (eac6c9c): KEY/DOMAIN + tiled WMS (tilePixelRatio=2). That path drew parcels.
-  const QString baseUrl =
-      QStringLiteral("https://api.vworld.kr/req/wms?KEY=%1&DOMAIN=localhost").arg(key);
+  //
+  // DOMAIN 은 뺐다. VWorld 는 DOMAIN=localhost 가 붙으면 같은 키라도 INCORRECT_KEY 로
+  // 거절한다. 인증은 Referer 헤더가 하므로 http-header:referer 를 반드시 같이 보낸다
+  // (XYZ 배경지도가 쓰는 것과 같은 값). 2026-09-06 실측:
+  //   referer O + DOMAIN=localhost → INCORRECT_KEY
+  //   referer O + DOMAIN 없음      → 정상 PNG
+  //   referer X                    → DOMAIN 과 무관하게 INCORRECT_KEY
+  const QString baseUrl = QStringLiteral("https://api.vworld.kr/req/wms?KEY=%1").arg(key);
   const QString encUrl = QString::fromLatin1(QUrl::toPercentEncoding(baseUrl));
   const QString stylePart = styles.isEmpty() ? QStringLiteral("styles")
                                              : QStringLiteral("styles=%1").arg(styles);
@@ -2909,8 +3067,19 @@ static QString makeVworldWmsUri(const QString& apiKey, const QString& layers, co
              "IgnoreGetMapUrl=1&IgnoreGetFeatureInfoUrl=1&contextualWMSLegend=0"
              "&crs=%1&dpiMode=7&format=image/png&transparent=true&featureCount=10"
              "&tilePixelRatio=2&stepWidth=512&stepHeight=512"
+             "&http-header:referer=https://localhost"
              "&layers=%2&%3&url=%4")
       .arg(crs, layers, stylePart, encUrl);
+}
+
+// 지적 GDAL_WMS 설정 파일이 사는 곳. 임시폴더가 아니라 앱 폴더다.
+static QString kaVworldCadastralXmlPath() {
+  const QByteArray localAppData = qgetenv("LOCALAPPDATA");
+  const QString base = localAppData.isEmpty() ? QDir::tempPath()
+                                              : QString::fromLocal8Bit(localAppData);
+  const QString dir = base + QStringLiteral("/ka-hgis");
+  QDir().mkpath(dir);
+  return QDir(dir).filePath(QStringLiteral("vworld-cadastral.xml"));
 }
 
 static bool addGdalVworldCadastral(QgsProject* project, QgsMapCanvas* canvas, const QString& apiKey,
@@ -2923,7 +3092,13 @@ static bool addGdalVworldCadastral(QgsProject* project, QgsMapCanvas* canvas, co
                           "<GDAL_WMS>"
                           "<Service name=\"WMS\">"
                           "<Version>1.3.0</Version>"
-                          "<ServerUrl>https://api.vworld.kr/req/wms?key=%1&amp;domain=localhost&amp;</ServerUrl>"
+                          // domain= 은 넣지 않는다. VWorld 는 domain=localhost 가 붙으면
+                          // 같은 키·같은 Referer 라도 INCORRECT_KEY 로 거절한다(실측).
+                          //   referer 있음 + domain=localhost → INCORRECT_KEY
+                          //   referer 있음 + domain 없음      → 정상 PNG
+                          //   referer 없음                    → domain 과 무관하게 INCORRECT_KEY
+                          // 즉 인증은 아래 <Referer> 가 하고, domain 은 해가 되기만 한다.
+                          "<ServerUrl>https://api.vworld.kr/req/wms?key=%1&amp;</ServerUrl>"
                           "<Layers>%2</Layers>"
                           "<Styles>lp_pa_cbnd_bonbun,lp_pa_cbnd_bubun</Styles>"
                           "<CRS>EPSG:3857</CRS>"
@@ -2947,7 +3122,11 @@ static bool addGdalVworldCadastral(QgsProject* project, QgsMapCanvas* canvas, co
                           "<Referer>https://localhost</Referer>"
                           "</GDAL_WMS>")
                           .arg(apiKey.trimmed(), layers);
-  const QString xmlPath = QDir::temp().filePath(QStringLiteral("ka-hgis-vworld-cadastral.xml"));
+  // 예전에는 이 파일을 윈도우 임시폴더에 뒀다. 프로젝트에는 상대경로
+  // "../../AppData/Local/Temp/ka-hgis-vworld-cadastral.xml" 로 적혀서,
+  // 임시폴더가 비워지거나 조사 파일을 다른 폴더로 옮기면 지적 레이어가 깨졌다.
+  // 앱 전용 폴더에 두어 세션이 바뀌어도 남게 한다.
+  const QString xmlPath = kaVworldCadastralXmlPath();
   {
     QFile f(xmlPath);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
