@@ -1,0 +1,11 @@
+********* Start testing of TestWorkflow *********
+Config: Using QtTest library 6.11.1, Qt 6.11.1 (x86_64-little_endian-llp64 shared (dynamic) release build; by MSVC 2022), windows 11
+PASS   : TestWorkflow::initTestCase()
+PASS   : TestWorkflow::exportSubmissionPackage_pdfIsUserSheetOnly()
+PASS   : TestWorkflow::exportPackagePrefersUserSheetPdf()
+FAIL!  : TestWorkflow::test_export_failure_aborts_and_reports_error() 'result.isEmpty()' returned FALSE. (Export must abort when layout PDF cannot be written)
+D:\hgis\tests\test_workflow.cpp(5510) : failure location
+PASS   : TestWorkflow::test_section_sheet_bundling()
+PASS   : TestWorkflow::cleanupTestCase()
+Totals: 5 passed, 1 failed, 0 skipped, 0 blacklisted, 2474ms
+********* Finished testing of TestWorkflow *********

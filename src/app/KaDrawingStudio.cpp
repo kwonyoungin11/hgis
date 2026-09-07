@@ -7,6 +7,7 @@
 #include "core/LayerOps.h"
 #include "core/GeorefService.h"
 #include "KaFileBrowserPanel.h"
+#include "KaLayerOpacityRail.h"
 #include "MainWindow.h"
 
 #include <algorithm>
@@ -23,6 +24,10 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QMimeData>
+#include <QUrl>
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QFile>
@@ -976,8 +981,8 @@ void KaDrawingStudio::buildUi() {
 
   auto* leftCol = new QFrame(root);
   leftCol->setObjectName(QStringLiteral("studioLeftCol"));
-  leftCol->setMinimumWidth(240);
-  leftCol->setMaximumWidth(320);
+  leftCol->setMinimumWidth(160);
+  leftCol->setMaximumWidth(720);
   auto* leftLay = new QVBoxLayout(leftCol);
   leftLay->setContentsMargins(6, 6, 6, 6);
   leftLay->setSpacing(4);
@@ -1028,6 +1033,8 @@ void KaDrawingStudio::buildUi() {
       mainWin->editCurrentLayerStyle(m_layerTree->currentLayer());
     }
   });
+  connect(m_layerTree, &QgsLayerTreeView::currentLayerChanged, this,
+          &KaDrawingStudio::updateLayerOpacityControl);
 
   connect(m_layerTree->selectionModel(), &QItemSelectionModel::selectionChanged,
           this, &KaDrawingStudio::syncMapFromLayers);
@@ -1039,6 +1046,7 @@ void KaDrawingStudio::buildUi() {
     connect(tree, &QgsLayerTreeNode::visibilityChanged, this,
             [this](QgsLayerTreeNode*) { syncMapFromLayers(); });
   }
+  layerBox->setMinimumHeight(96);
   layerLay->addWidget(leftCap);
   layerLay->addWidget(m_layerTree, 1);
   auto* layerEmpty = new QLabel(
@@ -1066,6 +1074,7 @@ void KaDrawingStudio::buildUi() {
 
   m_filesPanel = new KaFileBrowserPanel(leftSplit);
   m_filesPanel->setObjectName(QStringLiteral("studioFilesPanel"));
+  m_filesPanel->setMinimumHeight(96);
   connect(m_filesPanel, &KaFileBrowserPanel::fileActivated, this, [this, mainWin](const QString& path) {
     if (mainWin) {
       const bool raster = GeorefService::isImagePath(path);
@@ -1123,9 +1132,12 @@ void KaDrawingStudio::buildUi() {
   m_view->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   m_view->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   m_view->setMenuProvider(new KaLayoutMenuProvider(this));
+  m_view->setAcceptDrops(true);
   m_view->installEventFilter(this);
-  if (m_view->viewport())
+  if (m_view->viewport()) {
+    m_view->viewport()->setAcceptDrops(true);
     m_view->viewport()->installEventFilter(this);
+  }
 
   m_toolSelect = new QgsLayoutViewToolSelect(m_view);
   m_toolPan = new QgsLayoutViewToolPan(m_view);
@@ -1160,19 +1172,19 @@ void KaDrawingStudio::buildUi() {
   auto* legendLay = new QVBoxLayout(m_cardLegend);
   legendLay->setContentsMargins(10, 10, 10, 10);
   legendLay->setSpacing(6);
-  auto* legendCap = new QLabel(QStringLiteral("무엇을 넣을까?"), m_cardLegend);
+  auto* legendCap = new QLabel(QStringLiteral("조판 항목"), m_cardLegend);
   legendCap->setObjectName(QStringLiteral("cardCaption"));
   legendLay->addWidget(legendCap);
   auto* legendRow = new QHBoxLayout;
   legendRow->setSpacing(14);
   auto* legendBtn = makeRailTile(m_cardLegend, KaIcons::icon(QStringLiteral("layout_legend")),
-                                 QStringLiteral("범례를 넣을까?"), QSize(22, 22));
+                                 QStringLiteral("범례"), QSize(22, 22));
   connect(legendBtn, &QToolButton::clicked, this, [this]() {
     beginPlaceLegend();
     if (m_cardLegend) m_cardLegend->setFocus();
   });
   auto* pdfBtn = makeRailTile(m_cardLegend, KaIcons::icon(QStringLiteral("pdf")),
-                              QStringLiteral("PDF로 내보낼까?"), QSize(22, 22));
+                              QStringLiteral("PDF 내보내기"), QSize(22, 22));
   pdfBtn->setObjectName(QStringLiteral("btnPrimary"));
   pdfBtn->setToolTip(QStringLiteral("지금 용지를 PDF 파일로 저장합니다"));
   connect(pdfBtn, &QToolButton::clicked, this, &KaDrawingStudio::savePdf);
@@ -1214,7 +1226,7 @@ void KaDrawingStudio::buildUi() {
   auto* northLay = new QVBoxLayout(m_cardNorth);
   northLay->setContentsMargins(10, 10, 10, 10);
   northLay->setSpacing(6);
-  northLay->addWidget(new QLabel(QStringLiteral("방위를 넣을까?"), m_cardNorth));
+  northLay->addWidget(new QLabel(QStringLiteral("방위"), m_cardNorth));
   auto* northRow = new QHBoxLayout;
   northRow->setSpacing(6);
   struct NorthSample { const char* rel; const char* tip; int art; };
@@ -1256,7 +1268,7 @@ void KaDrawingStudio::buildUi() {
   auto* scaleLay = new QVBoxLayout(m_scaleBar);
   scaleLay->setContentsMargins(10, 10, 10, 10);
   scaleLay->setSpacing(8);
-  scaleLay->addWidget(new QLabel(QStringLiteral("도면 정보를 고칠까?"), m_scaleBar));
+  scaleLay->addWidget(new QLabel(QStringLiteral("도면 정보"), m_scaleBar));
   m_scaleSpin = new QSpinBox(m_scaleBar);
   m_scaleSpin->setRange(10, 5000000);
   m_scaleSpin->setSingleStep(10);
@@ -1336,6 +1348,24 @@ void KaDrawingStudio::buildUi() {
   deskGrid->addWidget(m_view, 0, 0);
   deskGrid->addWidget(m_adjustBar, 0, 0, Qt::AlignTop);
   m_adjustBar->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  {
+    // 투명도 막대는 캔버스 위에 붙박이로 떠 있어야 한다.
+    // QgsLayoutView 는 QGraphicsView 라서 페이지를 끌면 scrollContentsBy 가
+    // viewport()->scroll() 을 부르고, 그러면 viewport 의 자식 위젯까지 같이 밀린다.
+    // 지도(QgsMapCanvas)는 스크롤 없이 범위를 다시 그려서 이 문제가 없었다.
+    // 스크롤하지 않는 desk 에 붙여 페이지를 움직여도 제자리에 남게 한다.
+    m_opacityRail = new KaLayerOpacityRail(desk);
+  }
+  connect(m_opacityRail, &KaLayerOpacityRail::percentChanged, this, [this](int value) {
+    if (!m_layerTree) return;
+    QgsMapLayer* cur = m_layerTree->currentLayer();
+    if (!cur || !LayerOps::isReferenceOrBasemapLayer(cur)) return;
+    LayerOps::setMapLayerOpacity(cur, value / 100.0, m_mapCanvas);
+    syncMapFromLayers();
+    if (auto* mainWin = qobject_cast<MainWindow*>(window()))
+      mainWin->updateLayerOpacityControl();
+  });
+  updateLayerOpacityControl();
   rightLay->addWidget(desk, 1);
 
   auto* bottomTools = new QWidget(desk);
@@ -1348,6 +1378,8 @@ void KaDrawingStudio::buildUi() {
   btLay->setSpacing(22);
   deskGrid->addWidget(bottomTools, 0, 0, Qt::AlignHCenter | Qt::AlignBottom);
   bottomTools->raise();
+  if (m_opacityRail)
+    m_opacityRail->raise();
   auto addBottom = [this, bottomTools](const QString& iconId, const QString& text,
                                        const QString& tip, auto slot) {
     auto* b = new QToolButton(bottomTools);
@@ -1367,23 +1399,32 @@ void KaDrawingStudio::buildUi() {
                              QStringLiteral("축척은 두고, 고른 레이어를 조판 한가운데로 옮깁니다"),
                              &KaDrawingStudio::centerSurveyInMap));
   btLay->addWidget(addBottom(QStringLiteral("layout_select"),
-                             KaBeginnerRibbon::twoLine(QStringLiteral("항목을 옮겨볼까?")),
+                             KaBeginnerRibbon::twoLine(QStringLiteral("항목 이동")),
                              QStringLiteral("좌표 상자를 끌어 옮깁니다"),
                              &KaDrawingStudio::useSelectTool));
   btLay->addWidget(addBottom(QStringLiteral("layout_map_frame"), QStringLiteral("용지/방향"),
                              QStringLiteral("용지 크기(A4/A3) 및 방향(가로/세로)을 전환합니다"),
                              &KaDrawingStudio::openPaperSettingsDialog));
-  side->setMinimumWidth(300);
-  side->setMaximumWidth(360);
-  rootLay->addWidget(leftCol, 0);
-  rootLay->addWidget(right, 1);
-  rootLay->addWidget(side, 0);
+  side->setMinimumWidth(260);
+  side->setMaximumWidth(420);
+  m_studioSplit = new QSplitter(Qt::Horizontal, root);
+  m_studioSplit->setObjectName(QStringLiteral("studioMainSplit"));
+  m_studioSplit->setHandleWidth(10);
+  m_studioSplit->setChildrenCollapsible(false);
+  m_studioSplit->addWidget(leftCol);
+  m_studioSplit->addWidget(right);
+  m_studioSplit->addWidget(side);
+  m_studioSplit->setStretchFactor(0, 0);
+  m_studioSplit->setStretchFactor(1, 1);
+  m_studioSplit->setStretchFactor(2, 0);
+  m_studioSplit->setSizes({268, 900, 320});
+  rootLay->addWidget(m_studioSplit, 1);
   setCentralWidget(root);
 
   m_status = new QLabel(this);
   statusBar()->addWidget(m_status, 1);
   m_status->setText(QStringLiteral(
-      "조판 중 — 항목을 끌어 옮기고, 끝나면 「PDF로 내보낼까?」. 작업 좌표계 → 제출 5179."));
+      "조판 중 — 항목을 끌어 옮기고, 끝나면 「PDF 내보내기」. 작업 좌표계 → 제출 5179."));
   m_paperFitPending = true;
 }
 
@@ -2520,6 +2561,21 @@ void KaDrawingStudio::placeScaleLabel(const QRectF& layoutRect, bool selectAfter
   }
 }
 
+void KaDrawingStudio::updateLayerOpacityControl() {
+  if (!m_opacityRail || !m_layerTree) return;
+  QgsMapLayer* cur = m_layerTree->currentLayer();
+  if (cur && LayerOps::isReferenceOrBasemapLayer(cur)) {
+    const int val = qBound(0, qRound(LayerOps::mapLayerOpacity(cur) * 100.0), 100);
+    m_opacityRail->setPercent(val, true);
+  } else {
+    m_opacityRail->setPercent(100, false);
+  }
+}
+
+void KaDrawingStudio::repaintMapLayers() {
+  syncMapFromLayers();
+}
+
 void KaDrawingStudio::syncMapFromLayers() {
   if (m_syncingMapFromLayers) return;
   m_syncingMapFromLayers = true;
@@ -2987,6 +3043,29 @@ void KaDrawingStudio::removeSelectedLayers() {
 
 bool KaDrawingStudio::eventFilter(QObject* watched, QEvent* event) {
   const bool onTree = m_layerTree && event && (watched == m_layerTree || watched == m_layerTree->viewport());
+  const bool onDropTarget = event &&
+      ((m_view && (watched == m_view || watched == m_view->viewport())) || onTree);
+  if (onDropTarget &&
+      (event->type() == QEvent::DragEnter || event->type() == QEvent::DragMove ||
+       event->type() == QEvent::Drop)) {
+    auto* de = static_cast<QDropEvent*>(event);
+    const bool fromTree = m_layerTree &&
+        (de->source() == m_layerTree || de->source() == m_layerTree->viewport());
+    if (!fromTree && de->mimeData() && de->mimeData()->hasUrls()) {
+      if (event->type() == QEvent::Drop) {
+        auto* mainWin = qobject_cast<MainWindow*>(window());
+        const bool ok = mainWin && mainWin->tryAddDroppedUrls(de->mimeData()->urls());
+        if (ok) {
+          syncMapFromLayers();
+          de->acceptProposedAction();
+          return true;
+        }
+      } else {
+        de->acceptProposedAction();
+        return true;
+      }
+    }
+  }
   if (onTree && event->type() == QEvent::KeyPress) {
     auto* ke = static_cast<QKeyEvent*>(event);
     if (ke->matches(QKeySequence::Undo) ||

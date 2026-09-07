@@ -8,6 +8,7 @@
 #include <QSet>
 #include <vector>
 #include "core/LocationSearch.h"
+#include "core/AdminBoundaryService.h"
 #include "core/TrenchGridGenerator.h"
 class QListWidget;
 class QListWidgetItem;
@@ -19,8 +20,8 @@ class QLineEdit;
 class QComboBox;
 class QCheckBox;
 class QDoubleSpinBox;
-class QSlider;
 class QEvent;
+class KaLayerOpacityRail;
 class QShowEvent;
 class QCloseEvent;
 class QTabWidget;
@@ -51,7 +52,6 @@ class KaTerrain3dLayoutStudio;
 class KaStartPage;
 class KaCoordPointMapTool;
 class KaMeasureMapTool;
-class KaVertexEditTool;
 class KaFeatureSelectTool;
 class KaFoundLocationMark;
 class QSplitter;
@@ -87,7 +87,9 @@ public:
   void setRestoreLastSurveyEnabled(bool enabled) { m_restoreLastSurveyEnabled = enabled; }
   bool addVectorFromPath(const QString& path);
   bool addRasterFromPath(const QString& path);
+  bool tryAddDroppedUrls(const QList<QUrl>& urls);
   void showLayerTreeContextMenu(QgsLayerTreeView* treeView, const QPoint& pos);
+  void updateLayerOpacityControl();
   // "2000" 과 "1:2000" 을 모두 분모 2000 으로 읽는다. 0 이면 숫자가 아니다.
   static double scaleDenominatorFromUi(const QString& raw);
   void editCurrentLayerStyle(QgsMapLayer* layer = nullptr);
@@ -116,7 +118,6 @@ private slots:
   void clipOverlappingLayers();
   void startSplitPolygonTool();
   void onWorkControlClicked(QListWidgetItem* item);
-  void updateLayerOpacityControl();
   void refreshWorkPanel();
   void saveEdits();
   void stopEdits();
@@ -223,8 +224,9 @@ private:
   void updateNextActionStatus();
   void setupFileBrowser();
   void clearSubToolbar();
+  // 지금 켜져 있는 도구에 파란 밑줄이 오게 체크 상태를 맞춘다.
+  void updateSubToolbarChecks();
   bool addSectionGeoTiffFromPath(const QString& path, const QString& crsAuthId);
-  bool tryAddDroppedUrls(const QList<QUrl>& urls);
   bool tryAddDroppedPaths(const QStringList& paths);
   QStringList selectedBrowserFiles() const;
   void loadSurveyLayers(const QString& gpkgOrStub);
@@ -243,6 +245,9 @@ private:
   void bindMapDisplayScreen();
   void setWorkCrs(const QString& authId);
   void searchLocation(const QString& query);
+  void applySurfaceSurveyFieldMap(const QString& sido, const QString& city, const QString& dong);
+  void onAdminBoundaryFetched(const AdminBoundaryParse& parsed);
+  void onAdminBoundaryFailed(const QString& message);
   void onLocationResults(const QVector<LocationHit>& hits);
   void onLocationFailed(const QString& message);
   void zoomToLocation(const LocationHit& hit);
@@ -314,6 +319,7 @@ private:
   QString m_browserPath;
   ChecklistEngine* m_checklist = nullptr;
   LocationSearch* m_locator = nullptr;
+  AdminBoundaryService* m_adminBoundary = nullptr;
   QString m_surveyPath;
   QString m_workCrs = QStringLiteral("EPSG:5187");
 #if KA_HGIS_HAS_QGIS
@@ -355,9 +361,7 @@ private:
   QColor m_mapGridColor = QColor(51, 65, 85, 210);
   QVector<QToolButton*> m_mapGridColorBtns;
   KaAttributeMapTool* m_attributeTool = nullptr;
-  QWidget* m_layerOpacityWidget = nullptr;
-  QSlider* m_layerOpacitySlider = nullptr;
-  QLabel* m_layerOpacityLabel = nullptr;
+  KaLayerOpacityRail* m_layerOpacityRail = nullptr;
   KaAlignMapTool* m_alignTool = nullptr;
   KaAlignPickTool* m_alignPickTool = nullptr;
   KaImageView* m_alignImage = nullptr;
@@ -377,7 +381,6 @@ private:
   QTimer* m_alignCursorTimer = nullptr;
   QgsMapToolPan* m_panTool = nullptr;
   QgsMapToolSelect* m_selectTool = nullptr;
-  KaVertexEditTool* m_vertexTool = nullptr;
   KaFeatureSelectTool* m_featureSelectTool = nullptr;
   KaFoundLocationMark* m_locationMark = nullptr;
   QString m_locationMarkTitle;

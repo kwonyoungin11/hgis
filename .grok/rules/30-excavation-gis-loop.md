@@ -5,7 +5,7 @@ This is the user's standing order for **문화재 발굴조사 HGIS**. Hooks inj
 ## Every request
 
 1. Prompt-engineer internally (do not dump).
-2. sequential-thinking MCP + context7 MCP first.
+2. context7 when library docs are needed. STA (`sequential-thinking-agent`) if complexity ≥ 3. Do not call sequential-thinking MCP on every request.
 3. Follow the user's last command. Before map/CRS/layout/digitize/graphic edits, learn the topic in **English** from official developer sites (context7 + fetch): QGIS cookbook/user manual/api.qgis.org + in-repo `docs/vendor/qgis-manual-3.44/`; ArcGIS `developers.arcgis.com` + Pro mapping help. Terms: `docs/user/job-cards/arcgis-용어.md`. Do not invent Qgs* APIs. Do not clone ArcMap chrome.
 4. Load matching skills. Each expert loads skills **separately**.
 5. Graph: QUICK solo; FEATURE/gis/debug/architecture summon the full matching expert set this turn (`spawn_subagent` or `/workflow ka-ship`). Editing app+core without a spawn is blocked.

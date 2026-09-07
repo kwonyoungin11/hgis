@@ -52,6 +52,7 @@
 #include <qgsprintlayout.h>
 #include <qgsproject.h>
 #include <qgsvectorlayer.h>
+#include <qgsrasterlayer.h>
 
 QStringList LayoutService::defaultLayoutNames() {
   return {
@@ -269,9 +270,29 @@ static QString writeLayoutNorthArrowPng() {
 
 static bool hasDrawableContent(const QList<QgsMapLayer*>& layers, const LayoutService::DrawingRecipe& rec,
                                QgsFeatureId featureId) {
+  if (rec.kind == LayoutService::DrawingKind::FeaturePlan) {
+    for (QgsMapLayer* ml : layers) {
+      auto* vl = qobject_cast<QgsVectorLayer*>(ml);
+      if (!vl || LayerOps::isReferenceLayer(vl) || LayerOps::isBasemapLayer(vl)) continue;
+      const QString k = LayerOps::layerKeyOf(vl);
+      if ((k == QLatin1String("feature_poly") || k == QLatin1String("feature_line")) && vl->featureCount() > 0)
+        return true;
+    }
+    return false;
+  }
+  if (rec.kind == LayoutService::DrawingKind::Section) {
+    for (QgsMapLayer* ml : layers) {
+      auto* vl = qobject_cast<QgsVectorLayer*>(ml);
+      if (!vl || LayerOps::isReferenceLayer(vl) || LayerOps::isBasemapLayer(vl)) continue;
+      const QString k = LayerOps::layerKeyOf(vl);
+      if (k == QLatin1String("section_line") && vl->featureCount() > 0)
+        return true;
+    }
+    return false;
+  }
   for (QgsMapLayer* ml : layers) {
     auto* vl = qobject_cast<QgsVectorLayer*>(ml);
-    if (!vl || LayerOps::isReferenceLayer(vl)) continue;
+    if (!vl || LayerOps::isReferenceLayer(vl) || LayerOps::isBasemapLayer(vl)) continue;
     if (rec.kind == LayoutService::DrawingKind::FeatureDetail) {
       if (featureId != FID_NULL && vl->getFeature(featureId).isValid())
         return true;
@@ -359,6 +380,10 @@ static void fillLayout(QgsPrintLayout* layout, QgsProject* project,
   const double H = land ? std::min(pageW, pageH) : std::max(pageW, pageH);
 
   applyPageSize(layout, opt.paper, opt.orientation);
+
+  // 자동 생성 기본 템플릿 표식
+  layout->setCustomProperty(QStringLiteral("ka_hgis/auto_template"), true);
+  layout->setCustomProperty(QStringLiteral("ka_hgis/user_composed"), false);
 
   auto* sa = LayerOps::findByLayerKey(project, QStringLiteral("survey_area"));
   const QString surveyName = !opt.surveyName.isEmpty() ? opt.surveyName : firstAttr(sa, QStringLiteral("survey_name"));
@@ -1091,15 +1116,66 @@ int LayoutService::rebuildDefaultLayouts(QgsProject* project) {
   return n;
 }
 
-bool LayoutService::isComposedStudioSheet(QgsProject* project) {
+bool LayoutService::isComposedStudioSheet(QgsProject* project, const QString& layoutName) {
   if (!project || !project->layoutManager())
     return false;
+  const QString target = layoutName.isEmpty() ? QStringLiteral("user_sheet") : layoutName;
   auto* ly = dynamic_cast<QgsPrintLayout*>(
-      project->layoutManager()->layoutByName(QStringLiteral("user_sheet")));
+      project->layoutManager()->layoutByName(target));
   if (!ly)
     return false;
+
   auto* map = dynamic_cast<QgsLayoutItemMap*>(ly->itemById(QStringLiteral("ka_map")));
-  return map && map->scale() > 0.0 && !map->layers().isEmpty();
+  if (!map)
+    map = dynamic_cast<QgsLayoutItemMap*>(ly->itemById(QStringLiteral("ka_section_map")));
+  if (!map) {
+    QList<QgsLayoutItemMap*> maps;
+    ly->layoutItems(maps);
+    for (auto* m : maps) {
+      if (m) {
+        map = m;
+        break;
+      }
+    }
+  }
+  if (!map)
+    return false;
+
+  // 1. 유효한 축척 (0 초과 및 유한값)
+  if (!(map->scale() > 0.0) || !std::isfinite(map->scale()))
+    return false;
+
+  // 2. 유한하고 비어있지 않은 지도 범위
+  const QgsRectangle ext = map->extent();
+  if (!ext.isFinite() || ext.isEmpty() || !(ext.width() > 0.0) || !(ext.height() > 0.0))
+    return false;
+
+  // 3. 비-참조 유효 레이어 확인 (더미 layout_blank 및 참조 지도 배제)
+  bool hasValidLayer = false;
+  for (QgsMapLayer* l : map->layers()) {
+    if (!l || !l->isValid())
+      continue;
+    const QString n = l->name();
+    if (n == QLatin1String("layout_blank"))
+      continue;
+    if (target != QLatin1String("section_sheet") && n == QLatin1String("ka_section_blank"))
+      continue;
+    if (LayerOps::isReferenceLayer(l) || LayerOps::isBasemapLayer(l))
+      continue;
+
+    if (auto* vl = qobject_cast<QgsVectorLayer*>(l)) {
+      if (vl->featureCount() > 0 || (target == QLatin1String("section_sheet") && n == QLatin1String("ka_section_blank"))) {
+        hasValidLayer = true;
+        break;
+      }
+    } else if (auto* rl = qobject_cast<QgsRasterLayer*>(l)) {
+      if (rl->width() > 0 && rl->height() > 0 && !rl->extent().isEmpty()) {
+        hasValidLayer = true;
+        break;
+      }
+    }
+  }
+  return hasValidLayer;
 }
 
 QString LayoutService::createReportLayout(QgsProject* project, const QString& titleKo,

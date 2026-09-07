@@ -93,7 +93,7 @@ See `.grok/rules/00-grok-preset.md`.
 1. Targeted `read_file` / `search_replace` / `grep` / `list_dir`
 2. `lsp` (clangd) for C++ definition/references/diagnostics after edits
 3. In-repo QGIS manuals under `docs/vendor/qgis-manual-3.44/` for `Qgs*` behavior
-4. context7 MCP only after in-repo `Qgs*` usage is missing; sequential-thinking only on FEATURE/ARCHITECTURE
+4. context7 MCP only after in-repo `Qgs*` usage is missing; STA (`sequential-thinking-agent`) only on complexity 3+ (FEATURE/ARCHITECTURE/debug)
 5. Do **not** spawn parallel subagents for single-file known fixes
 6. Project skills: `/ka-experts` (전문가소환), `/ka-graph`, `/gis-verify`, `/ka-hgis-verify`, `/ka-drawing-studio`, `/ka-submit-package`, `/ka-georef-align`, `/unlazy`
 

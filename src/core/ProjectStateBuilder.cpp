@@ -12,6 +12,7 @@
 #include <qgslayout.h>
 #include <qgsprintlayout.h>
 #include <qgslayoutitemmap.h>
+#include <qgsrasterlayer.h>
 
 QJsonObject ProjectStateBuilder::empty() {
   QJsonObject st;
@@ -50,10 +51,10 @@ QJsonObject ProjectStateBuilder::fromProject(QgsProject* project) {
       sas.append(fallback);
     }
   }
-  auto* sa = sas.isEmpty() ? nullptr : sas.first();
   auto* fp = LayerOps::findByLayerKey(project, QStringLiteral("feature_poly"));
   auto* fl = LayerOps::findByLayerKey(project, QStringLiteral("feature_line"));
   auto* cp = LayerOps::findByLayerKey(project, QStringLiteral("control_points"));
+  auto* sl = LayerOps::findByLayerKey(project, QStringLiteral("section_line"));
 
   int saCount = 0;
   for (auto* saLayer : sas) {
@@ -62,6 +63,7 @@ QJsonObject ProjectStateBuilder::fromProject(QgsProject* project) {
   const int fpCount = fp ? int(fp->featureCount()) : 0;
   const int flCount = fl ? int(fl->featureCount()) : 0;
   const int cpCount = cp ? int(cp->featureCount()) : 0;
+  const int slCount = sl ? int(sl->featureCount()) : 0;
   st.insert(QStringLiteral("survey_area_count"), saCount);
   st.insert(QStringLiteral("feature_poly_count"), fpCount);
   st.insert(QStringLiteral("feature_line_count"), flCount);
@@ -129,33 +131,70 @@ QJsonObject ProjectStateBuilder::fromProject(QgsProject* project) {
   st.insert(QStringLiteral("has_origin"), o || cpCount == 0);
   st.insert(QStringLiteral("has_accuracy"), a || cpCount == 0);
 
-  // 위치도·배치도 오류 규칙은 도면만들기 user_sheet가 채워졌을 때만 통과.
-  const bool composedSheet = LayoutService::isComposedStudioSheet(project);
-  st.insert(QStringLiteral("layout_exists:site_location"), composedSheet);
-  st.insert(QStringLiteral("layout_exists:feature_plan"), composedSheet);
-  st.insert(QStringLiteral("layout_exists:survey_area_map"), composedSheet);
+  const bool composedUserSheet = LayoutService::isComposedStudioSheet(project, QStringLiteral("user_sheet"));
+  const bool composedSectionSheet = LayoutService::isComposedStudioSheet(project, QStringLiteral("section_sheet"));
 
-  auto namedLayoutComposed = [&](const QString& name) {
-    if (!project->layoutManager())
+  auto namedLayoutComposed = [&](const QString& name) -> bool {
+    if (!project || !project->layoutManager())
       return false;
     auto* ly = dynamic_cast<QgsPrintLayout*>(project->layoutManager()->layoutByName(name));
     if (!ly)
       return false;
+    // 미조판 자동 템플릿 배제: 사용자가 편집/구성하지 않은 템플릿은 통과 불가
+    if (ly->customProperty(QStringLiteral("ka_hgis/auto_template")).toBool() &&
+        !ly->customProperty(QStringLiteral("ka_hgis/user_composed")).toBool()) {
+      return false;
+    }
     if (ly->itemById(QStringLiteral("empty_hint")))
       return false;
     QList<QgsLayoutItemMap*> maps;
     ly->layoutItems(maps);
     for (QgsLayoutItemMap* map : maps) {
-      if (map && map->scale() > 0.0 && !map->layers().isEmpty())
-        return true;
+      if (!map) continue;
+      if (!(map->scale() > 0.0) || !std::isfinite(map->scale())) continue;
+      const QgsRectangle ext = map->extent();
+      if (!ext.isFinite() || ext.isEmpty() || !(ext.width() > 0.0) || !(ext.height() > 0.0)) continue;
+      for (QgsMapLayer* l : map->layers()) {
+        if (!l || !l->isValid()) continue;
+        if (l->name() == QLatin1String("layout_blank") || l->name() == QLatin1String("ka_section_blank"))
+          continue;
+        if (LayerOps::isReferenceLayer(l) || LayerOps::isBasemapLayer(l))
+          continue;
+        if (auto* vl = qobject_cast<QgsVectorLayer*>(l)) {
+          if (vl->featureCount() > 0) return true;
+        } else if (auto* rl = qobject_cast<QgsRasterLayer*>(l)) {
+          if (rl->width() > 0 && rl->height() > 0 && !rl->extent().isEmpty()) return true;
+        }
+      }
     }
     return false;
   };
-  // 개별실측·층위(경고): 해당 이름 조판이 지도·축척·레이어를 가질 때만. user_sheet는 단면이 아님.
-  st.insert(QStringLiteral("layout_exists:feature_detail"),
-            namedLayoutComposed(QStringLiteral("feature_detail")));
-  st.insert(QStringLiteral("layout_exists:section"),
-            namedLayoutComposed(QStringLiteral("section")));
+
+  // 1. 유적위치도: survey_area 피처 > 0 및 (user_sheet 또는 site_location 조판 필요)
+  const bool siteLocationPass = (saCount > 0) &&
+      (composedUserSheet || namedLayoutComposed(QStringLiteral("site_location")));
+  st.insert(QStringLiteral("layout_exists:site_location"), siteLocationPass);
+
+  // 2. 유구배치도: (feature_poly 또는 feature_line 피처 > 0) 및 (user_sheet 또는 feature_plan 조판 필요)
+  const bool hasFeatures = (fpCount > 0 || flCount > 0);
+  const bool featurePlanPass = hasFeatures &&
+      (composedUserSheet || namedLayoutComposed(QStringLiteral("feature_plan")));
+  st.insert(QStringLiteral("layout_exists:feature_plan"), featurePlanPass);
+
+  // 3. 조사구역도: survey_area 피처 > 0 및 (user_sheet 또는 survey_area_map 조판 필요)
+  const bool surveyAreaMapPass = (saCount > 0) &&
+      (composedUserSheet || namedLayoutComposed(QStringLiteral("survey_area_map")));
+  st.insert(QStringLiteral("layout_exists:survey_area_map"), surveyAreaMapPass);
+
+  // 4. 단면/층위도: section_sheet 조판 또는 (section_line 피처 > 0 및 section 조판) 필요
+  const bool sectionPass = composedSectionSheet ||
+      (slCount > 0 && namedLayoutComposed(QStringLiteral("section")));
+  st.insert(QStringLiteral("layout_exists:section"), sectionPass);
+
+  // 5. 개별유구실측도: 유구 피처 존재 및 feature_detail 조판 필요
+  const bool featureDetailPass = hasFeatures &&
+      namedLayoutComposed(QStringLiteral("feature_detail"));
+  st.insert(QStringLiteral("layout_exists:feature_detail"), featureDetailPass);
 
   return st;
 }

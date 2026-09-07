@@ -7,6 +7,30 @@ set(CMAKE_AUTOMOC ON)
 
 if (MSVC)
   add_compile_options(/MP)
+  # /Zc:__cplusplus : 없으면 CMAKE_CXX_STANDARD 20 을 줘도 __cplusplus 가 199711(C++98)로 보고되어
+  #                   라이브러리들의 C++20 기능 검출이 조용히 실패한다. (이 머신에서 실측 확인)
+  # /utf-8          : 소스/실행 문자셋 UTF-8 고정 (기존에 타깃마다 흩어져 있던 것을 여기서 일괄 적용)
+  add_compile_options(/Zc:__cplusplus /utf-8 /permissive-)
+  # 경고 수준 상향. 자체 코드는 따옴표 include, Qt/QGIS 는 꺾쇠 include 이므로
+  # /external:anglebrackets 로 외부 헤더 경고만 차단하고 우리 코드에는 /W4 를 적용한다.
+  add_compile_options(/W4 /external:anglebrackets /external:W0)
+endif()
+
+# LTO(링크 타임 최적화): 번역 단위 경계를 넘어 인라이닝한다. Release 에서만.
+# check_ipo_supported() 는 build/CMakeFiles 에 임시 테스트 프로젝트를 남겨
+# VS 제너레이터의 ALL_BUILD 를 깨뜨리므로(MSB3202) 쓰지 않는다.
+# MSVC 2022 는 /GL + /LTCG 를 확실히 지원하므로 바로 켠다.
+if(MSVC)
+  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE OFF)
+  message(STATUS "LTO: MSVC c2.dll 내부 오류 회피를 위해 OFF")
+else()
+  include(CheckIPOSupported)
+  check_ipo_supported(RESULT KA_IPO_OK OUTPUT KA_IPO_MSG)
+  if(KA_IPO_OK)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+  else()
+    message(STATUS "LTO 미지원: ${KA_IPO_MSG}")
+  endif()
 endif()
 
 option(KA_HGIS_BUILD_TESTS "Build tests" ON)
@@ -43,6 +67,7 @@ add_library(ka_core STATIC
   src/core/LayoutService.cpp
   src/core/LayerOps.cpp
   src/core/LocationSearch.cpp
+  src/core/AdminBoundaryService.cpp
   src/core/KoreaRegionCatalog.cpp
   src/core/WorkflowGuide.cpp
   src/core/VworldSettings.cpp
@@ -62,6 +87,7 @@ add_library(ka_core STATIC
   src/core/SectionLayoutService.cpp
   src/core/Terrain3dService.cpp
   src/core/Terrain3dLayoutService.cpp
+  src/core/AndongPack.cpp
   src/core/ChecklistEngine.h
   src/core/SurveyProjectFactory.h
   src/core/SurveyStorage.h
@@ -70,6 +96,7 @@ add_library(ka_core STATIC
   src/core/LayoutService.h
   src/core/LayerOps.h
   src/core/LocationSearch.h
+  src/core/AdminBoundaryService.h
   src/core/KoreaRegionCatalog.h
   src/core/WorkflowGuide.h
   src/core/VworldSettings.h
@@ -89,6 +116,7 @@ add_library(ka_core STATIC
   src/core/SectionLayoutService.h
   src/core/Terrain3dService.h
   src/core/Terrain3dLayoutService.h
+  src/core/AndongPack.h
 )
 target_include_directories(ka_core PUBLIC ${KA_INCLUDES})
 target_link_directories(ka_core PUBLIC ${KA_LIBDIRS})
@@ -148,9 +176,11 @@ add_executable(ka-hgis
   src/app/KaCrashGuard.cpp
   src/app/KaRegionLocator.cpp
   src/app/KaFileBrowserPanel.cpp
+  src/app/KaLayerOpacityRail.cpp
   src/app/MainWindow.h
   src/app/KaSurveyAreaDialog.h
   src/app/KaFileBrowserPanel.h
+  src/app/KaLayerOpacityRail.h
   src/app/KaBeginnerRibbon.h
   src/app/KaApplication.h
   src/app/KaTheme.h
@@ -191,6 +221,43 @@ if(MSVC)
   target_compile_options(ka-hgis PRIVATE /utf-8 "$<$<CONFIG:Release>:/Zi>" "$<$<CONFIG:Release>:/FS>")
   target_link_options(ka-hgis PRIVATE
     "$<$<CONFIG:Release>:/DEBUG>" "$<$<CONFIG:Release>:/OPT:REF>" "$<$<CONFIG:Release>:/OPT:ICF>")
+endif()
+
+add_executable(andong-viewer WIN32
+  src/andong/AndongMain.cpp
+  src/andong/AndongWindow.cpp
+  src/andong/AndongWindow.h
+)
+target_include_directories(andong-viewer PRIVATE ${KA_INCLUDES})
+target_link_directories(andong-viewer PRIVATE ${KA_LIBDIRS})
+target_link_libraries(andong-viewer PRIVATE ka_core Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml qgis_core qgis_gui)
+target_compile_definitions(andong-viewer PRIVATE KA_HGIS_HAS_QGIS=1 "CORE_EXPORT=__declspec(dllimport)" "GUI_EXPORT=__declspec(dllimport)")
+if(MSVC)
+  target_compile_options(andong-viewer PRIVATE /utf-8 "$<$<CONFIG:Release>:/Zi>" "$<$<CONFIG:Release>:/FS>")
+  target_link_options(andong-viewer PRIVATE
+    "$<$<CONFIG:Release>:/DEBUG>" "$<$<CONFIG:Release>:/OPT:REF>" "$<$<CONFIG:Release>:/OPT:ICF>")
+endif()
+add_custom_command(TARGET andong-viewer POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:andong-viewer>/data/andong"
+  COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:andong-viewer>/data/theme"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_SOURCE_DIR}/data/andong/andong_city.geojson"
+    "$<TARGET_FILE_DIR:andong-viewer>/data/andong/andong_city.geojson"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_SOURCE_DIR}/data/theme/andong.qss"
+    "$<TARGET_FILE_DIR:andong-viewer>/data/theme/andong.qss"
+)
+if(EXISTS "${CMAKE_SOURCE_DIR}/data/andong/andong_mark.png")
+  add_custom_command(TARGET andong-viewer POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "${CMAKE_SOURCE_DIR}/data/andong/andong_mark.png"
+      "$<TARGET_FILE_DIR:andong-viewer>/data/andong/andong_mark.png")
+endif()
+if(EXISTS "${CMAKE_SOURCE_DIR}/data/andong/satellite.mbtiles")
+  add_custom_command(TARGET andong-viewer POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "${CMAKE_SOURCE_DIR}/data/andong/satellite.mbtiles"
+      "$<TARGET_FILE_DIR:andong-viewer>/data/andong/satellite.mbtiles")
 endif()
 
 add_custom_command(TARGET ka-hgis POST_BUILD
@@ -312,6 +379,17 @@ if(KA_HGIS_BUILD_TESTS)
                         ka_terrain_3d_tests
                         PROPERTIES WIN32_EXECUTABLE FALSE)
 
+  add_executable(ka_andong_tests tests/test_andong.cpp)
+  set_target_properties(ka_andong_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  target_link_libraries(ka_andong_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_andong_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_andong_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_andong_tests PRIVATE ${KA_TEST_DEFS})
+  if (MSVC)
+    target_compile_options(ka_andong_tests PRIVATE /utf-8)
+  endif()
+  add_test(NAME andong_pack COMMAND ka_andong_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
   add_executable(ka_theme_tests
     tests/test_theme.cpp
     src/app/KaTheme.cpp
@@ -346,6 +424,17 @@ if(KA_HGIS_BUILD_TESTS)
   add_test(NAME save_open_window COMMAND ka_save_open_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   set_tests_properties(save_open_window PROPERTIES TIMEOUT 90)
 
+  add_executable(ka_e2e_tests tests/test_e2e_opaque.cpp)
+  set_target_properties(ka_e2e_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  target_link_libraries(ka_e2e_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_e2e_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_e2e_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_e2e_tests PRIVATE ${KA_TEST_DEFS})
+  if (MSVC)
+    target_compile_options(ka_e2e_tests PRIVATE /utf-8 /W4)
+  endif()
+  add_test(NAME e2e_opaque_suite COMMAND ka_e2e_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
   # Windows: ctest without OSGeo4W PATH → 0xc0000135 (DLL not found).
   # ENVIRONMENT is a CMake list, so unescaped ';' would truncate PATH to the
   # first bin dir. Escape path separators; keep ';' only between VAR=value.
@@ -358,7 +447,7 @@ if(KA_HGIS_BUILD_TESTS)
       "${OSGEO4W_ROOT}/bin"
     )
     string(JOIN "\\;" _ka_path_esc ${_ka_path})
-    set_tests_properties(checklist_engine workflow_engine georef_engine feature_presets buffer_ring measure_tape dem_trench_engine theme_qss recent_surveys section_layout_engine section_studio_engine terrain_3d_engine save_open_window PROPERTIES
+    set_tests_properties(checklist_engine workflow_engine georef_engine feature_presets buffer_ring measure_tape dem_trench_engine theme_qss recent_surveys section_layout_engine section_studio_engine terrain_3d_engine save_open_window andong_pack e2e_opaque_suite PROPERTIES
       ENVIRONMENT "PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
   endif()
 endif()

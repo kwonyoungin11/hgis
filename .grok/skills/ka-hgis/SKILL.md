@@ -23,7 +23,7 @@ This repo is a standalone C++20/Qt6 desktop HGIS linked to OSGeo4W qgis-dev. Not
 | Need | Server / tool |
 |------|----------------|
 | Qt / QGIS / GDAL API | **context7** |
-| Multi-step diagnosis | **sequential-thinking** |
+| Multi-step diagnosis | **STA** `sequential-thinking-agent` (complexity 3+) |
 | C++ symbols / diagnostics | **clangd** via `lsp` |
 | In-repo manuals | `docs/vendor/qgis-manual-3.44/` |
 

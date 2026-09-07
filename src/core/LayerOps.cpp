@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <QPainter>
 #include <QScreen>
+#include <QSize>
 #include <QUrl>
 #include <QWindow>
 #include <QColor>
@@ -22,6 +23,9 @@
 #include <QDir>
 #include <QSet>
 #include <QTemporaryFile>
+#include <QPointer>
+#include <QTimer>
+#include <functional>
 
 #include <qgis.h>
 #include <qgsproject.h>
@@ -42,6 +46,7 @@
 #include <qgslinestring.h>
 #include <qgscategorizedsymbolrenderer.h>
 #include <qgssinglesymbolrenderer.h>
+#include <qgsinvertedpolygonrenderer.h>
 #include <qgssymbol.h>
 #include <qgsfillsymbol.h>
 #include <qgslinesymbol.h>
@@ -80,7 +85,8 @@
 #include <QNetworkRequest>
 
 QString LayerOps::reprojectVectorLayer(QgsVectorLayer* layer, const QString& targetCrsAuthId,
-                                       const QString& outPath, QgsProject* project, QString* errorOut) {
+                                       const QString& outPath, QgsProject* project, QString* errorOut,
+                                       bool addToMap) {
   if (!layer || !layer->isValid()) {
     if (errorOut) *errorOut = QStringLiteral("Invalid layer");
     return {};
@@ -103,7 +109,7 @@ QString LayerOps::reprojectVectorLayer(QgsVectorLayer* layer, const QString& tar
     if (errorOut) *errorOut = err.isEmpty() ? QStringLiteral("reproject write failed") : err;
     return {};
   }
-  if (project) {
+  if (addToMap && project) {
     auto* vl = new QgsVectorLayer(outPath, layer->name() + QStringLiteral("_") + targetCrsAuthId, QStringLiteral("ogr"));
     if (vl->isValid()) {
       vl->setCrs(dest);
@@ -141,6 +147,7 @@ int LayerOps::ensureControlPointQualityFields(QgsVectorLayer* controlPoints) {
 
 bool LayerOps::applyDomainDrawStyle(QgsVectorLayer* layer, const QString& layerKeyIn) {
   if (!layer || !layer->isValid()) return false;
+  if (isAdminEmdLayer(layer)) return true;
   const QString key = layerKeyIn.isEmpty() ? layerKeyOf(layer) : layerKeyIn;
   const Qgis::GeometryType gt = layer->geometryType();
 
@@ -256,6 +263,7 @@ QString LayerOps::detectNameField(const QgsVectorLayer* layer) {
   const QStringList heritageCandidates = {
     QStringLiteral("사업명"), QStringLiteral("유적명"), QStringLiteral("유적명칭"),
     QStringLiteral("조사명"), QStringLiteral("보고서명"), QStringLiteral("소재지"),
+    QStringLiteral("번호"), QStringLiteral("유적번호"), QStringLiteral("site_no"),
     QStringLiteral("yujuk_nm"), QStringLiteral("yujeok_nm"), QStringLiteral("site_name"),
     QStringLiteral("hist_nm"), QStringLiteral("rem_nm"), QStringLiteral("명칭"),
     QStringLiteral("name"), QStringLiteral("title")
@@ -2521,21 +2529,31 @@ int LayerOps::refreshVworldApiKeyInLayers(QgsProject* project, const QString& cu
 
 void LayerOps::applyCanvasScreenDpi(QgsMapCanvas* canvas) {
   if (!canvas) return;
-  // FHD 100% → 4K 150–200% (DPR 1.0–2.0). PassThrough 배율 그대로 쓴다.
-  // 같은 값이라도 다시 쓰면 렌더 설정이 더러워져 캐시를 버리고 전체를 다시 그린다.
-  // 이 함수는 9곳에서 불리므로 값이 실제로 달라질 때만 손댄다.
+  // FHD 100% → 와이드 → 4K 150–200% (DPR 1.0–2.0). 배율은 PassThrough 그대로.
+  // 타일 격자는 위젯×DPR 이어야 화면을 채운다. outputSize 가 논리 크기(또는 옛 값)로
+  // 남으면 줌할 때 위성만 한 덩어리 잘린 것처럼 보인다. 값이 달라질 때만 쓴다.
   const qreal dpr = canvas->devicePixelRatioF();
-  if (dpr > 0.05 &&
-      !qFuzzyCompare(canvas->mapSettings().devicePixelRatio(), static_cast<float>(dpr)))
-    canvas->mapSettings().setDevicePixelRatio(static_cast<float>(dpr));
+  const qreal pixelDpr = dpr > 0.05 ? dpr : 1.0;
+  if (!qFuzzyCompare(canvas->mapSettings().devicePixelRatio(), static_cast<float>(pixelDpr)))
+    canvas->mapSettings().setDevicePixelRatio(static_cast<float>(pixelDpr));
+  if (canvas->width() >= 2 && canvas->height() >= 2) {
+    const QSize want(qMax(1, qRound(double(canvas->width()) * pixelDpr)),
+                     qMax(1, qRound(double(canvas->height()) * pixelDpr)));
+    if (canvas->mapSettings().outputSize() != want)
+      canvas->mapSettings().setOutputSize(want);
+  }
   QWindow* wh = canvas->windowHandle();
   if (!wh && canvas->window())
     wh = canvas->window()->windowHandle();
+  // 96×DPR 과 윈도우 논리 DPI(보통 같음)로 축척 분모를 모니터마다 같게 둔다.
+  double dpi = 96.0 * double(pixelDpr);
   if (wh && wh->screen()) {
-    const double dpi = wh->screen()->logicalDotsPerInch();
-    if (dpi > 10.0 && !qFuzzyCompare(canvas->mapSettings().outputDpi(), dpi))
-      canvas->mapSettings().setOutputDpi(dpi);
+    const double logical = wh->screen()->logicalDotsPerInch();
+    if (logical > 10.0)
+      dpi = logical;
   }
+  if (!qFuzzyCompare(canvas->mapSettings().outputDpi(), dpi))
+    canvas->mapSettings().setOutputDpi(dpi);
 }
 
 bool LayerOps::canvasDisplayEventNeedsTileRefresh(int eventType) {
@@ -2790,6 +2808,142 @@ bool LayerOps::isolateAndZoomToLayer(QgsProject* project, QgsMapCanvas* canvas, 
   return true;
 }
 
+bool LayerOps::isAdminEmdLayer(const QgsMapLayer* layer) {
+  if (!layer) return false;
+  if (layer->customProperty(QStringLiteral("ka_hgis/admin_emd")).toBool()) return true;
+  return layerKeyOf(layer) == QLatin1String(kAdminEmdKey);
+}
+
+bool LayerOps::isImportedSiteLayer(const QgsMapLayer* layer) {
+  if (!layer) return false;
+  if (isAdminEmdLayer(layer)) return false;
+  const QString key = layerKeyOf(layer);
+  if (!key.startsWith(QLatin1String("user:"))) return false;
+  if (key.startsWith(QLatin1String("user:buffer"))) return false;
+  return true;
+}
+
+QgsVectorLayer* LayerOps::findImportedSiteLayer(QgsProject* project) {
+  if (!project) return nullptr;
+  QgsVectorLayer* named = nullptr;
+  QgsVectorLayer* any = nullptr;
+  for (QgsMapLayer* l : project->mapLayers()) {
+    auto* v = qobject_cast<QgsVectorLayer*>(l);
+    if (!v || !isImportedSiteLayer(v)) continue;
+    if (!any) any = v;
+    const QString n = v->name() + layerKeyOf(v);
+    if (n.contains(QStringLiteral("유적")))
+      return v;
+    if (!named) named = v;
+  }
+  return named ? named : any;
+}
+
+bool LayerOps::applyInvertedPaperMask(QgsVectorLayer* layer) {
+  if (!layer || !layer->isValid()) return false;
+  auto fill = QgsFillSymbol::createSimple({
+      {QStringLiteral("color"), QStringLiteral("255,255,255,255")},
+      {QStringLiteral("style"), QStringLiteral("solid")},
+      {QStringLiteral("outline_style"), QStringLiteral("no")},
+  });
+  if (!fill) return false;
+  auto* embedded = new QgsSingleSymbolRenderer(fill.release());
+  auto* inv = new QgsInvertedPolygonRenderer(embedded);
+  inv->setPreprocessingEnabled(true);
+  layer->setRenderer(inv);
+  layer->triggerRepaint();
+  return true;
+}
+
+QgsVectorLayer* LayerOps::upsertAdminEmdMask(QgsProject* project, const QgsGeometry& geom,
+                                             const QgsCoordinateReferenceSystem& srcCrs,
+                                             const QString& workCrsAuthId, const QString& titleKo) {
+  if (!project || geom.isEmpty()) return nullptr;
+  const QString destAuth =
+      workCrsAuthId.isEmpty() ? QStringLiteral("EPSG:5186") : workCrsAuthId;
+  QgsGeometry local = geom;
+  const QgsCoordinateReferenceSystem dest(destAuth);
+  if (srcCrs.isValid() && dest.isValid() && srcCrs != dest) {
+    QgsCoordinateTransform xf(srcCrs, dest, project->transformContext());
+    xf.setBallparkTransformsAreAppropriate(true);
+    if (local.transform(xf) != Qgis::GeometryOperationResult::Success)
+      return nullptr;
+  }
+
+  QgsVectorLayer* layer = nullptr;
+  for (QgsMapLayer* l : project->mapLayers()) {
+    if (isAdminEmdLayer(l)) {
+      layer = qobject_cast<QgsVectorLayer*>(l);
+      break;
+    }
+  }
+  if (!layer) {
+    const QString title =
+        titleKo.isEmpty() ? QStringLiteral("읍면동 마스크") : titleKo;
+    layer = new QgsVectorLayer(QStringLiteral("Polygon?crs=%1").arg(destAuth), title,
+                               QStringLiteral("memory"));
+    if (!layer->isValid()) {
+      delete layer;
+      return nullptr;
+    }
+    markReferenceLayer(layer);
+    layer->setCustomProperty(QStringLiteral("ka_hgis/admin_emd"), true);
+    project->addMapLayer(layer, true);
+  } else if (!titleKo.isEmpty()) {
+    layer->setName(titleKo);
+  }
+  if (layer && layerKeyOf(layer) == QLatin1String(kAdminEmdKey))
+    layer->removeCustomProperty(QString::fromUtf8(kPropLayerKey));
+
+  if (!layer->isValid()) return nullptr;
+  if (layer->isEditable())
+    layer->rollBack();
+  if (!layer->startEditing()) return nullptr;
+  QgsFeatureIds ids;
+  QgsFeatureIterator it = layer->getFeatures();
+  QgsFeature existing;
+  while (it.nextFeature(existing))
+    ids.insert(existing.id());
+  if (!ids.isEmpty())
+    layer->deleteFeatures(ids);
+  QgsFeature f(layer->fields());
+  f.setGeometry(local);
+  if (!layer->addFeature(f)) {
+    layer->rollBack();
+    return nullptr;
+  }
+  if (!layer->commitChanges()) {
+    layer->rollBack();
+    return nullptr;
+  }
+  applyInvertedPaperMask(layer);
+  applyLegendCrsLabel(layer);
+  return layer;
+}
+
+static bool isSatelliteLegendLayer(const QgsMapLayer* layer) {
+  if (!layer) return false;
+  return layer->name().contains(QStringLiteral("위성"));
+}
+
+bool LayerOps::isolateSurfaceSurveyView(QgsProject* project, QgsMapCanvas* canvas,
+                                        QgsMapLayer* siteLayer) {
+  if (!project) return false;
+  QgsLayerTree* root = project->layerTreeRoot();
+  if (!root) return false;
+  for (QgsMapLayer* l : project->mapLayers()) {
+    if (!l) continue;
+    QgsLayerTreeLayer* n = root->findLayer(l->id());
+    if (!n) continue;
+    const bool show = isSatelliteLegendLayer(l) || isAdminEmdLayer(l) || l == siteLayer ||
+                      (siteLayer == nullptr && isImportedSiteLayer(l));
+    n->setItemVisibilityChecked(show);
+  }
+  if (canvas)
+    syncMapCanvas(project, canvas, false);
+  return true;
+}
+
 void LayerOps::zoomToFullMax(QgsMapCanvas* canvas) {
   if (!canvas) return;
   const QString auth = canvas->mapSettings().destinationCrs().isValid()
@@ -2985,6 +3139,49 @@ bool LayerOps::addVworldBaseMap(QgsProject* project, QgsMapCanvas* canvas, const
   return ok;
 }
 
+// ── 캔버스가 그리는 중일 때: 버리지 말고 뒤로 미룬다 ─────────────────────────
+// 예전에는 canvas->isDrawing() 이면 새로고침·클램프를 그냥 버렸다. 진행 중인 WMS
+// 작업을 끊으면 TileDownloadManager 가 뒤늦게 deleteLater 를 불러 ACCESS_VIOLATION
+// 이 나기 때문이다. 그런데 버리기만 하니 「이 레이어로 이동」처럼 옮긴 직후 다시
+// 그려야 하는 자리에서 위성 타일이 새 범위로 갱신되지 않았고, 사용자가 줌인·줌아웃
+// 하거나 점을 찍고 지울 때까지 배경이 빈 종이로 남았다.
+// 이제는 그리기가 끝난 뒤로 미룬다. 진행 중인 작업을 끊지 않으므로 크래시 회피는
+// 그대로고, 미뤄 둔 일은 반드시 실행된다.
+namespace {
+constexpr int kDeferredRetryMax = 40;   // 40 × 120ms ≈ 4.8초까지 기다린다
+constexpr int kDeferredRetryMs = 120;
+constexpr const char* kPropRefreshPending = "kaRefreshPending";
+constexpr const char* kPropClampPending = "kaKoreaClampPending";
+
+void runWhenCanvasIdle(QgsMapCanvas* canvas, const char* pendingProp, int retriesLeft,
+                       const std::function<void(QgsMapCanvas*)>& job) {
+  if (!canvas) return;
+  if (!canvas->isDrawing()) {
+    canvas->setProperty(pendingProp, false);
+    job(canvas);
+    return;
+  }
+  if (retriesLeft <= 0) {
+    canvas->setProperty(pendingProp, false);
+    return;
+  }
+  // 같은 일이 이미 예약돼 있으면 타이머를 겹쳐 쌓지 않는다.
+  if (retriesLeft == kDeferredRetryMax && canvas->property(pendingProp).toBool())
+    return;
+  canvas->setProperty(pendingProp, true);
+  QPointer<QgsMapCanvas> guard(canvas);
+  QTimer::singleShot(kDeferredRetryMs, canvas, [guard, pendingProp, retriesLeft, job]() {
+    if (guard)
+      runWhenCanvasIdle(guard.data(), pendingProp, retriesLeft - 1, job);
+  });
+}
+
+void refreshCanvasNowOrLater(QgsMapCanvas* canvas) {
+  runWhenCanvasIdle(canvas, kPropRefreshPending, kDeferredRetryMax,
+                    [](QgsMapCanvas* c) { c->refresh(); });
+}
+}  // namespace
+
 void LayerOps::refreshXyzBasemapTiles(QgsMapCanvas* canvas) {
   if (!canvas) return;
   applyCanvasScreenDpi(canvas);
@@ -2995,9 +3192,8 @@ void LayerOps::refreshXyzBasemapTiles(QgsMapCanvas* canvas) {
   canvas->setParallelRenderingEnabled(false);
   // Aborting an in-flight WMS job drops TileDownloadManager objects that
   // still finish and call deleteLater — ACCESS_VIOLATION on Windows.
-  if (canvas->isDrawing())
-    return;
-  canvas->refresh();
+  // 그래서 끊지 않는다. 다만 버리지도 않고, 그리기가 끝나면 새 범위로 다시 그린다.
+  refreshCanvasNowOrLater(canvas);
 }
 
 bool LayerOps::addVworldSatelliteMap(QgsProject* project, QgsMapCanvas* canvas, const QString& apiKey, QString* errorOut) {
@@ -4128,10 +4324,11 @@ bool LayerOps::isLayerVisible(QgsProject* project, const QString& name) {
 }
 
 void LayerOps::refreshCanvasIfIdle(QgsMapCanvas* canvas) {
-  if (!canvas || canvas->isDrawing()) return;
+  if (!canvas) return;
   // 병렬 렌더만 끈다. 미리보기는 유지해야 팬·줌에서 지도가 안 꺼진다.
   canvas->setParallelRenderingEnabled(false);
-  canvas->refresh();
+  // 그리는 중이면 예전처럼 버리지 않고 끝난 뒤로 미룬다.
+  refreshCanvasNowOrLater(canvas);
 }
 
 bool LayerOps::addKoreaBasemap(QgsProject* project, QgsMapCanvas* canvas, KoreaBasemap kind,
@@ -4291,17 +4488,30 @@ static QgsRectangle extentFittedInside(const QgsRectangle& kr, double viewAspect
 
 static double canvasViewAspect(const QgsMapCanvas* canvas) {
   if (!canvas) return 1.0;
+  // 위젯 논리 크기 비율. outputSize 는 DPR 이 곱해져 있어도 비율은 같지만,
+  // 아직 0이거나 줌 직전 옛 값이면 와이드 모니터에서 한국 상자가 잘린다.
+  const int w = canvas->width();
+  const int h = canvas->height();
+  if (w >= 2 && h >= 2)
+    return double(w) / double(h);
   const QSize out = canvas->mapSettings().outputSize();
   if (out.width() >= 2 && out.height() >= 2)
     return double(out.width()) / double(out.height());
-  const int w = qMax(1, canvas->width());
-  const int h = qMax(1, canvas->height());
-  return double(w) / double(h);
+  return 1.0;
 }
 
 bool LayerOps::clampCanvasToKorea(QgsMapCanvas* canvas) {
   if (!canvas) return false;
-  if (canvas->isDrawing()) return false;
+  if (canvas->isDrawing()) {
+    // 그리는 중이라고 클램프를 버리면 한국 밖까지 줌아웃된 화면이 그대로 굳는다.
+    // VWorld 위성·지적 타일은 한반도 범위에만 있어서 그 화면에는 타일이 한 장도
+    // 오지 않는다(1:800만처럼 넓어지면 배경이 통째로 빈다). 끝난 뒤에 잡아 준다.
+    runWhenCanvasIdle(canvas, kPropClampPending, kDeferredRetryMax, [](QgsMapCanvas* c) {
+      if (LayerOps::clampCanvasToKorea(c))
+        LayerOps::refreshCanvasIfIdle(c);
+    });
+    return false;
+  }
   const QString auth = canvas->mapSettings().destinationCrs().isValid()
                            ? canvas->mapSettings().destinationCrs().authid()
                            : QStringLiteral("EPSG:5186");
@@ -4396,7 +4606,7 @@ void LayerOps::zoomToKorea(QgsMapCanvas* canvas, const QString& epsgAuthId, bool
 }
 
 QString LayerOps::convertToShp5179(QgsVectorLayer* layer, const QString& outShpPath,
-                                   QgsProject* project, QString* errorOut) {
+                                   QgsProject* project, QString* errorOut, bool addToMap) {
   if (!layer || !layer->isValid()) {
     if (errorOut) *errorOut = QStringLiteral("Invalid layer");
     return {};
@@ -4404,11 +4614,12 @@ QString LayerOps::convertToShp5179(QgsVectorLayer* layer, const QString& outShpP
   QString path = outShpPath;
   if (!path.endsWith(QLatin1String(".shp"), Qt::CaseInsensitive))
     path += QStringLiteral(".shp");
-  return reprojectVectorLayer(layer, QStringLiteral("EPSG:5179"), path, project, errorOut);
+  return reprojectVectorLayer(layer, QStringLiteral("EPSG:5179"), path, project, errorOut,
+                              addToMap);
 }
 
 QString LayerOps::convertFileToShp5179(const QString& inPath, const QString& outShpPath,
-                                       QgsProject* project, QString* errorOut) {
+                                       QgsProject* project, QString* errorOut, bool addToMap) {
   if (!QFile::exists(inPath)) {
     if (errorOut) *errorOut = QStringLiteral("Input not found");
     return {};
@@ -4419,7 +4630,7 @@ QString LayerOps::convertFileToShp5179(const QString& inPath, const QString& out
     delete vl;
     return {};
   }
-  const QString out = convertToShp5179(vl, outShpPath, project, errorOut);
+  const QString out = convertToShp5179(vl, outShpPath, project, errorOut, addToMap);
   delete vl;
   return out;
 }

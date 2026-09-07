@@ -1,0 +1,45 @@
+# ka-hgis 정적 분석 설정
+#
+# 방침: 노이즈보다 신호. Qt/QGIS 코드베이스에서 cppcoreguidelines-* 나 modernize-* 를
+#       통째로 켜면 수천 건이 쏟아져 진짜 버그가 묻힌다. 실제 버그(bugprone)와
+#       성능(performance) 위주로 좁혀 잡는다.
+#
+# 실행: clang-tidy -p build src/core/LayerOps.cpp
+#   ※ compile_commands.json 이 필요하다. VS 제너레이터는 이 파일을 만들지 않으므로
+#     CMakePresets 의 'compiledb' 프리셋(Ninja)으로 먼저 생성할 것.
+
+Checks: >
+  -*,
+  bugprone-*,
+  performance-*,
+  misc-*,
+  readability-misleading-indentation,
+  readability-redundant-control-flow,
+  readability-redundant-string-cstr,
+  readability-simplify-boolean-expr,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-emplace,
+  modernize-loop-convert,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -misc-non-private-member-variables-in-classes,
+  -misc-no-recursion,
+  -misc-include-cleaner,
+  -performance-avoid-endl,
+  -performance-enum-size,
+  -misc-const-correctness,
+  -misc-use-anonymous-namespace
+
+# 자체 코드만 검사한다. Qt/QGIS/GDAL 헤더의 경고는 우리가 고칠 수 없다.
+HeaderFilterRegex: '^.*[\\/]src[\\/].*\.(h|hpp)$'
+
+# 대량 정리(cleanup) 작업을 할 때만 아래 두 검사를 켠다. 평소엔 꺼둔다.
+#   clang-tidy -p build --checks='misc-const-correctness,misc-use-anonymous-namespace' <file>
+# 실측: 코어 3개 파일에서만 83건이 나와, 켜두면 진짜 버그가 묻힌다.
+#
+# 아직 기존 경고가 남아 있으므로 에러로 승격하지 않는다.
+# 기존 건을 정리한 뒤 아래 줄을 켜면 회귀를 막을 수 있다.
+# WarningsAsErrors: 'bugprone-*,performance-*'
+
+FormatStyle: file

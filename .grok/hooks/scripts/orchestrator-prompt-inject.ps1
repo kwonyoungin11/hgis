@@ -11,7 +11,7 @@ $ErrorActionPreference = 'SilentlyContinue'
 $ctx = @'
 [ORCHESTRATOR + GRAPH + LOOP — every user request]
 MCP / skills / hooks are ON. Do not refuse them.
-1) context7 + sequential-thinking before answering.
+1) context7 when library docs are needed. STA (sequential-thinking-agent) only if complexity >= 3.
 2) Internally rewrite the request. Do not dump it.
 3) GRAPH: pick QUICK | gis | ship | debug | architecture and spawn that graph this turn. FEATURE must not be solo. Worker prompts: TASK / EXPECTED OUTCOME / MUST DO / MUST NOT DO / CONTEXT.
 4) LOOP: after src/ edits, cmake --build then ctest this turn. Quote exit codes. No 완료/fixed without this-turn output. Fail → fix → re-run.

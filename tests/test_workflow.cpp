@@ -2,6 +2,13 @@
 #include <limits>
 #include <memory>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 #include <QtTest>
 #include <QColor>
 #include <QDir>
@@ -14,6 +21,7 @@
 #include <QDateTime>
 #include <QCoreApplication>
 #include <QEvent>
+#include <QSize>
 #include <QSettings>
 #include <QUrl>
 #include <QTemporaryDir>
@@ -37,6 +45,10 @@
 #include "core/GeorefService.h"
 #include "core/KaSafeQgis.h"
 #include "core/SurveyStorage.h"
+#include "core/AdminBoundaryService.h"
+#include "core/SectionLayoutService.h"
+#include <QCryptographicHash>
+#include <QRegularExpression>
 
 #include <gdal_priv.h>
 #include <ogr_api.h>
@@ -69,6 +81,7 @@
 #include <qgslayertreelayer.h>
 #include <qgscategorizedsymbolrenderer.h>
 #include <qgssinglesymbolrenderer.h>
+#include <qgsinvertedpolygonrenderer.h>
 #include <qgslinesymbol.h>
 #include <qgssymbollayer.h>
 #include <qgsprintlayout.h>
@@ -137,6 +150,10 @@ private slots:
   void vworldSettingsAndNoKeyTests();
   void koreaRegionCatalog_gyeonggiGangwonAddressQuery();
   void regionLocator_sitsInToolbarGapBeforeSearch();
+  void adminBoundary_buildsEmdUrlWithoutHardcodedKey();
+  void adminBoundary_parsesOkFeatureAndRejectsError();
+  void layerOps_isolateSurfaceSurvey_satelliteAndUserSiteOnly();
+  void regionLocator_fieldMapButtonKeepsFind();
   void editBufferCommitSurvivesReopen();
   void undoCommittedFeature_removesLastAdded();
   void importControlCsvWritesFeatures();
@@ -169,9 +186,16 @@ private slots:
   void canvasDisplayEvent_devicePixelRatioChangeNeedsTileRefresh();
   void refreshXyzBasemapTiles_restoresStaleDevicePixelRatio();
   void refreshXyzBasemapTiles_doesNotAbortInFlightWmsJob();
+  void zoomToLayer_redrawsBasemapAtNewExtent();
+  void shapeEditing_livesInsideSelectTool();
+  void subToolbar_marksTheActiveToolForTheBlueUnderline();
+  void layoutOpacityRail_staysPutWhenThePageMoves();
   void uiComboActions_doNotBustTileCacheWhileDrawing();
   void startupView_doesNotRestackXyzRefreshWhileWmsDownloads();
   void addVworldSatellite_fourKCanvasKeeps256pxTiles();
+  void applyCanvasScreenDpi_outputSizeFollowsWideWidget();
+  void convertToShp5179_addToMapFalseKeepsProjectLayerCount();
+  void convertSelectedTo5179_sourceDoesNotAddToMap();
   void otf_keepsWorkCrsWhenBasemapIs3857();
   void koreaExtent_5186IsTmMetersNotDegrees();
   void setWorkCrs_5187to5186_keepsSatelliteAndLocalExtent();
@@ -222,6 +246,16 @@ private slots:
   void fieldAndongCopy_embeddedRelativePathOpensWithoutCwd();
   void leftoverRestore_keepsUserFillColorNotFactoryDomainStyle();
   void restoreLastSurvey_prefersEmbeddedWorkspaceWhenSafe();
+  void restoreLastSurvey_bootUsesLayersOnlyToAvoidWmsAv();
+  void finishOpenedProject_doesNotBareRefreshWhileWms();
+  void test_export_failure_aborts_and_reports_error();
+  void test_section_sheet_bundling();
+  void test_chunked_sha256_manifest_integrity();
+  void test_challenge_pdf_failure_readonly_and_locked();
+  void test_challenge_section_sheet_bundling_variations();
+  void test_challenge_encoding_txt_flush_and_content();
+  void test_challenge_manifest_64kb_chunking_stress();
+  void test_challenge_manifest_self_exclusion_and_regex_format();
 };
 
 static bool projectHasLayerNamedLike(QgsProject* proj, const QString& base) {
@@ -378,11 +412,21 @@ void TestWorkflow::fullWorkflowSurveyToPackage() {
 void TestWorkflow::exportSubmissionPackage_pdfIsUserSheetOnly() {
   QgsProject proj;
   proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
-  auto* blank = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
-                                   QStringLiteral("layout_blank"), QStringLiteral("memory"));
-  QVERIFY(blank->isValid());
-  proj.addMapLayer(blank);
-  QVERIFY2(addComposedUserSheet(&proj, blank), "composed user_sheet");
+  auto* sa = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                QStringLiteral("survey_area"), QStringLiteral("memory"));
+  QVERIFY(sa->isValid());
+  sa->setCustomProperty(QString::fromUtf8(LayerOps::kPropLayerKey), QStringLiteral("survey_area"));
+  proj.addMapLayer(sa);
+  QVERIFY(sa->startEditing());
+  QgsFeature sf(sa->fields());
+  QgsPolylineXY ring;
+  ring << QgsPointXY(200000, 450000) << QgsPointXY(200100, 450000)
+       << QgsPointXY(200100, 450100) << QgsPointXY(200000, 450100)
+       << QgsPointXY(200000, 450000);
+  sf.setGeometry(QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring));
+  QVERIFY(sa->addFeature(sf));
+  QVERIFY(sa->commitChanges());
+  QVERIFY2(addComposedUserSheet(&proj, sa), "composed user_sheet");
   QVERIFY(LayoutService::isComposedStudioSheet(&proj));
   LayoutService::ensureDefaultLayouts(&proj);
 
@@ -1003,9 +1047,16 @@ void TestWorkflow::vertexEdit_snapsAndOffersAddDeleteOnLine() {
   QVERIFY2(snap >= 0, "applySnapConfig");
   const int snapEnd = mwSrc.indexOf(QLatin1String("void MainWindow::"), snap + 10);
   const QString snapBody = mwSrc.mid(snap, snapEnd > snap ? snapEnd - snap : 800);
-  QVERIFY2(snapBody.contains(QLatin1String("m_vertexTool")) &&
+  // 도형수정은 이제 별도 도구가 아니라 「도형선택」 안에 있다.
+  // 자석 설정도 그 경로를 따라 꼭짓점 편집기까지 내려가야 한다.
+  QVERIFY2(snapBody.contains(QLatin1String("m_featureSelectTool")) &&
                snapBody.contains(QLatin1String("setSnapEnabled")),
-           "자석 설정이 도형수정 도구에 전달돼야 함");
+           "자석 설정이 도형선택(=도형수정) 도구에 전달돼야 함");
+  QFile sel(QStringLiteral("src/app/KaFeatureSelectTool.cpp"));
+  QVERIFY2(sel.open(QIODevice::ReadOnly | QIODevice::Text), "KaFeatureSelectTool.cpp");
+  QVERIFY2(QString::fromUtf8(sel.readAll())
+               .contains(QLatin1String("m_vertex->setSnapEnabled")),
+           "선택 도구가 받은 자석 설정을 꼭짓점 편집기에 넘겨야 함");
 }
 
 void TestWorkflow::riverLevelLegend_waterStyleAndNameLabels() {
@@ -1225,7 +1276,7 @@ void TestWorkflow::elevationMap_xyzOnlySkipsAbortWhilePanning() {
                toggle.contains(QLatin1String("isDrawing")),
            "adding 지형맵 must not restack an in-flight tile job");
 
-  bool extentsSkipsWhileDrawing = false;
+  bool extentsClamps = false;
   int pos = 0;
   while (true) {
     const int ext = app.indexOf(QLatin1String("&QgsMapCanvas::extentsChanged"), pos);
@@ -1233,13 +1284,30 @@ void TestWorkflow::elevationMap_xyzOnlySkipsAbortWhilePanning() {
     const int end = app.indexOf(QLatin1String("});"), ext);
     const QString lambda = app.mid(ext, qMax(80, (end > ext ? end : ext + 420) - ext));
     if (lambda.contains(QLatin1String("clampCanvasToKorea"))) {
-      extentsSkipsWhileDrawing = lambda.contains(QLatin1String("isDrawing"));
+      extentsClamps = true;
       break;
     }
     pos = ext + 10;
   }
-  QVERIFY2(extentsSkipsWhileDrawing,
-           "extentsChanged must skip clamp while the canvas is drawing");
+  QVERIFY2(extentsClamps, "extentsChanged must clamp the view back into Korea");
+
+  // 예전에는 이 램다가 isDrawing() 이면 클램프를 통째로 건너뛰었다. 그런데 줌아웃은
+  // 곧바로 렌더를 띄우므로 extentsChanged 시점의 캔버스는 대개 그리는 중이었고,
+  // 그래서 클램프가 거의 매번 버려져 한국 밖(1:800만 등)까지 줌아웃되면 VWorld 타일이
+  // 없어 위성이 통째로 사라졌다. 이제 clampCanvasToKorea 가 직접 isDrawing() 을 보고,
+  // 진행 중인 WMS 작업을 끊는 대신 끝난 뒤로 미룬다 — 버리지는 않는다.
+  const QString clampBody = opsSrc.mid(clampFn, 1200);
+  QVERIFY2(clampBody.contains(QLatin1String("isDrawing")),
+           "must not move the extent while an in-flight WMS job is drawing");
+  QVERIFY2(clampBody.contains(QLatin1String("runWhenCanvasIdle")),
+           "그리는 중이면 버리지 말고 끝난 뒤로 미뤄야 한다");
+  const int deferFn = opsSrc.indexOf(QLatin1String("void runWhenCanvasIdle"));
+  QVERIFY2(deferFn >= 0, "runWhenCanvasIdle helper must exist");
+  const QString deferBody = opsSrc.mid(deferFn, 1200);
+  QVERIFY2(deferBody.contains(QLatin1String("QTimer::singleShot")),
+           "미뤄 둔 일은 타이머로 반드시 다시 실행돼야 한다 (버리면 화면이 빈 채로 굳는다)");
+  QVERIFY2(!deferBody.contains(QLatin1String("stopRendering")),
+           "must not abort an in-flight WMS job");
 }
 
 void TestWorkflow::demColorRelief_is3857XyzNotTerrainMap() {
@@ -1786,12 +1854,28 @@ void TestWorkflow::exportPackagePrefersUserSheetPdf() {
       QStringLiteral("ka_user_sheet_pkg_") + QString::number(QDateTime::currentMSecsSinceEpoch()));
   QDir().mkpath(dir);
   QgsProject proj;
-  QString err;
-  QVERIFY2(!LayoutService::createBlankSheet(&proj, 297.0, 210.0, QStringLiteral("user_sheet"), &err)
-                .isEmpty(),
-           qPrintable(err));
-  QVERIFY(proj.layoutManager()->layoutByName(QStringLiteral("user_sheet")));
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+
+  auto* sa = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                QStringLiteral("survey_area"), QStringLiteral("memory"));
+  QVERIFY(sa->isValid());
+  sa->setCustomProperty(QString::fromUtf8(LayerOps::kPropLayerKey), QStringLiteral("survey_area"));
+  proj.addMapLayer(sa);
+  QVERIFY(sa->startEditing());
+  QgsFeature sf(sa->fields());
+  QgsPolylineXY ring;
+  ring << QgsPointXY(200000, 450000) << QgsPointXY(200100, 450000)
+       << QgsPointXY(200100, 450100) << QgsPointXY(200000, 450100)
+       << QgsPointXY(200000, 450000);
+  sf.setGeometry(QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring));
+  QVERIFY(sa->addFeature(sf));
+  QVERIFY(sa->commitChanges());
+
+  QVERIFY2(addComposedUserSheet(&proj, sa), "composed user_sheet");
+  QVERIFY(LayoutService::isComposedStudioSheet(&proj));
+
   const QString pkg = QDir(dir).filePath(QStringLiteral("pkg"));
+  QString err;
   QVERIFY2(!ExportService::exportSubmissionPackage(&proj, pkg, QStringLiteral("UTF-8"),
                                                    QStringLiteral("OK"), false, false, &err)
                 .isEmpty(),
@@ -1950,6 +2034,37 @@ void TestWorkflow::convert5186PolygonTo5179Shp() {
   QVERIFY(pkgLoaded.isValid());
   QCOMPARE(pkgLoaded.crs().authid(), QStringLiteral("EPSG:5179"));
   delete fp;
+}
+
+void TestWorkflow::convertToShp5179_addToMapFalseKeepsProjectLayerCount() {
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  auto* vl = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"), QStringLiteral("work_poly"),
+                                QStringLiteral("memory"));
+  QVERIFY(vl->isValid());
+  QVERIFY(vl->startEditing());
+  QgsFeature ff(vl->fields());
+  QgsPolylineXY ring;
+  ring << QgsPointXY(200000, 450000) << QgsPointXY(200050, 450000) << QgsPointXY(200050, 450050)
+       << QgsPointXY(200000, 450050) << QgsPointXY(200000, 450000);
+  ff.setGeometry(QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring));
+  QVERIFY(vl->addFeature(ff));
+  QVERIFY(vl->commitChanges());
+  proj.addMapLayer(vl);
+  const int before = proj.mapLayers().size();
+  QVERIFY(before >= 1);
+
+  const QString dir = QDir::temp().filePath(QStringLiteral("ka_5179_nomap_") +
+                                            QString::number(QDateTime::currentMSecsSinceEpoch()));
+  QDir().mkpath(dir);
+  const QString out = QDir(dir).filePath(QStringLiteral("only_file.shp"));
+  QString err;
+  QVERIFY2(!LayerOps::convertToShp5179(vl, out, &proj, &err, false).isEmpty(), qPrintable(err));
+  QCOMPARE(int(proj.mapLayers().size()), before);
+  QVERIFY(QFile::exists(out));
+  QgsVectorLayer loaded(out, QStringLiteral("u"), QStringLiteral("ogr"));
+  QVERIFY(loaded.isValid());
+  QVERIFY(loaded.crs().authid() == QStringLiteral("EPSG:5179") || loaded.crs().isValid());
 }
 
 void TestWorkflow::vworldLayerOpsTest() {
@@ -2153,6 +2268,118 @@ void TestWorkflow::regionLocator_sitsInToolbarGapBeforeSearch() {
   QVERIFY2(body.contains(QLatin1String("setEditable(true)")), "동은 목록 선택 + 한글 입력");
   QVERIFY2(!body.contains(QLatin1String("Qt::Popup")),
            "Popup 창은 Windows에서 한글 IME를 막는다");
+}
+
+void TestWorkflow::adminBoundary_buildsEmdUrlWithoutHardcodedKey() {
+  const QUrl url = AdminBoundaryService::buildGetFeatureUrl(
+      QStringLiteral("TEST_KEY_NOT_PRODUCTION"), QStringLiteral("경상북도"),
+      QStringLiteral("안동시"), QStringLiteral("풍산읍"));
+  const QString s = url.toString();
+  QVERIFY2(s.contains(QLatin1String("api.vworld.kr/req/data")), qPrintable(s));
+  QVERIFY2(s.contains(QLatin1String("LT_C_ADEMD_INFO")), qPrintable(s));
+  QVERIFY2(s.contains(QLatin1String("geometry=true")) || s.contains(QLatin1String("geometry%3Dtrue")),
+           qPrintable(s));
+  QVERIFY2(s.contains(QLatin1String("TEST_KEY_NOT_PRODUCTION")), "key is a parameter, not a baked secret");
+  QVERIFY2(!s.contains(QLatin1String("vworld-live-key"), Qt::CaseInsensitive),
+           "must not hardcode a production key");
+  QVERIFY2(!s.contains(QLatin1String("domain="), Qt::CaseInsensitive),
+           "Data API DOMAIN=localhost rejects a live key");
+  QVERIFY2(s.contains(QStringLiteral("경상북도")) || QUrl::fromPercentEncoding(s.toUtf8()).contains(QStringLiteral("경상북도")),
+           qPrintable(s));
+  const QString filter = AdminBoundaryService::attrFilter(
+      QStringLiteral("경상북도"), QStringLiteral("안동시"), QStringLiteral("풍산읍"));
+  QVERIFY2(filter.contains(QStringLiteral("경상북도")), qPrintable(filter));
+  QVERIFY2(filter.contains(QStringLiteral("안동시")), qPrintable(filter));
+  QVERIFY2(filter.contains(QStringLiteral("풍산읍")), qPrintable(filter));
+}
+
+void TestWorkflow::adminBoundary_parsesOkFeatureAndRejectsError() {
+  const QByteArray ok = QByteArrayLiteral(
+      "{\"response\":{\"status\":\"OK\",\"result\":{\"featureCollection\":{"
+      "\"type\":\"FeatureCollection\",\"crs\":{\"type\":\"name\",\"properties\":{\"name\":\"EPSG:3857\"}},"
+      "\"features\":[{\"type\":\"Feature\",\"properties\":{"
+      "\"emd_cd\":\"47170340\",\"emd_kor_nm\":\"풍산읍\",\"full_nm\":\"경상북도 안동시 풍산읍\"},"
+      "\"geometry\":{\"type\":\"Polygon\",\"coordinates\":"
+      "[[[14200000,4300000],[14201000,4300000],[14201000,4301000],[14200000,4301000],[14200000,4300000]]]}}]}}}}");
+  const AdminBoundaryParse parsed = AdminBoundaryService::parseGetFeature(ok, QStringLiteral("안동시"));
+  QVERIFY2(parsed.ok, qPrintable(parsed.error));
+  QCOMPARE(parsed.title, QStringLiteral("경상북도 안동시 풍산읍"));
+  QCOMPARE(parsed.emdCode, QStringLiteral("47170340"));
+  QCOMPARE(parsed.crsAuthId, QStringLiteral("EPSG:3857"));
+  QVERIFY2(parsed.wkt.contains(QLatin1String("POLYGON")), qPrintable(parsed.wkt));
+  QVERIFY(parsed.wkt.contains(QLatin1String("14200000")));
+
+  const QByteArray bad = QByteArrayLiteral(
+      "{\"response\":{\"status\":\"NOT_FOUND\",\"error\":{\"text\":\"no feature\"}}}");
+  const AdminBoundaryParse miss = AdminBoundaryService::parseGetFeature(bad);
+  QVERIFY(!miss.ok);
+  QVERIFY2(miss.error.contains(QStringLiteral("찾지")), qPrintable(miss.error));
+}
+
+void TestWorkflow::layerOps_isolateSurfaceSurvey_satelliteAndUserSiteOnly() {
+  QgsProject proj;
+  auto* sat = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"), QStringLiteral("위성"),
+                                 QStringLiteral("memory"));
+  QVERIFY(sat->isValid());
+  LayerOps::markReferenceLayer(sat);
+  auto* cad = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"), QStringLiteral("지적"),
+                                 QStringLiteral("memory"));
+  QVERIFY(cad->isValid());
+  LayerOps::markReferenceLayer(cad);
+  auto* feat = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"), QStringLiteral("유구 (면)"),
+                                  QStringLiteral("memory"));
+  QVERIFY(feat->isValid());
+  LayerOps::markSurveyLayer(feat, QStringLiteral("feature_poly"));
+  auto* site = new QgsVectorLayer(QStringLiteral("Point?crs=EPSG:5186"), QStringLiteral("문화유적"),
+                                  QStringLiteral("memory"));
+  QVERIFY(site->isValid());
+  LayerOps::markSurveyLayer(site, QStringLiteral("user:문화유적"));
+  QgsGeometry box = QgsGeometry::fromWkt(
+      QStringLiteral("POLYGON((200000 450000,200500 450000,200500 450500,200000 450500,200000 450000))"));
+  QgsVectorLayer* mask =
+      LayerOps::upsertAdminEmdMask(&proj, box, QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")),
+                                   QStringLiteral("EPSG:5186"), QStringLiteral("안동시 풍산읍"));
+  QVERIFY(mask);
+  QVERIFY(mask->isValid());
+  QVERIFY(dynamic_cast<QgsInvertedPolygonRenderer*>(mask->renderer()));
+  QVERIFY(LayerOps::isAdminEmdLayer(mask));
+  QVERIFY2(LayerOps::layerKeyOf(mask).isEmpty(), "admin mask must not use a domain layer_key");
+  QVERIFY(LayerOps::isReferenceOrBasemapLayer(mask));
+  QVERIFY(!LayerOps::domainLayerKeys().contains(QStringLiteral("admin_emd")));
+  QVERIFY(LayerOps::applyDomainDrawStyle(mask));
+  QVERIFY2(dynamic_cast<QgsInvertedPolygonRenderer*>(mask->renderer()),
+           "domain factory style must not replace the invert mask");
+
+  proj.addMapLayer(sat);
+  proj.addMapLayer(cad);
+  proj.addMapLayer(feat);
+  proj.addMapLayer(site);
+
+  QVERIFY(LayerOps::isolateSurfaceSurveyView(&proj, nullptr, site));
+  QVERIFY(LayerOps::isLayerVisible(&proj, QStringLiteral("위성")));
+  QVERIFY(LayerOps::isLayerVisible(&proj, mask->name()));
+  QVERIFY(LayerOps::isLayerVisible(&proj, QStringLiteral("문화유적")));
+  QVERIFY(!LayerOps::isLayerVisible(&proj, QStringLiteral("지적")));
+  QVERIFY(!LayerOps::isLayerVisible(&proj, QStringLiteral("유구 (면)")));
+  QCOMPARE(LayerOps::findImportedSiteLayer(&proj), site);
+}
+
+void TestWorkflow::regionLocator_fieldMapButtonKeepsFind() {
+  QFile loc(QStringLiteral("src/app/KaRegionLocator.cpp"));
+  QVERIFY2(loc.open(QIODevice::ReadOnly | QIODevice::Text), "KaRegionLocator.cpp");
+  const QString body = QString::fromUtf8(loc.readAll());
+  QVERIFY2(body.contains(QStringLiteral("현장 지도")), "읍면동 현장 지도 단추");
+  QVERIFY2(body.contains(QLatin1String("regionFieldMap")), "regionFieldMap objectName");
+  QVERIFY2(body.contains(QLatin1String("regionFieldMapRequested")), "structured sido/city/dong signal");
+  QVERIFY2(body.contains(QStringLiteral("찾기")), "기존 찾기는 유지");
+
+  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
+  const QString src = QString::fromUtf8(mw.readAll());
+  QVERIFY2(src.contains(QLatin1String("regionFieldMapRequested")),
+           "MainWindow must wire 현장 지도");
+  QVERIFY2(src.contains(QLatin1String("searchRequested")), "찾기 지오코딩은 그대로");
+  QVERIFY2(!src.contains(QLatin1String("removeAllMapLayers")), "must not wipe layers");
 }
 
 void TestWorkflow::editBufferCommitSurvivesReopen() {
@@ -2893,8 +3120,120 @@ void TestWorkflow::refreshXyzBasemapTiles_doesNotAbortInFlightWmsJob() {
            "must not drop TileDownloadManager objects still finishing");
   QVERIFY2(!body.contains(QLatin1String("refreshAllLayers")),
            "refreshAllLayers plus refresh re-enters provider_wms block()");
-  QVERIFY2(body.contains(QLatin1String("isDrawing")),
-           "skip a second refresh while the first WMS job is still drawing");
+  QVERIFY2(body.contains(QLatin1String("refreshCanvasNowOrLater")),
+           "isDrawing 검사는 runWhenCanvasIdle 헬퍼로 옮겼다 — 진행 중 작업을 끊지 않는다");
+  QVERIFY2(!body.contains(QLatin1String("canvas->refresh()")),
+           "직접 refresh 하지 말 것 — 그리는 중이면 끝난 뒤로 미뤄야 한다");
+}
+
+void TestWorkflow::zoomToLayer_redrawsBasemapAtNewExtent() {
+  // 사용자 보고: 그리기를 끝내거나 SHP 를 고른 뒤 레이어 우클릭 → [이 레이어로 이동]
+  // 하면 옮긴 자리에 위성이 안 보이고, 줌인·줌아웃하거나 점을 찍고 지워야 나타났다.
+  // 옮긴 범위로 타일을 다시 받아 오라고 시켜야 한다.
+  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text),
+           "run from source tree (ctest WORKING_DIRECTORY)");
+  const QString app = QString::fromUtf8(mw.readAll());
+  const int fn = app.indexOf(QLatin1String("void MainWindow::zoomSelectedLayerMax"));
+  QVERIFY2(fn >= 0, "zoomSelectedLayerMax must exist");
+  const int next = app.indexOf(QLatin1String("\nvoid MainWindow::"), fn + 10);
+  const QString body = app.mid(fn, (next > fn ? next : fn + 1600) - fn);
+  QVERIFY2(body.contains(QLatin1String("zoomToLayerMax")), "레이어 범위로 옮긴다");
+  QVERIFY2(body.contains(QLatin1String("refreshXyzBasemapTiles")),
+           "옮긴 뒤 위성·지적 타일을 새 범위로 다시 받아 와야 한다");
+
+  // 「전체 최대 보기」도 같은 자리에서 배경이 비었다.
+  const int fullFn = app.indexOf(QLatin1String("void MainWindow::zoomMapToFullMax"));
+  QVERIFY2(fullFn >= 0, "zoomMapToFullMax must exist");
+  const int fullNext = app.indexOf(QLatin1String("\nvoid MainWindow::"), fullFn + 10);
+  const QString fullBody = app.mid(fullFn, (fullNext > fullFn ? fullNext : fullFn + 1200) - fullFn);
+  QVERIFY2(fullBody.contains(QLatin1String("refreshXyzBasemapTiles")),
+           "전체 보기로 옮긴 뒤에도 배경을 다시 그려야 한다");
+}
+
+void TestWorkflow::shapeEditing_livesInsideSelectTool() {
+  // 사용자 요구: 「도형수정」을 따로 두지 말 것. 도형선택으로 도형을 고르면 수정점이
+  // 바로 나오고, 선에 우클릭하면 점추가·점삭제가 나와야 한다.
+  QFile sel(QStringLiteral("src/app/KaFeatureSelectTool.cpp"));
+  QVERIFY2(sel.open(QIODevice::ReadOnly | QIODevice::Text),
+           "run from source tree (ctest WORKING_DIRECTORY)");
+  const QString src = QString::fromUtf8(sel.readAll());
+  QVERIFY2(src.contains(QLatin1String("new KaVertexEditTool")),
+           "선택 도구가 꼭짓점 편집기를 직접 들고 있어야 한다");
+  QVERIFY2(src.contains(QLatin1String("syncVertexTarget")),
+           "도형을 고르면 수정점이 따라 나와야 한다");
+  QVERIFY2(src.contains(QLatin1String("previewVertexMove")) &&
+               src.contains(QLatin1String("moveVertexTo")),
+           "수정점을 마우스로 끌어 옮길 수 있어야 한다");
+  QVERIFY2(src.contains(QString::fromUtf8("점추가")) && src.contains(QString::fromUtf8("점삭제")),
+           "우클릭 메뉴에 점추가·점삭제가 있어야 한다");
+  QVERIFY2(src.contains(QLatin1String("insertVertexAt")) &&
+               src.contains(QLatin1String("deleteVertexAt")),
+           "그 메뉴가 실제 편집으로 이어져야 한다");
+  QVERIFY2(src.contains(QLatin1String("clearTarget")),
+           "선택 해제·도구 종료 시 수정점을 치워야 한다");
+
+  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
+  const QString app = QString::fromUtf8(mw.readAll());
+  QVERIFY2(!app.contains(QLatin1String("startVertexEditTool")),
+           "도형수정을 따로 켜는 항목을 두지 말 것 — 도형선택에 들어 있다");
+  QVERIFY2(app.contains(QLatin1String("m_featureSelectTool->setSnapEnabled")),
+           "자석은 수정점을 끌 때도 걸려야 한다");
+}
+
+void TestWorkflow::subToolbar_marksTheActiveToolForTheBlueUnderline() {
+  // 사용자 요구: 지금 켜져 있는 도구에 파란 밑줄이 와야 한다.
+  // QSS 의 QToolBar#subToolbar QToolButton:checked 가 밑줄을 그리므로,
+  // 켜진 도구의 액션이 실제로 checked 여야 한다.
+  QFile qss(QStringLiteral("data/theme/ka-hgis.qss"));
+  QVERIFY2(qss.open(QIODevice::ReadOnly | QIODevice::Text), "ka-hgis.qss");
+  const QString style = QString::fromUtf8(qss.readAll());
+  const int rule = style.indexOf(QLatin1String("QToolBar#subToolbar QToolButton:checked"));
+  QVERIFY2(rule >= 0, "켜진 버튼을 표시하는 규칙이 있어야 한다");
+  QVERIFY2(style.mid(rule, 220).contains(QLatin1String("border-bottom")),
+           "표시는 파란 밑줄이어야 한다");
+
+  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
+  const QString app = QString::fromUtf8(mw.readAll());
+  const int fn = app.indexOf(QLatin1String("void MainWindow::updateSubToolbarChecks"));
+  QVERIFY2(fn >= 0, "켜진 도구를 표시하는 함수가 있어야 한다");
+  const QString body = app.mid(fn, 1400);
+  QVERIFY2(body.contains(QLatin1String("setCheckable")) && body.contains(QLatin1String("setChecked")),
+           "액션을 체크해야 QSS 가 밑줄을 그린다");
+  QVERIFY2(body.contains(QLatin1String("m_featureSelectTool")),
+           "도형선택이 켜져 있으면 그 버튼에 밑줄이 와야 한다");
+
+  const int draw = app.indexOf(QLatin1String("void MainWindow::showSubToolsDraw"));
+  QVERIFY2(draw >= 0, "showSubToolsDraw must exist");
+  const int drawEnd = app.indexOf(QLatin1String("\nvoid MainWindow::showSubToolsBasemap"), draw + 1);
+  const QString drawBody = app.mid(draw, (drawEnd > draw ? drawEnd : draw + 5000) - draw);
+  QVERIFY2(drawBody.contains(QLatin1String("kaSubTool")),
+           "버튼마다 어떤 도구인지 꼬리표가 있어야 판단할 수 있다");
+  QVERIFY2(drawBody.contains(QLatin1String("updateSubToolbarChecks")),
+           "툴바를 다시 만들면 밑줄도 다시 맞춰야 한다");
+  QVERIFY2(app.contains(QLatin1String("QgsMapCanvas::mapToolSet")),
+           "도구를 바꾸면 밑줄도 따라가야 한다");
+}
+
+void TestWorkflow::layoutOpacityRail_staysPutWhenThePageMoves() {
+  // 사용자 보고: 지도에서는 투명도 막대가 제자리인데, 조판(도면만들기)에서는
+  // 페이지를 끌면 막대가 페이지를 따라 같이 밀렸다.
+  // QgsLayoutView 는 QGraphicsView 라서 scrollContentsBy 가 viewport()->scroll() 을
+  // 부르고, 그러면 viewport 의 자식 위젯까지 함께 밀린다. QgsMapCanvas 는 스크롤 대신
+  // 범위를 다시 그리므로 지도 쪽은 멀쩡했다. 스크롤하지 않는 부모에 붙여야 한다.
+  QFile f(QStringLiteral("src/app/KaDrawingStudio.cpp"));
+  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text),
+           "run from source tree (ctest WORKING_DIRECTORY)");
+  const QString src = QString::fromUtf8(f.readAll());
+  const int at = src.indexOf(QLatin1String("new KaLayerOpacityRail"));
+  QVERIFY2(at >= 0, "조판 화면에도 투명도 막대가 있어야 한다");
+  const QString around = src.mid(qMax(0, at - 500), 560);
+  QVERIFY2(!around.contains(QLatin1String("m_view->viewport()")),
+           "스크롤되는 viewport 에 붙이면 페이지를 끌 때 막대가 같이 밀린다");
+  QVERIFY2(src.mid(at, 40).contains(QLatin1String("desk")),
+           "스크롤하지 않는 부모에 붙여야 제자리에 남는다");
 }
 
 void TestWorkflow::uiComboActions_doNotBustTileCacheWhileDrawing() {
@@ -3046,6 +3385,45 @@ void TestWorkflow::addVworldSatellite_fourKCanvasKeeps256pxTiles() {
   QVERIFY2(src.contains(QStringLiteral("tilePixelRatio=1")), qPrintable(src.left(180)));
   QVERIFY2(!src.contains(QStringLiteral("tilePixelRatio=2")),
            "VWorld satellite is 256px; @2x / 512 blanks 4K");
+}
+
+void TestWorkflow::applyCanvasScreenDpi_outputSizeFollowsWideWidget() {
+  QgsMapCanvas canvas;
+  canvas.resize(3440, 1440);
+  canvas.mapSettings().setOutputSize(QSize(800, 600));
+  LayerOps::applyCanvasScreenDpi(&canvas);
+  const qreal dpr = canvas.devicePixelRatioF();
+  const qreal pixelDpr = dpr > 0.05 ? dpr : 1.0;
+  const QSize want(qMax(1, qRound(3440.0 * pixelDpr)), qMax(1, qRound(1440.0 * pixelDpr)));
+  QCOMPARE(canvas.mapSettings().outputSize(), want);
+  QVERIFY(canvas.mapSettings().outputDpi() > 10.0);
+
+  canvas.resize(1920, 1080);
+  LayerOps::applyCanvasScreenDpi(&canvas);
+  const QSize fhd(qMax(1, qRound(1920.0 * pixelDpr)), qMax(1, qRound(1080.0 * pixelDpr)));
+  QCOMPARE(canvas.mapSettings().outputSize(), fhd);
+
+  canvas.resize(3840, 2160);
+  LayerOps::applyCanvasScreenDpi(&canvas);
+  const QSize uhd(qMax(1, qRound(3840.0 * pixelDpr)), qMax(1, qRound(2160.0 * pixelDpr)));
+  QCOMPARE(canvas.mapSettings().outputSize(), uhd);
+}
+
+void TestWorkflow::convertSelectedTo5179_sourceDoesNotAddToMap() {
+  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
+  const QString src = QString::fromUtf8(mw.readAll());
+  const int fn = src.indexOf(QLatin1String("void MainWindow::convertSelectedTo5179"));
+  QVERIFY2(fn >= 0, "convertSelectedTo5179");
+  const int next = src.indexOf(QLatin1String("\nvoid MainWindow::"), fn + 10);
+  QVERIFY2(next > fn, "convertSelectedTo5179 body");
+  const QString body = src.mid(fn, next - fn);
+  QVERIFY2(body.contains(QLatin1String("false")),
+           "5179 UI must pass addToMap false");
+  QVERIFY2(!body.contains(QLatin1String("m_canvas->refresh()")),
+           "5179 file-only must not refresh the work map");
+  QVERIFY2(body.contains(QLatin1String("preferredSurveyDir")),
+           "5179 save dialog should start in the survey folder");
 }
 
 void TestWorkflow::otf_keepsWorkCrsWhenBasemapIs3857() {
@@ -3630,12 +4008,19 @@ void TestWorkflow::drawSubToolbarWiresEachDomainSlot() {
            "단면선은 지도 우클릭 메뉴에서 그릴 수 있어야 한다");
   QVERIFY2(ctxBody.contains(QLatin1String("startAttributeEditTool")),
            "속성 편집도 지도 우클릭 메뉴에 남아 있어야 한다");
-  // 폴리곤 묶기·나누기는 늘어나는 빈칸 뒤(오른쪽 끝)에 모여 있어야 한다.
-  const int spacer = body.indexOf(QLatin1String("subToolbarSpacer"));
-  QVERIFY2(spacer >= 0, "폴리곤 도구를 오른쪽으로 미는 빈칸이 있어야 한다");
-  QVERIFY2(body.indexOf(QLatin1String("mergeFeaturePolygons")) > spacer &&
-               body.indexOf(QLatin1String("startSplitPolygonTool")) > spacer,
-           "폴리곤 묶기·나누기는 빈칸 뒤 오른쪽 끝에 놓여야 한다");
+  // 사용자 요구: 폴리곤 묶기·나누기·구간 분리·닫기는 오른쪽 끝이 아니라
+  // 그리기 버튼 바로 옆(가운데 쪽)에 같이 보여야 한다.
+  QVERIFY2(!body.contains(QLatin1String("subToolbarSpacer")),
+           "오른쪽 끝으로 미는 빈칸은 없어야 한다 — 그리기 버튼 옆에 붙인다");
+  const int artiPos = body.indexOf(QLatin1String("startEditArtifact"));
+  const int mergePos = body.indexOf(QLatin1String("mergeFeaturePolygons"));
+  const int splitPos = body.indexOf(QLatin1String("startSplitPolygonTool"));
+  const int clipPos = body.indexOf(QLatin1String("clipOverlappingLayers"));
+  const int closePos = body.indexOf(QLatin1String("&MainWindow::hideSubTools"));
+  QVERIFY2(artiPos >= 0 && mergePos > artiPos,
+           "폴리곤 묶기는 그리기 버튼 뒤에 이어서 놓여야 한다");
+  QVERIFY2(mergePos < splitPos && splitPos < clipPos && clipPos < closePos,
+           "순서는 폴리곤 묶기 → 폴리곤 나누기 → 구간 분리 → 닫기");
   QVERIFY2(!body.contains(QLatin1String("draw_area")) ||
                body.indexOf(QLatin1String("startEditFeaturePoly")) >
                    body.indexOf(QLatin1String("startEditSurveyArea")),
@@ -4803,20 +5188,46 @@ void TestWorkflow::restoreLastSurvey_prefersEmbeddedWorkspaceWhenSafe() {
   QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
   QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
   const QString src = QString::fromUtf8(mw.readAll());
-  const int fn = src.indexOf(QLatin1String("void MainWindow::restoreLastSurvey()"));
-  QVERIFY2(fn >= 0, "restoreLastSurvey 가 있어야 한다");
-  const QString body = src.mid(fn, 2200);
-  QVERIFY2(body.contains(QLatin1String("PreferWorkspace")),
-           "재접속은 안전하면 내장 작업공간(색·심볼)을 읽어야 한다");
-  QVERIFY2(body.contains(QLatin1String("hasEmbeddedProject")) ||
-               body.contains(QLatin1String("kaQgisProjectFileIsUnsafeToRead")),
-           "위성 AV로 표시된 파일만 LayersOnly로 떨어진다");
+  QVERIFY2(src.contains(QLatin1String("OpenSurveyMode::PreferWorkspace")),
+           "조사 열기는 안전하면 내장 작업공간(색·심볼)을 읽어야 한다");
   QFile ops(QStringLiteral("src/core/LayerOps.cpp"));
   QVERIFY2(ops.open(QIODevice::ReadOnly | QIODevice::Text), "LayerOps.cpp");
   const QString opsSrc = QString::fromUtf8(ops.readAll());
   QVERIFY2(opsSrc.contains(QLatin1String("saveGpkgDefaultStyles")) &&
                opsSrc.contains(QLatin1String("saveStyleToDatabaseV2")),
            "저장 때 GPKG layer_styles 에 색을 남겨 LayersOnly 폴백도 복원해야 한다");
+}
+
+void TestWorkflow::restoreLastSurvey_bootUsesLayersOnlyToAvoidWmsAv() {
+  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
+  const QString src = QString::fromUtf8(mw.readAll());
+  const int fn = src.indexOf(QLatin1String("void MainWindow::restoreLastSurvey()"));
+  QVERIFY2(fn >= 0, "restoreLastSurvey 가 있어야 한다");
+  const int next = src.indexOf(QLatin1String("void MainWindow::"), fn + 10);
+  QVERIFY2(next > fn, "restoreLastSurvey body");
+  const QString body = src.mid(fn, next - fn);
+  QVERIFY2(body.contains(QLatin1String("OpenSurveyMode::LayersOnly")),
+           "아이콘 재실행은 GPKG 테이블+위성만 — 내장 24레이어 WMS AV 방지");
+  QVERIFY2(!body.contains(QLatin1String("OpenSurveyMode::PreferWorkspace")),
+           "부팅 복원에 PreferWorkspace 를 넣으면 crash-20260906-153900 이 재발한다");
+  QVERIFY2(!body.contains(QLatin1String("setSkipAutoRestore(st, false)")),
+           "복원 직후 skip 을 내리면 타일 AV 다음 실행이 또 복원해서 꺼진다");
+}
+
+void TestWorkflow::finishOpenedProject_doesNotBareRefreshWhileWms() {
+  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
+  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
+  const QString src = QString::fromUtf8(mw.readAll());
+  const int fn = src.indexOf(QLatin1String("void MainWindow::finishOpenedProject"));
+  QVERIFY2(fn >= 0, "finishOpenedProject 가 있어야 한다");
+  const int next = src.indexOf(QLatin1String("bool MainWindow::openSurveyGpkg"), fn + 10);
+  QVERIFY2(next > fn, "finishOpenedProject body");
+  const QString body = src.mid(fn, next - fn);
+  QVERIFY2(!body.contains(QLatin1String("m_canvas->refresh()")),
+           "작업공간 연 직후 빈 refresh() 는 provider_wms deleteLater AV");
+  QVERIFY2(body.contains(QLatin1String("refreshXyzBasemapTiles")),
+           "그리는 중이면 skip 하는 XYZ 갱신만 써야 한다");
 }
 
 #include "test_workflow.moc"
@@ -5066,6 +5477,769 @@ void TestWorkflow::copySurvey_failurePreservesExistingDestination() {
   QVERIFY(!err.isEmpty());
   QVERIFY(original.open(QIODevice::ReadOnly));
   QCOMPARE(original.readAll(), contents);
+}
+
+void TestWorkflow::test_export_failure_aborts_and_reports_error() {
+  QTemporaryDir tempDir;
+  QVERIFY(tempDir.isValid());
+  const QString outDir = tempDir.filePath(QStringLiteral("export_failure_pkg"));
+  QDir().mkpath(outDir);
+
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+
+  auto* sa = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                QStringLiteral("survey_area"), QStringLiteral("memory"));
+  QVERIFY(sa->isValid());
+  sa->setCustomProperty(QString::fromUtf8(LayerOps::kPropLayerKey), QStringLiteral("survey_area"));
+  proj.addMapLayer(sa);
+  QVERIFY(sa->startEditing());
+  QgsFeature sf(sa->fields());
+  QgsPolylineXY ring;
+  ring << QgsPointXY(200000, 450000) << QgsPointXY(200100, 450000)
+       << QgsPointXY(200100, 450100) << QgsPointXY(200000, 450100)
+       << QgsPointXY(200000, 450000);
+  sf.setGeometry(QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring));
+  QVERIFY(sa->addFeature(sf));
+  QVERIFY(sa->commitChanges());
+
+  QVERIFY2(addComposedUserSheet(&proj, sa), "composed user_sheet");
+  QVERIFY(LayoutService::isComposedStudioSheet(&proj));
+
+  // Create directory at target PDF path to force LayoutService::exportLayoutPdf to fail
+  const QString pdfPath = QDir(outDir).filePath(QStringLiteral("조사도면.pdf"));
+  QVERIFY2(QDir(outDir).mkdir(QStringLiteral("조사도면.pdf")), "Failed to create directory at test PDF path");
+
+  QString err;
+  const QString result = ExportService::exportSubmissionPackage(
+      &proj, outDir, QStringLiteral("UTF-8"), QStringLiteral("OK"), true, false, &err);
+
+  // Clean up directory
+  QDir(outDir).rmdir(QStringLiteral("조사도면.pdf"));
+
+  // Export MUST fail, returning empty string and populating errorOut
+  QVERIFY2(result.isEmpty(), "Export must abort when layout PDF cannot be written");
+  QVERIFY2(!err.isEmpty(), "Error message must be reported on PDF export failure");
+
+  // Incomplete MANIFEST.sha256 must NOT be written when export aborts
+  const QString manifestPath = QDir(outDir).filePath(QStringLiteral("MANIFEST.sha256"));
+  QVERIFY2(!QFile::exists(manifestPath),
+           "MANIFEST.sha256 must not be created if package export fails");
+}
+
+void TestWorkflow::test_section_sheet_bundling() {
+  QTemporaryDir tempDir;
+  QVERIFY(tempDir.isValid());
+  const QString pkgDir = tempDir.filePath(QStringLiteral("section_bundle_pkg"));
+
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+
+  // 1. Survey area
+  auto* sa = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                QStringLiteral("survey_area"), QStringLiteral("memory"));
+  QVERIFY(sa->isValid());
+  sa->setCustomProperty(QString::fromUtf8(LayerOps::kPropLayerKey), QStringLiteral("survey_area"));
+  proj.addMapLayer(sa);
+  QVERIFY(sa->startEditing());
+  QgsFeature sf(sa->fields());
+  QgsPolylineXY ring;
+  ring << QgsPointXY(200000, 450000) << QgsPointXY(200100, 450000)
+       << QgsPointXY(200100, 450100) << QgsPointXY(200000, 450100)
+       << QgsPointXY(200000, 450000);
+  sf.setGeometry(QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring));
+  QVERIFY(sa->addFeature(sf));
+  QVERIFY(sa->commitChanges());
+
+  // 2. Composed user_sheet
+  QVERIFY2(addComposedUserSheet(&proj, sa), "composed user_sheet");
+  QVERIFY(LayoutService::isComposedStudioSheet(&proj));
+
+  // 3. Composed section_sheet via SectionLayoutService
+  SectionLayoutOptions secOpt;
+  secOpt.titleKo = QStringLiteral("트렌치 1호 토층 단면도");
+  secOpt.paper = SectionLayoutOptions::Paper::A4;
+  const auto secRes = SectionLayoutService::buildSectionLayout(&proj, {}, secOpt);
+  QVERIFY2(!secRes.layoutName.isEmpty(), qPrintable(secRes.errorKo));
+  QVERIFY(proj.layoutManager()->layoutByName(QStringLiteral("section_sheet")));
+
+  // 4. Export package
+  QString err;
+  const QString out = ExportService::exportSubmissionPackage(
+      &proj, pkgDir, QStringLiteral("UTF-8"), QStringLiteral("OK"), true, false, &err);
+  QVERIFY2(!out.isEmpty(), qPrintable(err));
+
+  // 5. Verify both 조사도면.pdf and 단면도.pdf exist
+  const QString userPdf = QDir(pkgDir).filePath(QStringLiteral("조사도면.pdf"));
+  QVERIFY2(QFile::exists(userPdf), "조사도면.pdf must exist");
+  QVERIFY(QFileInfo(userPdf).size() > 500);
+
+  const QString sectionPdf = QDir(pkgDir).filePath(QStringLiteral("단면도.pdf"));
+  QVERIFY2(QFile::exists(sectionPdf), "단면도.pdf must be bundled when section_sheet is present");
+  QVERIFY(QFileInfo(sectionPdf).size() > 500);
+
+  // 6. Verify MANIFEST.sha256 contains entries for both PDFs
+  const QString manifestPath = QDir(pkgDir).filePath(QStringLiteral("MANIFEST.sha256"));
+  QVERIFY(QFile::exists(manifestPath));
+  QFile mf(manifestPath);
+  QVERIFY(mf.open(QIODevice::ReadOnly | QIODevice::Text));
+  const QString manifestContent = QString::fromUtf8(mf.readAll());
+  mf.close();
+
+  QVERIFY2(manifestContent.contains(QStringLiteral("조사도면.pdf")),
+           "MANIFEST.sha256 must register 조사도면.pdf");
+  QVERIFY2(manifestContent.contains(QStringLiteral("단면도.pdf")),
+           "MANIFEST.sha256 must register 단면도.pdf");
+  QVERIFY2(manifestContent.contains(QStringLiteral("survey_area.shp")),
+           "MANIFEST.sha256 must register survey_area.shp");
+}
+
+void TestWorkflow::test_chunked_sha256_manifest_integrity() {
+  QTemporaryDir tempDir;
+  QVERIFY(tempDir.isValid());
+  const QString workDir = tempDir.filePath(QStringLiteral("manifest_test_dir"));
+  QDir().mkpath(workDir);
+
+  // File 1: Small file (< 1 KB)
+  const QString smallPath = QDir(workDir).filePath(QStringLiteral("small_metadata.txt"));
+  QFile fSmall(smallPath);
+  QVERIFY(fSmall.open(QIODevice::WriteOnly));
+  const QByteArray smallData = "KA-HGIS submission integrity verification small file test payload.\n";
+  fSmall.write(smallData);
+  fSmall.close();
+  const QString smallHash = QString::fromLatin1(
+      QCryptographicHash::hash(smallData, QCryptographicHash::Sha256).toHex());
+
+  // File 2: Multi-chunk binary file (256 KB = 4 x 64 KB chunks)
+  const QString largePath = QDir(workDir).filePath(QStringLiteral("large_stream.bin"));
+  QFile fLarge(largePath);
+  QVERIFY(fLarge.open(QIODevice::WriteOnly));
+  QByteArray largeData;
+  largeData.resize(256 * 1024);
+  for (int i = 0; i < largeData.size(); ++i) {
+    largeData[i] = static_cast<char>((i * 31 + 17) % 251);
+  }
+  fLarge.write(largeData);
+  fLarge.close();
+  const QString largeHash = QString::fromLatin1(
+      QCryptographicHash::hash(largeData, QCryptographicHash::Sha256).toHex());
+
+  // File 3: Korean-named file
+  const QString krPath = QDir(workDir).filePath(QStringLiteral("조사도면.pdf"));
+  QFile fKr(krPath);
+  QVERIFY(fKr.open(QIODevice::WriteOnly));
+  const QByteArray krData = "%PDF-1.4 dummy archaeological field sheet binary stream\n%%EOF\n";
+  fKr.write(krData);
+  fKr.close();
+  const QString krHash = QString::fromLatin1(
+      QCryptographicHash::hash(krData, QCryptographicHash::Sha256).toHex());
+
+  // Generate manifest
+  QString err;
+  QVERIFY2(ExportService::writeSha256Manifest(workDir, &err), qPrintable(err));
+
+  const QString manPath = QDir(workDir).filePath(QStringLiteral("MANIFEST.sha256"));
+  QVERIFY(QFile::exists(manPath));
+
+  QFile manFile(manPath);
+  QVERIFY(manFile.open(QIODevice::ReadOnly | QIODevice::Text));
+  QTextStream ts(&manFile);
+  ts.setEncoding(QStringConverter::Utf8);
+
+  const QRegularExpression lineRegex(QStringLiteral("^([a-f0-9]{64})  (.+)$"));
+  QMap<QString, QString> parsedHashes;
+  while (!ts.atEnd()) {
+    const QString line = ts.readLine();
+    if (line.trimmed().isEmpty()) continue;
+    const auto match = lineRegex.match(line);
+    QVERIFY2(match.hasMatch(), qPrintable(QStringLiteral("Invalid manifest line format: ") + line));
+    const QString hash = match.captured(1);
+    const QString filename = match.captured(2);
+    parsedHashes.insert(filename, hash);
+  }
+  manFile.close();
+
+  // Self-exclusion check
+  QVERIFY2(!parsedHashes.contains(QStringLiteral("MANIFEST.sha256")),
+           "MANIFEST.sha256 must not list itself");
+
+  // Verify all 3 files are present and match computed hashes
+  QCOMPARE(parsedHashes.size(), 3);
+  QCOMPARE(parsedHashes.value(QStringLiteral("small_metadata.txt")), smallHash);
+  QCOMPARE(parsedHashes.value(QStringLiteral("large_stream.bin")), largeHash);
+  QCOMPARE(parsedHashes.value(QStringLiteral("조사도면.pdf")), krHash);
+}
+
+void TestWorkflow::test_challenge_pdf_failure_readonly_and_locked() {
+  // Test A: Destination file 조사도면.pdf is read-only
+  {
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    const QString outDir = tempDir.filePath(QStringLiteral("pdf_fail_ro"));
+    QDir().mkpath(outDir);
+
+    QgsProject proj;
+    proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+    auto* sa = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                  QStringLiteral("survey_area"), QStringLiteral("memory"));
+    QVERIFY(sa->isValid());
+    sa->setCustomProperty(QString::fromUtf8(LayerOps::kPropLayerKey), QStringLiteral("survey_area"));
+    proj.addMapLayer(sa);
+    QVERIFY(sa->startEditing());
+    QgsFeature sf(sa->fields());
+    QgsPolylineXY ring;
+    ring << QgsPointXY(200000, 450000) << QgsPointXY(200100, 450000)
+         << QgsPointXY(200100, 450100) << QgsPointXY(200000, 450100)
+         << QgsPointXY(200000, 450000);
+    sf.setGeometry(QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring));
+    QVERIFY(sa->addFeature(sf));
+    QVERIFY(sa->commitChanges());
+    QVERIFY2(addComposedUserSheet(&proj, sa), "composed user_sheet");
+
+    // Pre-create 조사도면.pdf and set ReadOnly permissions
+    const QString pdfPath = QDir(outDir).filePath(QStringLiteral("조사도면.pdf"));
+    {
+      QFile rf(pdfPath);
+      QVERIFY(rf.open(QIODevice::WriteOnly));
+      rf.write("read only dummy placeholder");
+      rf.close();
+      QVERIFY(QFile::setPermissions(pdfPath, QFileDevice::ReadOwner | QFileDevice::ReadUser));
+    }
+
+    QString err;
+    const QString res = ExportService::exportSubmissionPackage(
+        &proj, outDir, QStringLiteral("UTF-8"), QStringLiteral("OK"), true, false, &err);
+
+    // Verify package aborts cleanly
+    QVERIFY2(res.isEmpty(), "exportSubmissionPackage must return empty QString on PDF write failure");
+    QVERIFY2(!err.isEmpty(), "Error output must be non-empty");
+
+    // Partial MANIFEST.sha256 MUST NOT be written
+    const QString manifestPath = QDir(outDir).filePath(QStringLiteral("MANIFEST.sha256"));
+    QVERIFY2(!QFile::exists(manifestPath), "MANIFEST.sha256 must NOT be written when PDF export fails");
+
+    // Restore permissions for tempDir cleanup
+    QFile::setPermissions(pdfPath, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+  }
+
+  // Test B: Destination file 조사도면.pdf is locked exclusively
+  {
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    const QString outDir = tempDir.filePath(QStringLiteral("pdf_fail_locked"));
+    QDir().mkpath(outDir);
+
+    QgsProject proj;
+    proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+    auto* sa = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                  QStringLiteral("survey_area"), QStringLiteral("memory"));
+    sa->setCustomProperty(QString::fromUtf8(LayerOps::kPropLayerKey), QStringLiteral("survey_area"));
+    proj.addMapLayer(sa);
+    QVERIFY(sa->startEditing());
+    QgsFeature sf(sa->fields());
+    QgsPolylineXY ring;
+    ring << QgsPointXY(200000, 450000) << QgsPointXY(200100, 450000)
+         << QgsPointXY(200100, 450100) << QgsPointXY(200000, 450100)
+         << QgsPointXY(200000, 450000);
+    sf.setGeometry(QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring));
+    QVERIFY(sa->addFeature(sf));
+    QVERIFY(sa->commitChanges());
+    QVERIFY2(addComposedUserSheet(&proj, sa), "composed user_sheet");
+
+    const QString pdfPath = QDir(outDir).filePath(QStringLiteral("조사도면.pdf"));
+#ifdef _WIN32
+    HANDLE hLock = CreateFileW(reinterpret_cast<LPCWSTR>(pdfPath.utf16()),
+                               GENERIC_READ | GENERIC_WRITE,
+                               FILE_SHARE_READ,
+                               NULL,
+                               CREATE_ALWAYS,
+                               FILE_ATTRIBUTE_NORMAL,
+                               NULL);
+    QVERIFY(hLock != INVALID_HANDLE_VALUE);
+#else
+    QFile lockFile(pdfPath);
+    QVERIFY(lockFile.open(QIODevice::WriteOnly));
+#endif
+
+    QString err;
+    const QString res = ExportService::exportSubmissionPackage(
+        &proj, outDir, QStringLiteral("UTF-8"), QStringLiteral("OK"), true, false, &err);
+
+    QVERIFY2(res.isEmpty(), "exportSubmissionPackage must abort when PDF is locked");
+    QVERIFY2(!err.isEmpty(), "Error output must report failure");
+
+    const QString manifestPath = QDir(outDir).filePath(QStringLiteral("MANIFEST.sha256"));
+    QVERIFY2(!QFile::exists(manifestPath), "MANIFEST.sha256 must NOT be written when PDF is locked");
+
+#ifdef _WIN32
+    CloseHandle(hLock);
+#else
+    lockFile.close();
+#endif
+  }
+
+  // Test C: user_sheet succeeds, but section_sheet (단면도.pdf) export fails (locked)
+  {
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    const QString outDir = tempDir.filePath(QStringLiteral("sec_fail_locked"));
+    QDir().mkpath(outDir);
+
+    QgsProject proj;
+    proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+    auto* sa = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                  QStringLiteral("survey_area"), QStringLiteral("memory"));
+    sa->setCustomProperty(QString::fromUtf8(LayerOps::kPropLayerKey), QStringLiteral("survey_area"));
+    proj.addMapLayer(sa);
+    QVERIFY(sa->startEditing());
+    QgsFeature sf(sa->fields());
+    QgsPolylineXY ring;
+    ring << QgsPointXY(200000, 450000) << QgsPointXY(200100, 450000)
+         << QgsPointXY(200100, 450100) << QgsPointXY(200000, 450100)
+         << QgsPointXY(200000, 450000);
+    sf.setGeometry(QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring));
+    QVERIFY(sa->addFeature(sf));
+    QVERIFY(sa->commitChanges());
+    QVERIFY2(addComposedUserSheet(&proj, sa), "composed user_sheet");
+
+    SectionLayoutOptions secOpt;
+    secOpt.titleKo = QStringLiteral("단면도");
+    secOpt.paper = SectionLayoutOptions::Paper::A4;
+    SectionLayoutService::buildSectionLayout(&proj, {}, secOpt);
+
+    const QString secPdfPath = QDir(outDir).filePath(QStringLiteral("단면도.pdf"));
+#ifdef _WIN32
+    HANDLE hSecLock = CreateFileW(reinterpret_cast<LPCWSTR>(secPdfPath.utf16()),
+                                  GENERIC_READ | GENERIC_WRITE,
+                                  FILE_SHARE_READ,
+                                  NULL,
+                                  CREATE_ALWAYS,
+                                  FILE_ATTRIBUTE_NORMAL,
+                                  NULL);
+    QVERIFY(hSecLock != INVALID_HANDLE_VALUE);
+#else
+    QFile secLockFile(secPdfPath);
+    QVERIFY(secLockFile.open(QIODevice::WriteOnly));
+#endif
+
+    QString err;
+    const QString res = ExportService::exportSubmissionPackage(
+        &proj, outDir, QStringLiteral("UTF-8"), QStringLiteral("OK"), true, false, &err);
+
+    QVERIFY2(res.isEmpty(), "exportSubmissionPackage must abort when section PDF export fails");
+    QVERIFY2(!err.isEmpty(), "Error output must report section failure");
+    QVERIFY2(err.contains(QStringLiteral("단면도.pdf")), "Error must mention 단면도.pdf");
+
+    const QString manifestPath = QDir(outDir).filePath(QStringLiteral("MANIFEST.sha256"));
+    QVERIFY2(!QFile::exists(manifestPath), "MANIFEST.sha256 must NOT be written when section PDF export fails");
+
+#ifdef _WIN32
+    CloseHandle(hSecLock);
+#else
+    secLockFile.close();
+#endif
+  }
+}
+
+void TestWorkflow::test_challenge_section_sheet_bundling_variations() {
+  // Scenario A: Uncomposed section_sheet (with empty_hint item) should NOT be exported as 단면도.pdf
+  {
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    const QString pkgDir = tempDir.filePath(QStringLiteral("sec_uncomposed_pkg"));
+
+    QgsProject proj;
+    proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+    auto* sa = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                  QStringLiteral("survey_area"), QStringLiteral("memory"));
+    sa->setCustomProperty(QString::fromUtf8(LayerOps::kPropLayerKey), QStringLiteral("survey_area"));
+    proj.addMapLayer(sa);
+    QVERIFY(sa->startEditing());
+    QgsFeature sf(sa->fields());
+    QgsPolylineXY ring;
+    ring << QgsPointXY(200000, 450000) << QgsPointXY(200100, 450000)
+         << QgsPointXY(200100, 450100) << QgsPointXY(200000, 450100)
+         << QgsPointXY(200000, 450000);
+    sf.setGeometry(QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring));
+    QVERIFY(sa->addFeature(sf));
+    QVERIFY(sa->commitChanges());
+    QVERIFY2(addComposedUserSheet(&proj, sa), "composed user_sheet");
+
+    // Add empty uncomposed section_sheet layout with empty_hint label
+    auto* secLayout = new QgsPrintLayout(&proj);
+    secLayout->setName(QStringLiteral("section_sheet"));
+    auto* hint = new QgsLayoutItemMap(secLayout);
+    hint->setId(QStringLiteral("empty_hint"));
+    secLayout->addLayoutItem(hint);
+    proj.layoutManager()->addLayout(secLayout);
+
+    QString err;
+    const QString res = ExportService::exportSubmissionPackage(
+        &proj, pkgDir, QStringLiteral("UTF-8"), QStringLiteral("OK"), true, false, &err);
+    QVERIFY2(!res.isEmpty(), qPrintable(err));
+
+    // 조사도면.pdf must exist, but 단면도.pdf must NOT exist
+    QVERIFY(QFile::exists(QDir(pkgDir).filePath(QStringLiteral("조사도면.pdf"))));
+    QVERIFY(!QFile::exists(QDir(pkgDir).filePath(QStringLiteral("단면도.pdf"))));
+
+    // MANIFEST.sha256 must register 조사도면.pdf, but NOT 단면도.pdf
+    QFile mf(QDir(pkgDir).filePath(QStringLiteral("MANIFEST.sha256")));
+    QVERIFY(mf.open(QIODevice::ReadOnly | QIODevice::Text));
+    const QString manifestContent = QString::fromUtf8(mf.readAll());
+    mf.close();
+    QVERIFY(manifestContent.contains(QStringLiteral("조사도면.pdf")));
+    QVERIFY(!manifestContent.contains(QStringLiteral("단면도.pdf")));
+  }
+
+  // Scenario B: section_sheet composed, but user_sheet absent
+  {
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    const QString pkgDir = tempDir.filePath(QStringLiteral("sec_only_pkg"));
+
+    QgsProject proj;
+    proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+    auto* sa = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                  QStringLiteral("survey_area"), QStringLiteral("memory"));
+    sa->setCustomProperty(QString::fromUtf8(LayerOps::kPropLayerKey), QStringLiteral("survey_area"));
+    proj.addMapLayer(sa);
+    QVERIFY(sa->startEditing());
+    QgsFeature sf(sa->fields());
+    QgsPolylineXY ring;
+    ring << QgsPointXY(200000, 450000) << QgsPointXY(200100, 450000)
+         << QgsPointXY(200100, 450100) << QgsPointXY(200000, 450100)
+         << QgsPointXY(200000, 450000);
+    sf.setGeometry(QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring));
+    QVERIFY(sa->addFeature(sf));
+    QVERIFY(sa->commitChanges());
+
+    // Build composed section_sheet
+    SectionLayoutOptions secOpt;
+    secOpt.titleKo = QStringLiteral("단독 단면도");
+    secOpt.paper = SectionLayoutOptions::Paper::A4;
+    SectionLayoutService::buildSectionLayout(&proj, {}, secOpt);
+
+    QString err;
+    const QString res = ExportService::exportSubmissionPackage(
+        &proj, pkgDir, QStringLiteral("UTF-8"), QStringLiteral("OK"), true, false, &err);
+    QVERIFY2(!res.isEmpty(), qPrintable(err));
+
+    // 단면도.pdf must exist, 조사도면.pdf must NOT exist
+    QVERIFY(QFile::exists(QDir(pkgDir).filePath(QStringLiteral("단면도.pdf"))));
+    QVERIFY(!QFile::exists(QDir(pkgDir).filePath(QStringLiteral("조사도면.pdf"))));
+
+    // README_submit.txt mentions 단면도.pdf and notes absence of 조사도면.pdf
+    QFile rf(QDir(pkgDir).filePath(QStringLiteral("README_submit.txt")));
+    QVERIFY(rf.open(QIODevice::ReadOnly | QIODevice::Text));
+    const QString readmeContent = QString::fromUtf8(rf.readAll());
+    rf.close();
+    QVERIFY(readmeContent.contains(QStringLiteral("단면도.pdf")));
+    QVERIFY(readmeContent.contains(QStringLiteral("조사도면.pdf 없음")));
+
+    // MANIFEST.sha256 registers 단면도.pdf
+    QFile mf(QDir(pkgDir).filePath(QStringLiteral("MANIFEST.sha256")));
+    QVERIFY(mf.open(QIODevice::ReadOnly | QIODevice::Text));
+    const QString manifestContent = QString::fromUtf8(mf.readAll());
+    mf.close();
+    QVERIFY(manifestContent.contains(QStringLiteral("단면도.pdf")));
+    QVERIFY(!manifestContent.contains(QStringLiteral("조사도면.pdf")));
+  }
+}
+
+void TestWorkflow::test_challenge_encoding_txt_flush_and_content() {
+  // Test with UTF-8
+  {
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    const QString pkgDir = tempDir.filePath(QStringLiteral("enc_utf8_pkg"));
+
+    QgsProject proj;
+    proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+    auto* sa = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                  QStringLiteral("survey_area"), QStringLiteral("memory"));
+    sa->setCustomProperty(QString::fromUtf8(LayerOps::kPropLayerKey), QStringLiteral("survey_area"));
+    proj.addMapLayer(sa);
+    QVERIFY(sa->startEditing());
+    QgsFeature sf(sa->fields());
+    QgsPolylineXY ring;
+    ring << QgsPointXY(200000, 450000) << QgsPointXY(200100, 450000)
+         << QgsPointXY(200100, 450100) << QgsPointXY(200000, 450100)
+         << QgsPointXY(200000, 450000);
+    sf.setGeometry(QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring));
+    QVERIFY(sa->addFeature(sf));
+    QVERIFY(sa->commitChanges());
+    QVERIFY2(addComposedUserSheet(&proj, sa), "composed user_sheet");
+
+    QString err;
+    const QString res = ExportService::exportSubmissionPackage(
+        &proj, pkgDir, QStringLiteral("UTF-8"), QStringLiteral("OK"), true, false, &err);
+    QVERIFY2(!res.isEmpty(), qPrintable(err));
+
+    const QString encPath = QDir(pkgDir).filePath(QStringLiteral("encoding.txt"));
+    QVERIFY(QFile::exists(encPath));
+    QFile encFile(encPath);
+    QVERIFY(encFile.open(QIODevice::ReadOnly));
+    const QByteArray actualBytes = encFile.readAll();
+    encFile.close();
+    QVERIFY(actualBytes.size() > 0);
+
+    // Compute genuine hash of actual file on disk
+    const QString genuineHash = QString::fromLatin1(
+        QCryptographicHash::hash(actualBytes, QCryptographicHash::Sha256).toHex());
+
+    // Empty string SHA-256
+    const QString emptyHash = QStringLiteral("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    QVERIFY2(genuineHash != emptyHash, "Genuine hash must not be empty-file hash");
+
+    // Read MANIFEST.sha256 and find encoding.txt entry
+    QFile manFile(QDir(pkgDir).filePath(QStringLiteral("MANIFEST.sha256")));
+    QVERIFY(manFile.open(QIODevice::ReadOnly | QIODevice::Text));
+    QTextStream ts(&manFile);
+    ts.setEncoding(QStringConverter::Utf8);
+    QString recordedHash;
+    while (!ts.atEnd()) {
+      const QString line = ts.readLine();
+      if (line.endsWith(QStringLiteral("encoding.txt"))) {
+        recordedHash = line.left(64);
+        break;
+      }
+    }
+    manFile.close();
+
+    QVERIFY2(!recordedHash.isEmpty(), "encoding.txt must be listed in MANIFEST.sha256");
+    QCOMPARE(recordedHash, genuineHash);
+    QVERIFY2(recordedHash != emptyHash,
+             "MANIFEST.sha256 must NOT record empty hash for encoding.txt (flush bug check)");
+  }
+
+  // Test with CP949 / EUC-KR
+  {
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    const QString pkgDir = tempDir.filePath(QStringLiteral("enc_cp949_pkg"));
+
+    QgsProject proj;
+    proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+    auto* sa = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+                                  QStringLiteral("survey_area"), QStringLiteral("memory"));
+    sa->setCustomProperty(QString::fromUtf8(LayerOps::kPropLayerKey), QStringLiteral("survey_area"));
+    proj.addMapLayer(sa);
+    QVERIFY(sa->startEditing());
+    QgsFeature sf(sa->fields());
+    QgsPolylineXY ring;
+    ring << QgsPointXY(200000, 450000) << QgsPointXY(200100, 450000)
+         << QgsPointXY(200100, 450100) << QgsPointXY(200000, 450100)
+         << QgsPointXY(200000, 450000);
+    sf.setGeometry(QgsGeometry::fromPolygonXY(QgsPolygonXY() << ring));
+    QVERIFY(sa->addFeature(sf));
+    QVERIFY(sa->commitChanges());
+    QVERIFY2(addComposedUserSheet(&proj, sa), "composed user_sheet");
+
+    QString err;
+    const QString res = ExportService::exportSubmissionPackage(
+        &proj, pkgDir, QStringLiteral("CP949"), QStringLiteral("OK"), true, false, &err);
+    QVERIFY2(!res.isEmpty(), qPrintable(err));
+
+    const QString encPath = QDir(pkgDir).filePath(QStringLiteral("encoding.txt"));
+    QFile encFile(encPath);
+    QVERIFY(encFile.open(QIODevice::ReadOnly));
+    const QByteArray actualBytes = encFile.readAll();
+    encFile.close();
+    QVERIFY(actualBytes.startsWith("CP949"));
+
+    const QString genuineHash = QString::fromLatin1(
+        QCryptographicHash::hash(actualBytes, QCryptographicHash::Sha256).toHex());
+
+    QFile manFile(QDir(pkgDir).filePath(QStringLiteral("MANIFEST.sha256")));
+    QVERIFY(manFile.open(QIODevice::ReadOnly | QIODevice::Text));
+    QTextStream ts(&manFile);
+    ts.setEncoding(QStringConverter::Utf8);
+    QString recordedHash;
+    while (!ts.atEnd()) {
+      const QString line = ts.readLine();
+      if (line.endsWith(QStringLiteral("encoding.txt"))) {
+        recordedHash = line.left(64);
+        break;
+      }
+    }
+    manFile.close();
+
+    QCOMPARE(recordedHash, genuineHash);
+  }
+}
+
+void TestWorkflow::test_challenge_manifest_64kb_chunking_stress() {
+  QTemporaryDir tempDir;
+  QVERIFY(tempDir.isValid());
+  const QString workDir = tempDir.filePath(QStringLiteral("chunk_stress_dir"));
+  QDir().mkpath(workDir);
+
+  struct TestCase {
+    QString fileName;
+    qsizetype size;
+    enum Pattern { Zeroes, SingleByte, BinaryAllBytes, RepeatedString } pattern;
+  };
+
+  const QList<TestCase> testCases = {
+    { QStringLiteral("c00_empty_0b.dat"), 0, TestCase::Zeroes },
+    { QStringLiteral("c01_single_1b.dat"), 1, TestCase::SingleByte },
+    { QStringLiteral("c02_subchunk_65535b.dat"), 65535, TestCase::BinaryAllBytes },
+    { QStringLiteral("c03_exactchunk_65536b.dat"), 65536, TestCase::BinaryAllBytes },
+    { QStringLiteral("c04_overchunk_65537b.dat"), 65537, TestCase::BinaryAllBytes },
+    { QStringLiteral("c05_twochunks_131072b.dat"), 131072, TestCase::BinaryAllBytes },
+    { QStringLiteral("c06_one_mb_1048576b.bin"), 1048576, TestCase::BinaryAllBytes },
+    { QStringLiteral("c07_five_mb_5242880b.bin"), 5242880, TestCase::BinaryAllBytes },
+    { QStringLiteral("c08_multibyte_korean_200kb.txt"), 204800, TestCase::RepeatedString },
+  };
+
+  QMap<QString, QString> expectedHashes;
+
+  for (const auto& tc : testCases) {
+    const QString filePath = QDir(workDir).filePath(tc.fileName);
+    QFile f(filePath);
+    QVERIFY(f.open(QIODevice::WriteOnly));
+
+    QByteArray data;
+    data.resize(tc.size);
+
+    if (tc.pattern == TestCase::Zeroes) {
+      // 0 bytes
+    } else if (tc.pattern == TestCase::SingleByte) {
+      data[0] = static_cast<char>(0x42);
+    } else if (tc.pattern == TestCase::BinaryAllBytes) {
+      char* ptr = data.data();
+      for (qsizetype i = 0; i < tc.size; ++i) {
+        ptr[i] = static_cast<char>((i * 137 + 59) & 0xFF);
+      }
+    } else if (tc.pattern == TestCase::RepeatedString) {
+      const QByteArray sample = QStringLiteral("고고학 발굴조사 도면 및 단면도면 레이아웃 매니페스트 검증 테스트 ").toUtf8();
+      char* ptr = data.data();
+      for (qsizetype i = 0; i < tc.size; ++i) {
+        ptr[i] = sample[i % sample.size()];
+      }
+    }
+
+    if (tc.size > 0) {
+      QCOMPARE(f.write(data), tc.size);
+    }
+    f.close();
+
+    const QString hash = QString::fromLatin1(
+        QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex());
+    expectedHashes.insert(tc.fileName, hash);
+  }
+
+  // Generate manifest
+  QString err;
+  QVERIFY2(ExportService::writeSha256Manifest(workDir, &err), qPrintable(err));
+
+  const QString manPath = QDir(workDir).filePath(QStringLiteral("MANIFEST.sha256"));
+  QVERIFY(QFile::exists(manPath));
+
+  QFile mf(manPath);
+  QVERIFY(mf.open(QIODevice::ReadOnly | QIODevice::Text));
+  QTextStream ts(&mf);
+  ts.setEncoding(QStringConverter::Utf8);
+
+  const QRegularExpression lineRegex(QStringLiteral("^([a-f0-9]{64})  (.+)$"));
+  QMap<QString, QString> actualHashes;
+  while (!ts.atEnd()) {
+    const QString line = ts.readLine();
+    if (line.trimmed().isEmpty()) continue;
+    const auto match = lineRegex.match(line);
+    QVERIFY2(match.hasMatch(), qPrintable(line));
+    actualHashes.insert(match.captured(2), match.captured(1));
+  }
+  mf.close();
+
+  // Verify each file hash matches exactly
+  QCOMPARE(actualHashes.size(), testCases.size());
+  for (auto it = expectedHashes.constBegin(); it != expectedHashes.constEnd(); ++it) {
+    QVERIFY2(actualHashes.contains(it.key()), qPrintable(QStringLiteral("Missing file: ") + it.key()));
+    QCOMPARE(actualHashes.value(it.key()), it.value());
+  }
+
+  // Check 0-byte file specifically
+  QCOMPARE(actualHashes.value(QStringLiteral("c00_empty_0b.dat")),
+           QStringLiteral("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"));
+}
+
+void TestWorkflow::test_challenge_manifest_self_exclusion_and_regex_format() {
+  QTemporaryDir tempDir;
+  QVERIFY(tempDir.isValid());
+  const QString workDir = tempDir.filePath(QStringLiteral("regex_format_dir"));
+  QDir().mkpath(workDir);
+
+  // Pre-seed an existing MANIFEST.sha256 before calling writeSha256Manifest (overwrite scenario)
+  const QString manPath = QDir(workDir).filePath(QStringLiteral("MANIFEST.sha256"));
+  {
+    QFile preExisting(manPath);
+    QVERIFY(preExisting.open(QIODevice::WriteOnly | QIODevice::Text));
+    preExisting.write("stale manifest content that must be replaced\n");
+    preExisting.close();
+  }
+
+  // Create test files
+  const QStringList testFiles = {
+    QStringLiteral("survey_area.shp"),
+    QStringLiteral("survey_area.shx"),
+    QStringLiteral("survey_area.dbf"),
+    QStringLiteral("조사도면.pdf"),
+    QStringLiteral("단면도.pdf"),
+    QStringLiteral("README_submit.txt"),
+    QStringLiteral("encoding.txt")
+  };
+
+  for (const auto& fn : testFiles) {
+    QFile f(QDir(workDir).filePath(fn));
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.write(fn.toUtf8() + " test payload contents for regex checking.\n");
+    f.close();
+  }
+
+  // Call writeSha256Manifest
+  QString err;
+  QVERIFY2(ExportService::writeSha256Manifest(workDir, &err), qPrintable(err));
+
+  // Inspect raw bytes of MANIFEST.sha256
+  QFile mf(manPath);
+  QVERIFY(mf.open(QIODevice::ReadOnly));
+  const QByteArray rawBytes = mf.readAll();
+  mf.close();
+
+  // Strict regex: ^[a-f0-9]{64}  [^\r\n]+$
+  const QRegularExpression strictRegex(QStringLiteral("^[a-f0-9]{64}  [^\\r\\n]+$"));
+
+  // 1. Line format check with line endings stripped
+  QFile mfText(manPath);
+  QVERIFY(mfText.open(QIODevice::ReadOnly | QIODevice::Text));
+  QTextStream tsText(&mfText);
+  tsText.setEncoding(QStringConverter::Utf8);
+  int textLineCount = 0;
+  while (!tsText.atEnd()) {
+    const QString line = tsText.readLine();
+    if (line.trimmed().isEmpty()) continue;
+    textLineCount++;
+    const auto match = strictRegex.match(line);
+    QVERIFY2(match.hasMatch(), qPrintable(QStringLiteral("Line does not match strict regex: [") + line + QStringLiteral("]")));
+    const QString fn = line.mid(66);
+    QVERIFY2(fn != QStringLiteral("MANIFEST.sha256"), "MANIFEST.sha256 must NOT be present in manifest entries");
+  }
+  mfText.close();
+  QCOMPARE(textLineCount, testFiles.size());
+
+  // 2. Raw binary terminator inspection
+  const bool hasCrlf = rawBytes.contains("\r\n");
+  // Check that every trimmed line in raw bytes matches regex
+  const QString text = QString::fromUtf8(rawBytes);
+  const QStringList rawLines = text.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+  for (const QString& rLine : rawLines) {
+    const QString clean = rLine.endsWith(QLatin1Char('\r')) ? rLine.chopped(1) : rLine;
+    const auto m = strictRegex.match(clean);
+    QVERIFY2(m.hasMatch(), qPrintable(clean));
+    QVERIFY2(!clean.contains(QLatin1Char('\r')), "clean line has no CR");
+  }
+  Q_UNUSED(hasCrlf);
 }
 
 int main(int argc, char** argv) {

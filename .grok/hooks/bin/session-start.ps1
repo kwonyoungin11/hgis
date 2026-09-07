@@ -25,7 +25,7 @@ if (Test-Path $cc) { $lines += "compile_commands: ok" } else { $lines += "compil
 [Console]::Error.WriteLine(("ka-hgis session: " + ($lines -join "; ")))
 $ctx = @'
 [SESSION] Read .grok/NOW.md first (current work + do-not-touch). Excavation HGIS loop is ON via UserPromptSubmit hook.
-Every request: sequential-thinking + context7, ENGLISH official QGIS+ArcGIS developer sites first, expert team (arcgis-expert || qgis-expert then ka-developer) + designers, TDD tests-first, then implement.
+Complexity 1-2: parent only. Complexity 3+: Task sequential-thinking-agent. context7 for library docs. ENGLISH official QGIS+ArcGIS developer sites first, expert team (arcgis-expert || qgis-expert then ka-developer) + designers, TDD tests-first, then implement.
 좌표점=조판. 조판 축척 유지. 맵 중심→조판 중앙. /ka-predev /ka-tdd /ka-design
 '@
 $payload = @{

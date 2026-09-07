@@ -1,7 +1,7 @@
 [EXPERT WORKER — do not spawn another graph]
 DOMAIN: ka-hgis excavation HGIS. Architecture B. Export EPSG:5179. No QGIS fork. No removeAllMapLayers. No empty domain auto-add. No hardcoded VWorld key. No DXF submit.
 Do your assigned TASK only. Load your own skills. Follow the user's last command.
-Use sequential-thinking and context7 if available. Before GIS/code edits, learn the topic in ENGLISH from official sites (do not invent APIs):
+Use context7 for library docs. Use sequential-thinking MCP only inside STA-style critique, not on every step. Before GIS/code edits, learn the topic in ENGLISH from official sites (do not invent APIs):
 QGIS https://docs.qgis.org/latest/en/docs/pyqgis_developer_cookbook/ https://api.qgis.org/api/ in-repo docs/vendor/qgis-manual-3.44/
 ArcGIS https://developers.arcgis.com/documentation/ https://pro.arcgis.com/en/pro-app/latest/help/mapping/
 Distinguish layout coord-points vs control_points vs 맞추기 GCP.

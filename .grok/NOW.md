@@ -1,5 +1,77 @@
 # NOW — Grok resume (2026-08-22)
 
+## 지금 (2026-09-06 아이콘 실행 후 종료)
+
+사용자: 바탕화면 아이콘·E: 포터블이 잠시 보이다가 꺼진다.
+원인: 포터블 누락 아님. 아이콘은 `start-ka-hgis.vbs`→`launch.ps1`→`build\Release`. 지난 조사 내장 작업공간(24레이어+위성·지적 WMS) 복원 직후 `provider_wms` `deleteLater` AV. 덤프 `crash-20260906-153833`, `153900`.
+한 일: 부팅 복원은 `LayersOnly`. `finishOpenedProject`는 빈 `refresh()` 대신 `refreshXyzBasemapTiles`. skip 플래그는 정상 종료 때만 해제.
+금지: 커밋, `removeAllMapLayers`, VWorld 키 하드코딩.
+검증: cmake 0 · 해당 workflow 3테스트 0 · smoke-quit 0 · publish 2,827,264 bytes.
+필드: 옛 창 닫고 **고고학 전용 HGIS**. 색·심볼 전체는 「조사 열기」.
+
+## 지금 (2026-09-06 안동 읍면동 굵은선)
+
+사용자: 바탕화면 `안동시\LSMD_ADM_SECT_UMD_경북` 읍면동을 안동시만, 굵은 선·동이름.
+한 일: `COL_ADM_SE='47170'` 필터(경북 525→안동 56). `읍면동` 레이어 1.6mm 선 + `EMD_NM` 라벨. 바탕화면 `안동시`를 데이터 루트로.
+금지: 경북 전체 표시, VWorld 키, 커밋.
+검증: cmake 0 · andong_pack 0 · smoke-quit 0.
+필드: 옛 `andong-viewer` 닫고 다시. 왼쪽 **행정 → 읍면동 / 이름**.
+커밋 금지.
+
+## 지금 (2026-09-06 안동시 발표 오프라인 뷰어)
+
+사용자: hgis와 별도, 안동시만 위성, 전부 오프라인, SHP 명칭/지번 토글, 휠 줌, 포터블.
+한 일: `andong-viewer` (C++/Qt/QGIS 얇은 exe) + `AndongPack` + `data/andong/andong_city.geojson` 반전 마스크 + `satellite.mbtiles`(z12–15, 4357장). 유적 SHP 12장 자동 로드, 레이어/이름 체크박스, 찾기.
+금지: ka-hgis MainWindow에 넣기, VWorld 키 하드코딩, 커밋.
+검증: cmake 0 · andong_pack ctest 0 · `--smoke-quit` 0 · portable smoke 0 · `dist\andong-portable` + 바탕 `andong-portable`.
+필드: `start-andong.bat` 또는 `andong-viewer.exe`. 안동시 밖은 흰 여백. **지적 SHP는 `D:\hgis\안동시`에 없었음** — `data\andong\shp`에 지적/지번 SHP를 넣으면 지번 토글이 살아남.
+커밋 금지.
+
+## 지금 (2026-09-06 지표조사 현장 지도)
+
+사용자: 시군구·읍면동을 고르면 그 위성만 + 가져온 유적 SHP만.
+한 일: `KaRegionLocator` 「현장 지도」→ `AdminBoundaryService`(VWorld `LT_C_ADEMD_INFO`) → `admin_emd` 반전 폴리곤 마스크. 지적·유구는 끄고 위성·마스크·`user:` SHP만. 「찾기」 지오코딩은 유지.
+금지: 줌만으로 대체, `removeAllMapLayers`, VWorld 키 하드코딩, 제출 CRS 5179 변경, 커밋.
+검증: cmake 0 · 신규 workflow 4테스트 0 · smoke-quit 0 · publish 갱신.
+후속: 마스크에서 `layer_key` 제거(도메인 취급 방지). Data API `domain=localhost` 제거. 시·도 필터·위성 실패 안내.
+필드: 옛 창 닫고 **고고학 전용 HGIS**. 경북→안동시→읍면동→현장 지도. 키가 있어야 경계를 받음. 유적 SHP 없으면 파일 고르기.
+포터블: `E:\ka-hgis-portable` (start.bat / ka-hgis.exe). E: 기존 조사 폴더는 그대로.
+
+## 지금 (2026-09-06 맵·도면만들기 레이어/파일함 · 세로 투명도)
+
+사용자: 지도와 도면만들기의 레이어·파일함을 같게. 창 크기 조절. 투명도 게이지는 맵/도면 창 안 왼쪽 맨 위(레이어창 바로 오른쪽) 세로.
+한 일: `KaLayerOpacityRail` 오버레이. 레이어 카드 가로 슬라이더 제거. `studioMainSplit`로 도면 왼쪽 열 160–720. 파일 끌어넣기는 `tryAddDroppedUrls` 공통.
+금지: 제출 CRS 5179 변경, `removeAllMapLayers`, VWorld 키, 커밋.
+검증: cmake 0 · theme_qss 0 · smoke-quit 0 · publish 2,786,816 bytes.
+필드: 옛 창 닫고 **고고학 전용 HGIS**. 위성 고르면 맵·도면 둘 다 왼쪽 위 세로 투명도. 레이어/파일함 경계 드래그.
+
+## 지금 (2026-09-06 파일함 글자 축소 · 전문 라벨)
+
+사용자: 파일함 줄이면 `...` → 글자 크기 축소. 아이콘 명칭을 전문 용어로.
+한 일: `KaFileBrowserPanel::fitShortcutFonts` (QFontMetrics::horizontalAdvance, 7–12px). QSS `filesCard`에서 고정 font-size 제거. 리본/조판 `까?` 문구를 새 조사·조사 열기·디지타이즈·좌표 정합·5179 반출·PDF 내보내기 등으로 교체.
+검증: theme_qss + 해당 ctest. 필드: 옛 창 닫고 고고학 전용 HGIS. 파일함 좁혀도 라벨 전체가 보여야 함.
+커밋 금지.
+
+## 지금 (2026-09-06 5179 파일만 · 위성 해상도)
+
+사용자: 「파일만 쓰고 지도에는 안 올리게」+ 줌 시 위성 잘림을 FHD/와이드/4K에서 일정하게.
+고침: `convertToShp5179`/`convertFileToShp5179` 기본 `addToMap=false`. 리본 5179는 `QgsProject`만 변환 맥락으로 쓰고 `addMapLayer`/`refresh` 없음. `applyCanvasScreenDpi`가 `outputSize=위젯×DPR`. Resize는 락(`NeedsTileRefresh(Resize)=false`) 유지한 채 `scheduleMapDisplayRefresh`. `canvasViewAspect`는 위젯 비율.
+금지: 512/@2x 타일, `removeAllMapLayers`, 제출 CRS 5179 변경, 커밋.
+필드: 옛 창 닫고 **고고학 전용 HGIS**. 5179변환은 SHP만. 줌해도 위성이 화면을 채움.
+
+
+
+## 지금 (2026-09-06 STA 서브에이전트)
+
+사용자: Sequential Thinking MCP를 매 요청 호출하지 말고, 복잡도 게이트 + 격리 STA로 바꾼다 (사양서 2.0).
+한 일:
+- 에이전트 `.cursor/agents/sequential-thinking-agent.md` (+ 사용자 `~/.cursor/agents/`)
+- 부모 스킬·규칙: 1–2점 부모 단독, 3–5점 STA. Context7은 문서용 유지.
+- MCP `sequentialthinking`은 STA 안에서만 선택. 없으면 스크래치패드(듀얼 모드).
+- Cursor에는 `send_message` 없음. 하트비트는 background + `~/.cursor/subagents/`. 재사용은 `Task resume` + `.grok/.state/sta-session.json`.
+금지: 인사·한 줄에 STA. LangGraph Python 런타임 없음(이 저장소는 Cursor). 커밋 금지.
+필드: **새 채팅**에서 복잡도 3+ 요청 시 Task 목록에 `sequential-thinking-agent`가 보여야 함.
+
 ## 지금 (2026-09-05 재접속 시 레이어 색이 바뀜)
 
 원인: 부팅 `restoreLastSurvey`가 항상 LayersOnly라 내장 작업공간(색·심볼)을 건너뛰고 leftover가 `applyDomainDrawStyle` 공장색을 입힘. 그 상태로 자동저장하면 원래 색이 덮임.
@@ -43,14 +115,10 @@
 고침: `kaSafeReadQgisProject` SEH, 실패 시 GPKG만, 복원 중 죽으면 다음 실행은 홈에 머묾.
 필드: 기존 창 닫고 바탕화면 **고고학 전용 HGIS**. 홈이 유지되어야 함. 커밋 금지.
 
-## 지금 (2026-09-05 상시: 모든 대화 Context7 + Sequential Thinking)
+## 지금 (2026-09-05 상시: 모든 대화 Context7 + Sequential Thinking) — 폐기
 
-사용자: 모든 대화에 순차적사고와 Context7 MCP를 쓰고, 기억·기록하라.
-기록:
-- Cursor 사용자 규칙 `모든 대화 Context7+순차적사고` (id 17758501)
-- `%USERPROFILE%\.cursor\rules\always-context7-thinking.mdc`
-- 프로젝트 `.cursor/rules/mcp-context7-thinking.mdc` + `grok-ka-hgis.mdc`
-금지: 있다고만 하고 호출 생략. 키를 채팅에 붙이지 말 것.
+**2026-09-06 STA 게이트로 대체.** 인사·1–2점에 sequentialthinking MCP 강제 없음. Context7은 라이브러리 문서만. 규칙 id 17758501 제목은 `STA 게이트 + Context7 문서`.
+없는 파일: `always-context7-thinking.mdc`, `mcp-context7-thinking.mdc` — 다시 만들지 말 것.
 
 ## 지금 (2026-09-05 Grok 전용 병렬 — 모델 혼합 아님)
 

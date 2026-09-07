@@ -14,6 +14,8 @@ class QgsRectangle;
 class QgsPointXY;
 class QgsFeature;
 class QgsLayerTreeGroup;
+class QgsGeometry;
+class QgsCoordinateReferenceSystem;
 
 class LayerOps {
 public:
@@ -21,6 +23,7 @@ public:
   static constexpr const char* kGroupReference = "참조 지도";
   static constexpr const char* kPropLayerKey = "ka_hgis/layer_key";
   static constexpr const char* kPropLayerRole = "ka_hgis/layer_role";
+  static constexpr const char* kAdminEmdKey = "admin_emd";
   static constexpr const char* kRoleSurvey = "survey";
   static constexpr const char* kRoleReference = "reference";
   static constexpr const char* kPropAlignPending = "ka_hgis/align_pending";
@@ -44,8 +47,11 @@ public:
     Osm
   };
 
+  // addToMap: 재투영 결과를 범례에 올릴지. 제출용 5179는 false — 작업 CRS 지도에
+  // 업로드 레이어를 섞지 않는다. project 는 변환 맥락용으로 그대로 넘긴다.
   static QString reprojectVectorLayer(QgsVectorLayer* layer, const QString& targetCrsAuthId,
-                                      const QString& outPath, QgsProject* project, QString* errorOut = nullptr);
+                                      const QString& outPath, QgsProject* project,
+                                      QString* errorOut = nullptr, bool addToMap = true);
 
   static int ensureControlPointQualityFields(QgsVectorLayer* controlPoints);
 
@@ -219,15 +225,26 @@ public:
   static bool zoomToProjectDataLayers(QgsMapCanvas* canvas, QgsProject* project);
   static bool isolateAndZoomToLayer(QgsProject* project, QgsMapCanvas* canvas, QgsMapLayer* layer,
                                     bool keepReference = true);
+  static bool isAdminEmdLayer(const QgsMapLayer* layer);
+  static bool isImportedSiteLayer(const QgsMapLayer* layer);
+  static QgsVectorLayer* findImportedSiteLayer(QgsProject* project);
+  static bool applyInvertedPaperMask(QgsVectorLayer* layer);
+  static QgsVectorLayer* upsertAdminEmdMask(QgsProject* project, const QgsGeometry& geom,
+                                            const QgsCoordinateReferenceSystem& srcCrs,
+                                            const QString& workCrsAuthId, const QString& titleKo);
+  static bool isolateSurfaceSurveyView(QgsProject* project, QgsMapCanvas* canvas,
+                                       QgsMapLayer* siteLayer = nullptr);
   static void zoomToFullMax(QgsMapCanvas* canvas);
   static void applyKoreaMapLimits(QgsProject* project, QgsMapCanvas* canvas);
   static bool clampCanvasToKorea(QgsMapCanvas* canvas);
 
   static QString convertToShp5179(QgsVectorLayer* layer, const QString& outShpPath,
-                                  QgsProject* project, QString* errorOut = nullptr);
+                                  QgsProject* project, QString* errorOut = nullptr,
+                                  bool addToMap = false);
 
   static QString convertFileToShp5179(const QString& inPath, const QString& outShpPath,
-                                      QgsProject* project, QString* errorOut = nullptr);
+                                      QgsProject* project, QString* errorOut = nullptr,
+                                      bool addToMap = false);
 
   static QString georeferenceImageSimple(const QString& imagePath, QgsVectorLayer* controlPoints,
                                          QgsProject* project, QgsMapCanvas* canvas, QString* errorOut = nullptr);

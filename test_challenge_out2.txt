@@ -1,0 +1,20 @@
+********* Start testing of TestWorkflow *********
+Config: Using QtTest library 6.11.1, Qt 6.11.1 (x86_64-little_endian-llp64 shared (dynamic) release build; by MSVC 2022), windows 11
+PASS   : TestWorkflow::initTestCase()
+QWARN  : TestWorkflow::test_challenge_pdf_failure_readonly_and_locked() QPainter::begin(): Returned false
+QWARN  : TestWorkflow::test_challenge_pdf_failure_readonly_and_locked() QPainter::begin(): Returned false
+QWARN  : TestWorkflow::test_challenge_pdf_failure_readonly_and_locked() QPainter::begin(): Returned false
+PASS   : TestWorkflow::test_challenge_pdf_failure_readonly_and_locked()
+PASS   : TestWorkflow::test_challenge_section_sheet_bundling_variations()
+PASS   : TestWorkflow::test_challenge_encoding_txt_flush_and_content()
+PASS   : TestWorkflow::test_challenge_manifest_64kb_chunking_stress()
+PASS   : TestWorkflow::test_challenge_manifest_self_exclusion_and_regex_format()
+QWARN  : TestWorkflow::test_export_failure_aborts_and_reports_error() QPainter::begin(): Returned false
+PASS   : TestWorkflow::test_export_failure_aborts_and_reports_error()
+PASS   : TestWorkflow::test_section_sheet_bundling()
+PASS   : TestWorkflow::test_chunked_sha256_manifest_integrity()
+PASS   : TestWorkflow::exportSubmissionPackage_pdfIsUserSheetOnly()
+PASS   : TestWorkflow::exportPackagePrefersUserSheetPdf()
+PASS   : TestWorkflow::cleanupTestCase()
+Totals: 12 passed, 0 failed, 0 skipped, 0 blacklisted, 5504ms
+********* Finished testing of TestWorkflow *********

@@ -42,28 +42,36 @@ public:
   void activate() override;
   void deactivate() override;
 
+
+  // 「도형선택」이 편집 기능만 빌려 쓴다. 지도 도구로 걸지 않고 호출만 한다.
+  // 이 도구를 따로 켜는 버튼은 없다 — 도형을 고르면 수정점이 바로 나와야 한다는
+  // 요구에 맞춰, 선택 도구가 이 기능들을 그대로 불러 쓴다.
+  void setTarget(QgsVectorLayer* layer, QgsFeatureId fid);
+  void clearTarget();
+  bool hasTarget() const { return !m_layer.isNull() && m_fid >= 0; }
+  void showVertexMarkers();
+  // 끄는 동안 화면만 미리 보여 준다. 저장은 놓을 때 moveVertexTo 에서 한 번.
+  void previewVertexMove(int index, const QgsPointXY& toLayerPt);
+  int vertexNear(const QgsPointXY& mapPt, int tolPx = 20) const;
+  int segmentNear(const QgsPointXY& mapPt, QgsPointXY* onLine, int tolPx = 16) const;
+  bool moveVertexTo(int index, const QgsPointXY& to);
+  bool deleteVertexAt(int index);
+  bool insertVertexAt(int index, const QgsPointXY& at);
+  QgsGeometry selectedGeometry() const;
+  // 도형은 레이어 CRS, 마우스는 지도 CRS. 섞으면 도형이 안 잡힌다.
+  QgsPointXY toLayer(const QgsPointXY& mapPt) const;
+  QgsPointXY snapMapPoint(QgsMapMouseEvent* e, bool* snapped = nullptr) const;
+
 signals:
   void statusMessage(const QString& text);
 
 private:
   void selectAt(const QgsPointXY& mapPt);
   void clearSelection();
-  void showVertexMarkers();
   void showLineVertexMenu(QgsMapMouseEvent* e);
-  QgsPointXY snapMapPoint(QgsMapMouseEvent* e, bool* snapped = nullptr) const;
-  // 화면에서 tolPx 안에 있는 꼭짓점 번호. 없으면 -1.
-  int vertexNear(const QgsPointXY& mapPt, int tolPx = 20) const;
-  // 화면에서 tolPx 안에 있는 변의 뒤쪽 꼭짓점 번호. 없으면 -1.
-  int segmentNear(const QgsPointXY& mapPt, QgsPointXY* onLine, int tolPx = 16) const;
   double mapTolerance(int px) const;
   double layerTolerance(int px) const;
-  // 도형은 레이어 CRS, 마우스는 지도 CRS. 섞으면 도형이 안 잡힌다.
-  QgsPointXY toLayer(const QgsPointXY& mapPt) const;
   QgsPointXY toMap(const QgsPointXY& layerPt) const;
-  bool moveVertexTo(int index, const QgsPointXY& to);
-  bool deleteVertexAt(int index);
-  bool insertVertexAt(int index, const QgsPointXY& at);
-  QgsGeometry selectedGeometry() const;
   void refreshRubber(const QgsGeometry& geom);
 
   QPointer<QgsVectorLayer> m_layer;

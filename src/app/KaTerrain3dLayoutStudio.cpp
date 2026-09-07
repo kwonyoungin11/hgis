@@ -149,7 +149,7 @@ KaTerrain3dLayoutStudio::KaTerrain3dLayoutStudio(QgsProject* project, QWidget* p
     m_view->viewport()->installEventFilter(this);
   midLay->addWidget(m_view, 1);
 
-  m_status = new QLabel(QStringLiteral("입체지형 조판 — 범례는 「범례를 넣을까?」로"), mid);
+  m_status = new QLabel(QStringLiteral("입체지형 조판 — 범례는 「범례」로"), mid);
   m_status->setContentsMargins(8, 4, 8, 4);
   midLay->addWidget(m_status);
 
@@ -177,16 +177,16 @@ KaTerrain3dLayoutStudio::KaTerrain3dLayoutStudio(QgsProject* project, QWidget* p
   auto* legendLay = new QVBoxLayout(cardLegend);
   legendLay->setContentsMargins(10, 10, 10, 10);
   legendLay->setSpacing(6);
-  auto* legendCap = new QLabel(QStringLiteral("무엇을 넣을까?"), cardLegend);
+  auto* legendCap = new QLabel(QStringLiteral("조판 항목"), cardLegend);
   legendCap->setObjectName(QStringLiteral("cardCaption"));
   legendLay->addWidget(legendCap);
   auto* legendRow = new QHBoxLayout;
   legendRow->setSpacing(14);
   auto* legendBtn = makeTile(cardLegend, KaIcons::icon(QStringLiteral("layout_legend")),
-                             QStringLiteral("범례를 넣을까?"), QSize(22, 22));
+                             QStringLiteral("범례"), QSize(22, 22));
   connect(legendBtn, &QToolButton::clicked, this, &KaTerrain3dLayoutStudio::addLegend);
   auto* pdfBtn = makeTile(cardLegend, KaIcons::icon(QStringLiteral("pdf")),
-                          QStringLiteral("PDF로 내보낼까?"), QSize(22, 22));
+                          QStringLiteral("PDF 내보내기"), QSize(22, 22));
   pdfBtn->setObjectName(QStringLiteral("btnPrimary"));
   connect(pdfBtn, &QToolButton::clicked, this, &KaTerrain3dLayoutStudio::exportPdf);
   legendRow->addWidget(legendBtn, 1);
@@ -222,7 +222,7 @@ KaTerrain3dLayoutStudio::KaTerrain3dLayoutStudio(QgsProject* project, QWidget* p
   auto* northLay = new QVBoxLayout(cardNorth);
   northLay->setContentsMargins(10, 10, 10, 10);
   northLay->setSpacing(6);
-  northLay->addWidget(new QLabel(QStringLiteral("방위를 넣을까?"), cardNorth));
+  northLay->addWidget(new QLabel(QStringLiteral("방위"), cardNorth));
   auto* northRow = new QHBoxLayout;
   northRow->setSpacing(6);
   const char* northTips[] = {"북 글자", "북 화살", "나침반", "바람장미"};
@@ -252,7 +252,7 @@ KaTerrain3dLayoutStudio::KaTerrain3dLayoutStudio(QgsProject* project, QWidget* p
   auto* scaleLay = new QVBoxLayout(cardScale);
   scaleLay->setContentsMargins(10, 10, 10, 10);
   scaleLay->setSpacing(8);
-  scaleLay->addWidget(new QLabel(QStringLiteral("도면 정보를 고칠까?"), cardScale));
+  scaleLay->addWidget(new QLabel(QStringLiteral("도면 정보"), cardScale));
   m_scaleSpin = new QSpinBox(cardScale);
   m_scaleSpin->setRange(10, 5000000);
   m_scaleSpin->setSingleStep(10);

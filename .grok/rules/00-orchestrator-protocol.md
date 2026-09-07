@@ -8,7 +8,7 @@ MCP, skills, and hooks are **allowed and required**. There is no ban.
 
 User standing order (also injected by `.grok/hooks/bin/prompt-inject.ps1`
 and spelled out in `30-excavation-gis-loop.md`): excavation field HGIS only;
-prompt-engineer internally; sequential-thinking + context7 first; **English
+prompt-engineer internally; context7 when library docs are needed; STA on complexity 3+ (not every greeting); **English
 official QGIS + ArcGIS developer sites** (docs.qgis.org, api.qgis.org,
 developers.arcgis.com, pro.arcgis.com) before GIS edits — user command wins;
 matching skills (each expert
@@ -23,8 +23,8 @@ scale); 레이어를 가운데 keeps scale.
 
 Before answering, call:
 
-1. **context7** (`search_tool` then `use_tool`) for current docs/APIs
-2. **sequential-thinking** (`search_tool` then `use_tool`) to decompose the request
+1. **context7** for current docs/APIs when the question is about a library
+2. **STA** (`Task` `sequential-thinking-agent`) only if complexity ≥ 3. Score 1–2: parent only. Do not call `sequentialthinking` MCP on every request.
 
 If a server is disconnected, say so once and continue with built-in tools.
 Do not invent a ban.
@@ -63,7 +63,7 @@ Operational copy: `.grok/rules/50-graph-loop.md`.
 Emit `spawn_subagent` or `/workflow ka-ship` **this turn**. Do not narrate a launch without the tool call.
 Worker prompts: TASK / EXPECTED OUTCOME / MUST DO / MUST NOT DO / CONTEXT.
 Activate `ka-graph`, `ka-experts`, `ka-hgis`, `ka-hgis-verify` as they match.
-Skip spawning only for a one-word greeting. Still do Step 1–2.
+Score 1–2 or a greeting: skip STA. Still rewrite internally. Context7 only if library docs are needed.
 Editing `src/app` **and** `src/core` this turn without a spawn is FEATURE and is blocked.
 
 ## Step 4 — loop engineering (verify-fix-verify)

@@ -21,7 +21,7 @@ class QgsLayoutViewToolPan;
 class QgsPrintLayout;
 class QgsProject;
 
-// 입체지형 전용 조판 탭. 시트는 terrain3d_sheet. 넣을까/방위/도명 카드는 2D와 같음.
+// 입체지형 전용 조판 탭. 시트는 terrain3d_sheet. 조판 항목/방위/도명 카드는 2D와 같음.
 class KaTerrain3dLayoutStudio : public QWidget {
   Q_OBJECT
 public:

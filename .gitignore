@@ -82,6 +82,14 @@ dist/**/*.dll
 dist/ka-hgis-portable/apps/
 dist/ka-hgis-portable/bin/
 dist/ka-hgis-portable/share/
+dist/andong-portable/apps/
+dist/andong-portable/bin/
+dist/andong-portable/share/
+data/andong/*.mbtiles
+data/andong/*.tif
+data/andong/*.tiff
+data/andong/_src_logo_a.ai
+data/andong/mark-src/
 
 # Python / misc
 __pycache__/

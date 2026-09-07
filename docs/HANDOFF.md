@@ -59,7 +59,7 @@ Korean field archaeology HGIS (C++20/Qt6 + OSGeo4W `qgis-dev`, Architecture B, n
 5i. **입체지형** = 리본 진입 **삭제**(사용자 포기). 엔진/`terrain3d_sheet` 코드는 남김. 제출 5179 아님.
 5e. **레이어 글자** = 벡터 우클릭 「글자 끄기/켜기」(`LayerOps::setLabelsVisible`). 지적 WMS의 지번 글자는 그림에 박혀 있어 레이어를 통째로 꺼야 함.
 5f. **시굴격자 비율** = 조사구역 레이어 우클릭 → 시굴격자 → 시굴(10%) / 표본(2%). 폭 2 m 고정, 길이·간격 배분(`buildForTargetRatio`). 선택한(없으면 마지막) 구역만.
-6. Work CRS default **EPSG:5187 (동부)**; 5186 also OK. **export SHP+PDF+MANIFEST = EPSG:5179**. Checklist error hard-blocks 제출
+6. Work CRS default **EPSG:5187 (동부)**; 5186 also OK. **export SHP+PDF+MANIFEST = EPSG:5179**. 리본 「인트라넷 내보내기 5179」/「5179변환」은 파일만 쓰고 지도·범례에 올리지 않는다. Checklist error hard-blocks 제출
 7a. **축척 칸은 하나** — 편집 가능한 `scaleCombo` 하나뿐(입력줄이 그 안의 `scaleEdit`). 예전의 별도 QLineEdit + 프리셋 QComboBox 두 개 구성으로 되돌리지 말 것. `MainWindow::scaleDenominatorFromUi` 가 "2000"·"1:2000" 을 모두 읽는다. 프리셋은 1:100 부터.
 7. 초보자 리본 6그룹(조사파일/기록/배경/정합·분석/산출/찾기). 질문형 짧은 라벨. Text menu bar **hidden**. **파일함은 기본 표시**(더보기로 숨길 수 있음). 작업 제어 dock은 더보기. 조판 위 「보기」 리본 없음 — 줌·이동은 마우스, 용지 맞춤은 열 때 자동.
 

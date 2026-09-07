@@ -84,6 +84,9 @@ void TestTheme::requiredSelectorsPresent() {
       "QFrame#ribbonGroup",
       "QLabel#ribbonGroupCaption",
       "QWidget#regionLocator QToolButton#regionChip",
+      "QFrame#layerOpacityRail",
+      "QSplitter#studioLeftSplit",
+      "QSplitter#studioMainSplit",
   };
   for (const char* sel : need) {
     QVERIFY2(qss.contains(QLatin1String(sel)), sel);
@@ -155,29 +158,29 @@ void TestTheme::beginnerChrome_questionLabels() {
            "메인에 초보자 리본");
   QVERIFY2(main.contains(QString::fromUtf8("조사파일")), "조사파일 그룹");
   QVERIFY2(main.contains(QString::fromUtf8("기록")), "기록 그룹");
-  QVERIFY2(main.contains(QString::fromUtf8("배경 지도를 깔아볼까?")), "배경 그룹");
-  QVERIFY2(main.contains(QString::fromUtf8("정합·분석")) ||
-               main.contains(QString::fromUtf8("좌표없는 사진에 좌표를")),
+  QVERIFY2(main.contains(QString::fromUtf8("배경 지도")), "배경 그룹");
+  QVERIFY2(main.contains(QString::fromUtf8("좌표 정합")) ||
+               main.contains(QString::fromUtf8("정합·분석")),
            "정합 그룹");
   QVERIFY2(main.contains(QString::fromUtf8("산출")) ||
                main.contains(QString::fromUtf8("내보내기")),
            "내보내기 그룹");
   QVERIFY2(main.contains(QString::fromUtf8("찾기")), "찾기 그룹");
-  QVERIFY2(main.contains(QString::fromUtf8("만들까?")), "새조사 초보자 말");
-  QVERIFY2(main.contains(QString::fromUtf8("도면 만들기")) ||
-               (main.contains(QString::fromUtf8("도면")) && main.contains(QString::fromUtf8("만들까?"))),
-           "도면 만들기");
+  QVERIFY2(main.contains(QString::fromUtf8("새 조사")), "새 조사");
+  QVERIFY2(main.contains(QString::fromUtf8("도면 만들기")), "도면 만들기");
   QVERIFY2(!main.contains(QLatin1String("addDockWidget(Qt::RightDockWidgetArea, checkDock)")),
            "도면 검수 칸을 지도에 붙이지 않음");
   QVERIFY2(main.contains(QString::fromUtf8("5179")), "제출은 5179");
-  QVERIFY2(main.contains(QString::fromUtf8("유구 면을 그려볼까?")) ||
-               main.contains(QString::fromUtf8("그려볼까?")),
-           "그리기 말");
+  QVERIFY2(main.contains(QString::fromUtf8("그리기")), "그리기");
   QFile fb(QStringLiteral("src/app/KaFileBrowserPanel.cpp"));
   const QString panelCode = fb.open(QIODevice::ReadOnly | QIODevice::Text) ? QString::fromUtf8(fb.readAll()) : QString();
   QVERIFY2(main.contains(QString::fromUtf8("파일을 지도에 끌어 넣으면 레이어가 됩니다.")) ||
                panelCode.contains(QString::fromUtf8("파일을 지도에 끌어 넣으면 레이어가 됩니다.")),
            "파일함 끌어넣기 안내");
+  QVERIFY2(panelCode.contains(QLatin1String("fitShortcutFonts")),
+           "파일함 좁으면 글자 크기 축소");
+  QVERIFY2(panelCode.contains(QLatin1String("horizontalAdvance")),
+           "파일함 글자 폭은 QFontMetrics");
   QVERIFY2(!main.contains(QLatin1String("addIcon(QStringLiteral(\"out\"), QStringLiteral(\"terrain_3d\")")),
            "입체지형 리본 삭제");
 
@@ -191,8 +194,8 @@ void TestTheme::beginnerChrome_questionLabels() {
   QFile ds(QStringLiteral("src/app/KaDrawingStudio.cpp"));
   QVERIFY2(ds.open(QIODevice::ReadOnly | QIODevice::Text), "KaDrawingStudio.cpp");
   const QString studio = QString::fromUtf8(ds.readAll());
-  QVERIFY2(studio.contains(QString::fromUtf8("PDF로 내보낼까?")), "조판 PDF 초보자 말");
-  QVERIFY2(studio.contains(QString::fromUtf8("무엇을 넣을까?")), "조판 오른쪽 안내");
+  QVERIFY2(studio.contains(QString::fromUtf8("PDF 내보내기")), "조판 PDF");
+  QVERIFY2(studio.contains(QString::fromUtf8("조판 항목")), "조판 오른쪽 안내");
   QVERIFY2(!studio.contains(QLatin1String("studioToolbar")), "조판 위 보기 툴바 없음 — 휠·드래그");
   QVERIFY2(!studio.contains(QString::fromUtf8("용지 전체를 볼까?")), "용지 맞춤 버튼 없음");
   QVERIFY2(!studio.contains(QString::fromUtf8("화면을 움직여볼까?")), "화면 이동 버튼 없음");
@@ -200,7 +203,15 @@ void TestTheme::beginnerChrome_questionLabels() {
            "보기 그룹 없음");
   QVERIFY2(studio.contains(QLatin1String("savePdf")), "PDF 슬롯은 그대로");
   QVERIFY2(studio.contains(QLatin1String("&KaDrawingStudio::savePdf")),
-           "조판 「PDF로 내보낼까?」가 savePdf에 연결되어 있어야 한다");
+           "조판 「PDF 내보내기」가 savePdf에 연결되어 있어야 한다");
+  QVERIFY2(studio.contains(QLatin1String("KaLayerOpacityRail")),
+           "도면만들기 맵 안 세로 투명도");
+  QVERIFY2(studio.contains(QLatin1String("studioMainSplit")),
+           "도면만들기 레이어·파일함 폭을 끌어서 조절");
+  QVERIFY2(main.contains(QLatin1String("KaLayerOpacityRail")),
+           "지도 창 안 세로 투명도");
+  QVERIFY2(!main.contains(QLatin1String("layersLay->addWidget(m_layerOpacityWidget)")),
+           "투명도는 레이어 카드가 아니라 맵 안");
   QVERIFY2(!studio.contains(QLatin1String("addStudio(QStringLiteral(\"out\")")),
            "위 리본 PDF는 범례창과 중복이라 뺌");
 }

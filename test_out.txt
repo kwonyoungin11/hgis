@@ -1,0 +1,39 @@
+********* Start testing of TestE2EOpaque *********
+Config: Using QtTest library 6.11.1, Qt 6.11.1 (x86_64-little_endian-llp64 shared (dynamic) release build; by MSVC 2022), windows 11
+PASS   : TestE2EOpaque::initTestCase()
+PASS   : TestE2EOpaque::testT1_ExportPackage_BundlesPdfAndShp()
+PASS   : TestE2EOpaque::testT1_Manifest_Sha256ChecksumIntegrity()
+FAIL!  : TestE2EOpaque::testT1_LayoutComposition_Validation() 'LayoutService::isComposedStudioSheet(&proj)' returned FALSE. ()
+D:\hgis\tests\test_e2e_opaque.cpp(268) : failure location
+PASS   : TestE2EOpaque::testT1_ChecklistEngine_RuleEvaluation()
+PASS   : TestE2EOpaque::testT1_VworldKey_PropagationAndRegex()
+PASS   : TestE2EOpaque::testT1_Geometry_SanitizeAndRepair()
+QDEBUG : TestE2EOpaque::testT1_SurveyProjectFactory_StorageInit() C:\src\osgeo4w\src\qgis-dev\qgis\src\core\providers\ogr\qgsogrprovider.cpp(1405) : (QgsOgrProvider::extent) [2994ms] Failure: unable to compute extent2D (ogr error: 6)
+QDEBUG : TestE2EOpaque::testT1_SurveyProjectFactory_StorageInit() C:\src\osgeo4w\src\qgis-dev\qgis\src\core\providers\ogr\qgsogrprovider.cpp(1405) : (QgsOgrProvider::extent) [1ms] Failure: unable to compute extent2D (ogr error: 6)
+QDEBUG : TestE2EOpaque::testT1_SurveyProjectFactory_StorageInit() C:\src\osgeo4w\src\qgis-dev\qgis\src\core\providers\ogr\qgsogrprovider.cpp(1405) : (QgsOgrProvider::extent) [1ms] Failure: unable to compute extent2D (ogr error: 6)
+QDEBUG : TestE2EOpaque::testT1_SurveyProjectFactory_StorageInit() C:\src\osgeo4w\src\qgis-dev\qgis\src\core\providers\ogr\qgsogrprovider.cpp(1405) : (QgsOgrProvider::extent) [1ms] Failure: unable to compute extent2D (ogr error: 6)
+QDEBUG : TestE2EOpaque::testT1_SurveyProjectFactory_StorageInit() C:\src\osgeo4w\src\qgis-dev\qgis\src\core\providers\ogr\qgsogrprovider.cpp(1405) : (QgsOgrProvider::extent) [1ms] Failure: unable to compute extent2D (ogr error: 6)
+QDEBUG : TestE2EOpaque::testT1_SurveyProjectFactory_StorageInit() C:\src\osgeo4w\src\qgis-dev\qgis\src\core\providers\ogr\qgsogrprovider.cpp(1405) : (QgsOgrProvider::extent) [1ms] Failure: unable to compute extent2D (ogr error: 6)
+QDEBUG : TestE2EOpaque::testT1_SurveyProjectFactory_StorageInit() C:\src\osgeo4w\src\qgis-dev\qgis\src\core\providers\ogr\qgsogrprovider.cpp(1405) : (QgsOgrProvider::extent) [1ms] Failure: unable to compute extent2D (ogr error: 6)
+PASS   : TestE2EOpaque::testT1_SurveyProjectFactory_StorageInit()
+PASS   : TestE2EOpaque::testT2_ZeroFeatureLayers_ExportGraceful()
+PASS   : TestE2EOpaque::testT2_DegenerateGeometry_EdgeCases()
+PASS   : TestE2EOpaque::testT2_CoordinateBounds_Extents()
+PASS   : TestE2EOpaque::testT2_UncomposedLayout_BlankRejection()
+PASS   : TestE2EOpaque::testT2_Checklist_BlockOnError()
+PASS   : TestE2EOpaque::testT2_InvalidDestination_DirectoryHandling()
+QDEBUG : TestE2EOpaque::testT3_DigitizeRepair_Save_Reopen_Export() C:\src\osgeo4w\src\qgis-dev\qgis\src\core\providers\ogr\qgsogrprovider.cpp(1405) : (QgsOgrProvider::extent) [1991ms] Failure: unable to compute extent2D (ogr error: 6)
+QDEBUG : TestE2EOpaque::testT3_DigitizeRepair_Save_Reopen_Export() C:\src\osgeo4w\src\qgis-dev\qgis\src\core\providers\ogr\qgsogrprovider.cpp(1405) : (QgsOgrProvider::extent) [1ms] Failure: unable to compute extent2D (ogr error: 6)
+QDEBUG : TestE2EOpaque::testT3_DigitizeRepair_Save_Reopen_Export() C:\src\osgeo4w\src\qgis-dev\qgis\src\core\providers\ogr\qgsogrprovider.cpp(1405) : (QgsOgrProvider::extent) [1ms] Failure: unable to compute extent2D (ogr error: 6)
+QDEBUG : TestE2EOpaque::testT3_DigitizeRepair_Save_Reopen_Export() C:\src\osgeo4w\src\qgis-dev\qgis\src\core\providers\ogr\qgsogrprovider.cpp(1405) : (QgsOgrProvider::extent) [1ms] Failure: unable to compute extent2D (ogr error: 6)
+QDEBUG : TestE2EOpaque::testT3_DigitizeRepair_Save_Reopen_Export() C:\src\osgeo4w\src\qgis-dev\qgis\src\core\providers\ogr\qgsogrprovider.cpp(1405) : (QgsOgrProvider::extent) [1ms] Failure: unable to compute extent2D (ogr error: 6)
+QDEBUG : TestE2EOpaque::testT3_DigitizeRepair_Save_Reopen_Export() C:\src\osgeo4w\src\qgis-dev\qgis\src\core\providers\ogr\qgsogrprovider.cpp(1405) : (QgsOgrProvider::extent) [1ms] Failure: unable to compute extent2D (ogr error: 6)
+QDEBUG : TestE2EOpaque::testT3_DigitizeRepair_Save_Reopen_Export() C:\src\osgeo4w\src\qgis-dev\qgis\src\core\providers\ogr\qgsogrprovider.cpp(1405) : (QgsOgrProvider::extent) [1ms] Failure: unable to compute extent2D (ogr error: 6)
+QWARN  : TestE2EOpaque::testT3_DigitizeRepair_Save_Reopen_Export() QTemporaryDir: Unable to remove "C:\\Users\\kyi25\\AppData\\Local\\Temp\\ka_e2e_tests-gpMHAl" most likely due to the presence of read-only files.
+PASS   : TestE2EOpaque::testT3_DigitizeRepair_Save_Reopen_Export()
+PASS   : TestE2EOpaque::testT3_Checklist_StateBuilder_DynamicSync()
+QWARN  : TestE2EOpaque::testT4_MultiPeriodExcavationSite_FullPackage() QTemporaryDir: Unable to remove "C:\\Users\\kyi25\\AppData\\Local\\Temp\\ka_e2e_tests-GLzTpz" most likely due to the presence of read-only files.
+PASS   : TestE2EOpaque::testT4_MultiPeriodExcavationSite_FullPackage()
+PASS   : TestE2EOpaque::cleanupTestCase()
+Totals: 17 passed, 1 failed, 0 skipped, 0 blacklisted, 9208ms
+********* Finished testing of TestE2EOpaque *********

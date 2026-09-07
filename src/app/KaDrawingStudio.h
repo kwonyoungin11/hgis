@@ -23,7 +23,9 @@ class QLineEdit;
 class QShowEvent;
 class QSpinBox;
 class QTimer;
+class QSplitter;
 class QWidget;
+class KaLayerOpacityRail;
 class QgsProject;
 class QgsMapCanvas;
 class QgsLayoutView;
@@ -55,6 +57,8 @@ public:
   static bool promptPaper(QWidget* parent, double* widthMm, double* heightMm);
   void resetPaper(double widthMm, double heightMm, bool preserveExisting = true);
   void refreshMapFromProject();
+  void updateLayerOpacityControl();
+  void repaintMapLayers();
   // 입체지형 3D 그림을 맵 칸에 올리고, 축척·방위는 DEM 범위에 맞춘다.
   void placeTerrain3dPicture(const QString& pngPath, const QgsRectangle& groundExtent,
                              const QgsCoordinateReferenceSystem& crs);
@@ -160,6 +164,8 @@ private:
   QgsLayerTreeView* m_layerTree = nullptr;
   QgsLayerTreeModel* m_layerModel = nullptr;
   class KaFileBrowserPanel* m_filesPanel = nullptr;
+  KaLayerOpacityRail* m_opacityRail = nullptr;
+  QSplitter* m_studioSplit = nullptr;
   // 도곽 +/테두리 자는 격자 설정에서 켠다. 간격 0 = 축척에 맞춰 자동(1-2-5).
   bool m_gridEnabled = false;
   bool m_gridShowNums = false;

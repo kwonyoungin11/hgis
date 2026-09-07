@@ -22,5 +22,6 @@ alwaysApply: true
 - 실행은 `.\scripts\run-ka-hgis.ps1`. `ka-hgis.exe`를 직접 켜지 않는다.
 - 지도/CRS/조판은 GIS 버그로 취급. `zoomToExtent`·`setTool` 순서는 `.grok/NOW.md`와 `.grok/rules/40-section-studio.md`를 따른다.
 - FEATURE면 `/ka-experts` 또는 `/workflow ka-ship`을 **이번 턴에** 소환한다. 한 파일 오타는 혼자 고친다.
+- 사고: 복잡도 1–2는 부모만. 3+면 `sequential-thinking-agent`(STA). 인사마다 sequential-thinking MCP 금지. Context7은 라이브러리 문서용.
 - 루프: 이번 턴에 `src/`를 고쳤으면 cmake/ctest 증거를 남긴다. 예전 미커밋만 있는 조사 턴은 빌드하지 않는다. `.grok/rules/50-graph-loop.md`.
 - 제품 `src/`/`tests/`를 이번 턴에 쓰면 사용자에게 묻지 말고 보안 리뷰를 한 번 자동 실행한다. `.cursor/hooks.json` `stop`이 이어서 넣고, 에이전트는 `security-review`를 바로 띄운다.

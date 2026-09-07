@@ -285,8 +285,8 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
       if (!t.isEmpty()) toolbarTexts << t;
     }
     const QStringList need = {
-      QStringLiteral("만들까?"), QStringLiteral("열까?"), QStringLiteral("저장"),
-      QStringLiteral("그려볼까?"), QStringLiteral("배경"), QStringLiteral("도면")
+      QStringLiteral("새 조사"), QStringLiteral("열기"), QStringLiteral("저장"),
+      QStringLiteral("그리기"), QStringLiteral("배경"), QStringLiteral("도면")
     };
     QStringList missing;
     for (const QString& n : need) {
@@ -457,12 +457,12 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
       }
       return false;
     };
-    all = step(QStringLiteral("toolbar_new_action"), hasText(QStringLiteral("만들까?"))) && all;
-    all = step(QStringLiteral("toolbar_draw_toggle"), hasText(QStringLiteral("그려볼까?"))) && all;
+    all = step(QStringLiteral("toolbar_new_action"), hasText(QStringLiteral("새 조사"))) && all;
+    all = step(QStringLiteral("toolbar_draw_toggle"), hasText(QStringLiteral("그리기"))) && all;
     all = step(QStringLiteral("toolbar_basemap_toggle"), hasText(QStringLiteral("배경"))) && all;
     all = step(QStringLiteral("toolbar_submit_toggle"), hasText(QStringLiteral("도면"))) && all;
     all = step(QStringLiteral("toolbar_measure_tape"),
-               hasText(QStringLiteral("거리")) || hasText(QStringLiteral("재볼까?"))) && all;
+               hasText(QStringLiteral("거리"))) && all;
     all = step(QStringLiteral("toolbar_dem"), hasText(QStringLiteral("DEM"))) && all;
     bool demClasses = false;
     if (auto* btnDem = w->findChild<QToolButton*>(QStringLiteral("btnDem"))) {

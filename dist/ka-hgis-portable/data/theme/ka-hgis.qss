@@ -424,7 +424,7 @@ QHeaderView::section {
 }
 
 /* ---- Cards / docks / splitter ---- */
-QFrame#mapCard, QFrame#layersCard, QFrame#filesCard,
+QFrame#mapCard, QFrame#layersCard, QFrame#filesCard, QFrame#studioFilesPanel,
 QFrame#itemInspector, QFrame#mapAdjustBar, QFrame#drawerCard,
 QFrame#studioLeftCol, QFrame#studioBottomBar,
 QFrame#terrainLayersCard, QFrame#terrainFilesCard {
@@ -527,20 +527,54 @@ QTabBar::tab {
 }
 QTabBar::tab:selected { color: #124B94; border-bottom: 2px solid #1E67C6; }
 /* ---- Left Dock (레이어 위 / 파일함 아래 동시 노출) ---- */
-QSplitter#leftSplit {
+QSplitter#leftSplit,
+QSplitter#studioLeftSplit,
+QSplitter#studioMainSplit {
   background: transparent;
 }
-QSplitter#leftSplit::handle {
+QSplitter#leftSplit::handle,
+QSplitter#studioLeftSplit::handle {
   background: #D5D9DE;
   height: 6px;
   margin: 2px 12px;
   border-radius: 3px;
 }
-QSplitter#leftSplit::handle:hover {
+QSplitter#studioMainSplit::handle {
+  background: #D5D9DE;
+  width: 6px;
+  margin: 12px 2px;
+  border-radius: 3px;
+}
+QSplitter#leftSplit::handle:hover,
+QSplitter#studioLeftSplit::handle:hover,
+QSplitter#studioMainSplit::handle:hover {
   background: #1E67C6;
 }
+QFrame#layerOpacityRail {
+  background: rgba(255, 255, 255, 230);
+  border: 1px solid #D5D9DE;
+  border-radius: 8px;
+}
+QFrame#layerOpacityRail QLabel {
+  color: #475569;
+  font-size: 11px;
+  font-weight: 700;
+}
+QFrame#layerOpacityRail QSlider::groove:vertical {
+  background: #E5E7EB;
+  width: 6px;
+  border-radius: 3px;
+}
+QFrame#layerOpacityRail QSlider::handle:vertical {
+  background: #1E67C6;
+  border: 1px solid #175AB0;
+  height: 14px;
+  margin: 0 -5px;
+  border-radius: 7px;
+}
 QFrame#layersCard,
-QFrame#filesCard {
+QFrame#filesCard,
+QFrame#studioFilesPanel {
   background: #FFFFFF;
   border: 1px solid #D5D9DE;
   border-bottom: 2px solid #BAC2CC;
@@ -555,7 +589,7 @@ QFrame#filesInner {
 }
 
 /* ---- Side panel buttons (레이어·파일함) ---- */
-QFrame#layersCard QToolButton, QFrame#filesCard QToolButton {
+QFrame#layersCard QToolButton {
   font-size: 12px;
   padding: 4px 10px;
   border: 1px solid #D5D9DE;
@@ -564,13 +598,26 @@ QFrame#layersCard QToolButton, QFrame#filesCard QToolButton {
   border-radius: 6px;
   color: #4C535B;
 }
-QFrame#layersCard QToolButton:hover, QFrame#filesCard QToolButton:hover {
+QFrame#filesCard QToolButton,
+QFrame#studioFilesPanel QToolButton {
+  padding: 4px 6px;
+  border: 1px solid #D5D9DE;
+  border-bottom: 2px solid #BAC2CC;
+  background: #FFFFFF;
+  border-radius: 6px;
+  color: #4C535B;
+}
+QFrame#layersCard QToolButton:hover,
+QFrame#filesCard QToolButton:hover,
+QFrame#studioFilesPanel QToolButton:hover {
   background: #F8FAFC;
   border-color: #C3C8CF;
   border-bottom: 2px solid #ACB5C0;
   color: #1F2328;
 }
-QFrame#layersCard QToolButton:pressed, QFrame#filesCard QToolButton:pressed {
+QFrame#layersCard QToolButton:pressed,
+QFrame#filesCard QToolButton:pressed,
+QFrame#studioFilesPanel QToolButton:pressed {
   background: #E8F0FA;
   border-bottom: 1px solid #BAC2CC;
 }

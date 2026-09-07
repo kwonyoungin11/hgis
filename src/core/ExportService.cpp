@@ -1,5 +1,6 @@
 #include "ExportService.h"
 #include "LayoutService.h"
+#include "SectionLayoutService.h"
 #include "LayerOps.h"
 #include <QDir>
 #include <QFile>
@@ -10,12 +11,25 @@
 #include <QCryptographicHash>
 #include <qgsproject.h>
 #include <qgsvectorlayer.h>
+#include <qgsrasterlayer.h>
+#include <qgsprintlayout.h>
+#include <qgslayoutitemmap.h>
 #include <qgsvectorfilewriter.h>
 #include <qgscoordinatetransformcontext.h>
 #include <qgslayoutmanager.h>
 
 static QgsVectorLayer* layerByName(QgsProject* p, const QString& name) {
   return LayerOps::findByLayerKey(p, name);
+}
+
+static bool isSectionSheetComposed(QgsProject* project) {
+  if (!project || !project->layoutManager())
+    return false;
+  auto* ly = dynamic_cast<QgsPrintLayout*>(
+      project->layoutManager()->layoutByName(QStringLiteral("section_sheet")));
+  if (!ly || ly->itemById(QStringLiteral("empty_hint")))
+    return false;
+  return LayoutService::isComposedStudioSheet(project, QStringLiteral("section_sheet"));
 }
 
 bool ExportService::writeSha256Manifest(const QString& dir, QString* errorOut) {
@@ -32,13 +46,32 @@ bool ExportService::writeSha256Manifest(const QString& dir, QString* errorOut) {
   }
   QTextStream ts(&man);
   ts.setEncoding(QStringConverter::Utf8);
-  const QFileInfoList files = d.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+  const QFileInfoList files = d.entryInfoList(QDir::Files | QDir::NoDotAndDotDot, QDir::Name);
+
+  constexpr qint64 kChunkSize = 64 * 1024; // 64 KB chunk
+  QByteArray buffer(kChunkSize, Qt::Uninitialized);
+  char* dataPtr = buffer.data();
+
   for (const QFileInfo& fi : files) {
     if (fi.fileName() == QLatin1String("MANIFEST.sha256")) continue;
     QFile f(fi.absoluteFilePath());
-    if (!f.open(QIODevice::ReadOnly)) continue;
-    const QByteArray hash = QCryptographicHash::hash(f.readAll(), QCryptographicHash::Sha256).toHex();
-    ts << QString::fromLatin1(hash) << "  " << fi.fileName() << "\n";
+    if (!f.open(QIODevice::ReadOnly)) {
+      if (errorOut) *errorOut = QStringLiteral("Cannot open file for hashing: %1").arg(fi.fileName());
+      return false;
+    }
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    while (!f.atEnd()) {
+      const qint64 bytesRead = f.read(dataPtr, kChunkSize);
+      if (bytesRead < 0) {
+        if (errorOut) *errorOut = QStringLiteral("Read error while hashing: %1").arg(fi.fileName());
+        return false;
+      }
+      if (bytesRead == 0) break;
+      hash.addData(QByteArrayView(dataPtr, static_cast<qsizetype>(bytesRead)));
+    }
+    f.close();
+    const QByteArray hexDigest = hash.result().toHex();
+    ts << QString::fromLatin1(hexDigest) << "  " << fi.fileName() << "\n";
   }
   return true;
 }
@@ -98,6 +131,47 @@ QString ExportService::exportSubmissionPackage(QgsProject* project,
     }
   }
 
+  QFile encf(dir.filePath(QStringLiteral("encoding.txt")));
+  if (encf.open(QIODevice::WriteOnly | QIODevice::Text)) {
+    encf.write(enc.toUtf8());
+    encf.write("\n");
+    encf.close();
+  }
+
+  // 1. Export user_sheet as 조사도면.pdf if composed
+  const bool hasUserSheet = project && LayoutService::isComposedStudioSheet(project, QStringLiteral("user_sheet"));
+  if (hasUserSheet) {
+    QString pdfErr;
+    const QString pdfResult = LayoutService::exportLayoutPdf(
+        project, QStringLiteral("user_sheet"),
+        dir.filePath(QStringLiteral("조사도면.pdf")), &pdfErr);
+    if (pdfResult.isEmpty()) {
+      if (errorOut) {
+        *errorOut = pdfErr.isEmpty()
+            ? QStringLiteral("조사도면.pdf 내보내기 실패")
+            : QStringLiteral("조사도면.pdf 내보내기 실패: %1").arg(pdfErr);
+      }
+      return {};
+    }
+  }
+
+  // 2. Export section_sheet as 단면도.pdf if present and composed
+  const bool hasSectionSheet = isSectionSheetComposed(project);
+  if (hasSectionSheet) {
+    QString secErr;
+    const QString secResult = SectionLayoutService::exportSectionPdf(
+        project, dir.filePath(QStringLiteral("단면도.pdf")), &secErr);
+    if (secResult.isEmpty()) {
+      if (errorOut) {
+        *errorOut = secErr.isEmpty()
+            ? QStringLiteral("단면도.pdf 내보내기 실패")
+            : QStringLiteral("단면도.pdf 내보내기 실패: %1").arg(secErr);
+      }
+      return {};
+    }
+  }
+
+  // 3. Write README_submit.txt after PDF export so file existence is reported accurately
   const QString readme = dir.filePath(QStringLiteral("README_submit.txt"));
   QFile f(readme);
   if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
@@ -113,25 +187,16 @@ QString ExportService::exportSubmissionPackage(QgsProject* project,
   ts << "intranet: upload each domain SHP (feature_poly.shp = one file; merge polygons in-app first if required)\n\n";
   ts << "checklist:\n" << checklistSummary << "\n";
   ts << "\nSee MANIFEST.sha256 for file hashes.\n";
-  ts << QStringLiteral("도면 PDF는 도면만들기 용지(user_sheet)만 넣습니다.\n");
-  const bool hasUserSheet = project && project->layoutManager()
-      && project->layoutManager()->layoutByName(QStringLiteral("user_sheet"));
-  if (!hasUserSheet)
+  ts << QStringLiteral("도면 PDF는 도면만들기 용지(user_sheet 및 section_sheet)를 넣습니다.\n");
+  if (QFile::exists(dir.filePath(QStringLiteral("조사도면.pdf")))) {
+    ts << QStringLiteral("- 조사도면.pdf (도면만들기 user_sheet)\n");
+  } else {
     ts << QStringLiteral("조사도면.pdf 없음: 도면만들기에서 용지를 만든 뒤 다시 보내기 하세요.\n");
+  }
+  if (QFile::exists(dir.filePath(QStringLiteral("단면도.pdf")))) {
+    ts << QStringLiteral("- 단면도.pdf (단면도면만들기 section_sheet)\n");
+  }
   f.close();
-
-  QFile encf(dir.filePath(QStringLiteral("encoding.txt")));
-  if (encf.open(QIODevice::WriteOnly | QIODevice::Text)) {
-    encf.write(enc.toUtf8());
-    encf.write("\n");
-  }
-
-  if (hasUserSheet) {
-    QString pdfErr;
-    LayoutService::exportLayoutPdf(project, QStringLiteral("user_sheet"),
-                                   dir.filePath(QStringLiteral("조사도면.pdf")), &pdfErr);
-    Q_UNUSED(pdfErr);
-  }
 
   QString merr;
   if (!writeSha256Manifest(outDir, &merr)) {
