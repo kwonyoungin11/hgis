@@ -36,6 +36,7 @@
 class TestGeoref : public QObject {
   Q_OBJECT
 private slots:
+  void twoPointRaster_flipsYAndKeepsThirdPointOnTarget();
   void helmertTranslateScale();
   void helmertRotate90();
   void affineThreePoints();
@@ -58,6 +59,51 @@ private slots:
 static bool nearly(double a, double b, double eps = 1e-6) {
   return std::abs(a - b) <= eps;
 }
+
+void TestGeoref::twoPointRaster_flipsYAndKeepsThirdPointOnTarget() {
+  // 현장 증상: 두 점을 찍어 맞추면 그 두 점은 붙는데 사진 전체는 엉뚱한 데로 간다.
+  // 원인은 그림 픽셀(y가 아래로 증가)에서 지도(y가 위로 증가)로 갈 때 필요한
+  // 상하 뒤집기가 2점 식에 없었던 것. 뒤집기가 없으면 두 점을 잇는 선을 축으로
+  // 거울상이 된다.
+  //
+  // 원본 그림 1000x800 을 지도 위에 그대로 놓았다고 보면
+  //   mapX = 100000 + col,  mapY = 500000 + (800 - row)
+  auto toMap = [](double col, double row, double* mx, double* my) {
+    *mx = 100000.0 + col;
+    *my = 500000.0 + (800.0 - row);
+  };
+
+  QVector<GeorefService::Pair> p;
+  for (const QPointF& src : {QPointF(100, 100), QPointF(900, 700)}) {
+    GeorefService::Pair pr;
+    pr.srcX = src.x();
+    pr.srcY = src.y();
+    toMap(pr.srcX, pr.srcY, &pr.mapX, &pr.mapY);
+    p.append(pr);
+  }
+
+  const GeorefService::Affine a = GeorefService::fromPairs(p, true);
+  QVERIFY2(a.valid, "두 점이면 맞춰져야 한다");
+
+  // 그림 → 지도는 상하가 뒤집히므로 행렬식이 음수여야 한다.
+  const double det = a.a * a.e - a.b * a.d;
+  QVERIFY2(det < 0.0, qPrintable(QStringLiteral("상하 뒤집기가 있어야 한다 (det=%1)").arg(det)));
+
+  // 찍지 않은 제3의 점도 제자리에 가야 진짜로 맞은 것이다.
+  double gx = 0, gy = 0;
+  toMap(700.0, 200.0, &gx, &gy);
+  double mx = 0, my = 0;
+  QVERIFY(GeorefService::transform(a, 700.0, 200.0, &mx, &my));
+  QVERIFY2(std::abs(mx - gx) < 1e-6 && std::abs(my - gy) < 1e-6,
+           qPrintable(QStringLiteral("제3점이 %1,%2 로 가야 하는데 %3,%4")
+                          .arg(gx).arg(gy).arg(mx).arg(my)));
+
+  // CAD·벡터(왼쪽도 지도 좌표)는 뒤집지 않는다 — 예전 동작 그대로.
+  const GeorefService::Affine v = GeorefService::fromPairs(p, false);
+  QVERIFY(v.valid);
+  QVERIFY2(v.a * v.e - v.b * v.d > 0.0, "벡터 정합은 뒤집지 않는다");
+}
+
 
 void TestGeoref::helmertTranslateScale() {
   QVector<GeorefService::Pair> p;

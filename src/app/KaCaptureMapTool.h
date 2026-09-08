@@ -43,6 +43,7 @@ signals:
   void geometryCaptured(const QgsGeometry& geom);
   void captureCanceled();
   void vertexMoved();
+  void vertexMoveFailed(const QString& message);
 
 private:
   void finish();
@@ -54,7 +55,7 @@ private:
   bool mapPointFromEvent(QgsMapMouseEvent* e, QgsPointXY* out, bool* snapped = nullptr);
   bool nearPoint(const QgsPointXY& a, const QgsPointXY& b) const;
   int indexOfSketchVertex(const QgsPointXY& pt) const;
-  bool hitSavedVertex(const QgsPointXY& mapPt, QgsFeatureId* fid, int* vertex) const;
+  bool hitSavedVertex(const QgsPointXY& mapPt, QgsFeatureId* fid, int* vertex);
   void previewMovedVertex(const QgsPointXY& mapPt);
   void finishVertexDrag(const QgsPointXY& mapPt);
   void cancelVertexDrag();

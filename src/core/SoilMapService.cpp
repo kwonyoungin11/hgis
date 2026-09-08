@@ -3,6 +3,8 @@
 
 #include <qgis.h>
 #include <qgsmaplayerlegend.h>
+#include <qgslayertree.h>
+#include <qgslayertreelayer.h>
 
 #include <QDir>
 #include <QStringList>
@@ -78,45 +80,6 @@ QNetworkRequest soilWfsRequest(const QString& url) {
   QNetworkRequest netReq{QUrl(url)};
   netReq.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("ka-hgis/0.3"));
   return netReq;
-}
-
-// hits가 0이면 이 테이블은 건너뛴다. 파싱/네트워크 실패(-1)는 본요청을 시도한다.
-long long fetchTableHits(int tableNo, const QgsRectangle& extent4326, QString* errorOut) {
-  QgsBlockingNetworkRequest req;
-  QNetworkRequest netReq = soilWfsRequest(SoilMapService::wfsGetFeatureUrl(tableNo, extent4326, true));
-  if (req.get(netReq) != QgsBlockingNetworkRequest::NoError) {
-    if (errorOut) *errorOut = req.errorMessage();
-    return -1;
-  }
-  const QRegularExpression re(QStringLiteral("numberMatched\\s*=\\s*\"(\\d+)\""));
-  const QRegularExpressionMatch m = re.match(QString::fromUtf8(req.reply().content()));
-  if (!m.hasMatch()) return -1;
-  return m.captured(1).toLongLong();
-}
-
-// 현재 화면 bbox(위경도)로 분포지형 필드만 GeoJSON으로 받는다.
-QString fetchTableGeojson(int tableNo, const QgsRectangle& extent4326, QString* errorOut) {
-  const QString url = SoilMapService::wfsGetFeatureUrl(tableNo, extent4326, false);
-  QgsBlockingNetworkRequest req;
-  QNetworkRequest netReq = soilWfsRequest(url);
-  if (req.get(netReq) != QgsBlockingNetworkRequest::NoError) {
-    if (errorOut) *errorOut = req.errorMessage();
-    return {};
-  }
-  const QByteArray body = req.reply().content();
-  if (body.isEmpty() || !body.trimmed().startsWith('{')) {
-    if (errorOut) *errorOut = QStringLiteral("서버가 GeoJSON 대신 다른 응답을 보냈습니다.");
-    return {};
-  }
-  const QString path =
-      QDir::temp().filePath(QStringLiteral("ka-hgis-soil-%1.geojson").arg(tableNo));
-  QFile f(path);
-  if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-    if (errorOut) *errorOut = QStringLiteral("임시 파일을 쓰지 못했습니다.");
-    return {};
-  }
-  f.write(body);
-  return path;
 }
 
 }  // namespace
@@ -276,139 +239,153 @@ bool SoilMapService::applyTerrainLabels(QgsVectorLayer* layer, double minAreaM2,
 }
 
 QgsVectorLayer* SoilMapService::downloadAndAdd(QgsProject* project, QgsMapCanvas* canvas,
-                                               const QgsRectangle& extent5186,
-                                               const QString& outGpkgPath,
-                                               QString* errorOut) {
-  if (!project) {
-    if (errorOut) *errorOut = QStringLiteral("프로젝트가 없습니다.");
-    return nullptr;
-  }
+    const QgsRectangle& extent5186, const QString& outGpkgPath, QString* errorOut) {
+  if (!project) return nullptr;
+  // Soil retains the actual viewport; do not expandExtentToMaxSpan here.
+  const auto prepared = prepare(extent5186, outGpkgPath, project->transformContext());
+  return addPrepared(project, canvas, prepared, errorOut);
+}
+
+PreparedReferenceMap SoilMapService::prepare(const QgsRectangle& extent5186,
+    const QString& requestedBasePath, const QgsCoordinateTransformContext& transformContext,
+    QgsFeedback* feedback, const ReferenceDownload& download) {
+  PreparedReferenceMap result;
+  result.tableName = QStringLiteral("soil_map");
+  if (ReferenceMapPreparation::cancelled(result, feedback)) return result;
   const QgsRectangle fetch5186 = extent5186;
-  if (fetch5186.isEmpty() || fetch5186.width() > maxSpanMeters() ||
+  if (fetch5186.isEmpty() || !fetch5186.isFinite() || fetch5186.width() > maxSpanMeters() ||
       fetch5186.height() > maxSpanMeters()) {
-    if (errorOut)
-      *errorOut = QStringLiteral(
-          "범위가 너무 넓습니다. 지도를 조사지역(한 변 %1km 이하)으로 확대한 뒤 다시 "
-          "내려받으세요.")
-          .arg(maxSpanMeters() / 1000.0, 0, 'f', 0);
-    return nullptr;
+    result.error = QStringLiteral("토양도 범위가 너무 넓습니다. 한 변 80 km 이하로 확대하고 다시 내려받으세요.");
+    return result;
   }
-
-  // bbox는 축 순서 혼선이 없는 위경도(urn:4326, 위도-경도)로 요청한다.
-  QgsRectangle ext4326;
+  QgsRectangle extent4326;
   try {
-    const QgsCoordinateTransform tr(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")),
-                                    QgsCoordinateReferenceSystem(QStringLiteral("EPSG:4326")),
-                                    QgsCoordinateTransformContext());
-    ext4326 = tr.transformBoundingBox(fetch5186);
+    QgsCoordinateTransform transform(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")),
+        QgsCoordinateReferenceSystem(QStringLiteral("EPSG:4326")), transformContext);
+    extent4326 = transform.transformBoundingBox(fetch5186);
   } catch (const QgsException&) {
-    if (errorOut) *errorOut = QStringLiteral("좌표 변환에 실패했습니다.");
-    return nullptr;
+    result.error = QStringLiteral("지도의 위치를 변환하지 못했습니다. 조사 좌표계를 확인하고 다시 내려받으세요.");
+    return result;
   }
-
-  // 화면 bbox에 피처가 있는 테이블만 받아 하나로 병합한다.
-  auto* merged = new QgsVectorLayer(QStringLiteral("MultiPolygon?crs=EPSG:5186"),
-                                    QStringLiteral("merge"), QStringLiteral("memory"));
+  if (!ReferenceMapPreparation::initializeStorage(result, requestedBasePath)) return result;
+  QgsVectorLayer merged(QStringLiteral("MultiPolygon?crs=EPSG:5186"),
+                         QStringLiteral("merge"), QStringLiteral("memory"));
   bool fieldsReady = false;
-  long long total = 0;
-  QString netErr;
   for (int tableNo = 1; tableNo <= 3; ++tableNo) {
-    QString err;
-    const long long hits = fetchTableHits(tableNo, ext4326, &err);
-    if (hits == 0) continue;
-    if (hits < 0 && netErr.isEmpty()) netErr = err;
-    const QString jsonPath = fetchTableGeojson(tableNo, ext4326, &err);
-    if (jsonPath.isEmpty()) {
-      if (netErr.isEmpty()) netErr = err;
-      continue;
+    if (ReferenceMapPreparation::cancelled(result, feedback)) return result;
+    QByteArray body;
+    QString hitError;
+    qlonglong expectedCount = -1;
+    const bool hitOk = ReferenceMapPreparation::download(
+        soilWfsRequest(wfsGetFeatureUrl(tableNo, extent4326, true)), &body, &hitError, feedback, download);
+    if (ReferenceMapPreparation::cancelled(result, feedback)) return result;
+    if (hitOk) {
+      const QRegularExpression re(QStringLiteral("numberMatched\\s*=\\s*\"(\\d+)\""));
+      const auto match = re.match(QString::fromUtf8(body));
+      if (match.hasMatch()) {
+        const qlonglong hits = match.captured(1).toLongLong();
+        expectedCount = hits;
+        if (hits == 0) continue;
+        if (hits > 100000) {
+          result.error = QStringLiteral("토양도 데이터가 한 번에 받을 수 있는 양을 넘었습니다. 범위를 좁혀 다시 내려받으세요. 기존 지도는 유지됩니다.");
+          return result;
+        }
+      }
     }
-    QgsVectorLayer part(jsonPath, QStringLiteral("part"), QStringLiteral("ogr"));
-    if (!part.isValid()) continue;
+    if (!ReferenceMapPreparation::download(soilWfsRequest(wfsGetFeatureUrl(tableNo, extent4326, false)),
+          &body, &result.error, feedback, download) ||
+        !ReferenceMapPreparation::validateCompleteFeatureCollection(body, &result.error)) {
+      ReferenceMapPreparation::cancelled(result, feedback);
+      return result;
+    }
+    const QString path = QDir(result.storage->path()).filePath(QStringLiteral("soil-%1.geojson").arg(tableNo));
+    if (!ReferenceMapPreparation::writeResponse(path, body, &result.error)) return result;
+    QgsVectorLayer part(path, QStringLiteral("part"), QStringLiteral("ogr"));
+    if (!part.isValid() || part.featureCount() >= 100000 ||
+        (expectedCount >= 0 && part.featureCount() < expectedCount)) {
+      result.error = QStringLiteral("토양도 일부를 완전히 읽지 못했습니다. 범위를 좁혀 다시 내려받으세요. 기존 지도는 유지됩니다.");
+      return result;
+    }
     if (!fieldsReady) {
-      merged->dataProvider()->addAttributes(part.fields().toList());
-      merged->updateFields();
+      if (!merged.dataProvider()->addAttributes(part.fields().toList())) {
+        result.error = QStringLiteral("토양도 항목을 준비하지 못했습니다. 다시 내려받으세요.");
+        return result;
+      }
+      merged.updateFields();
       fieldsReady = true;
     }
-    const QgsFields memFields = merged->fields();
-    const QgsFields srcFields = part.fields();
     QgsFeatureList batch;
-    QgsFeatureIterator it = part.getFeatures();
-    QgsFeature f;
-    while (it.nextFeature(f)) {
-      QgsFeature nf(memFields);
-      for (int i = 0; i < srcFields.count(); ++i) {
-        const int dst = memFields.indexOf(srcFields.at(i).name());
-        if (dst >= 0) nf.setAttribute(dst, f.attribute(i));
+    QgsFeature feature;
+    auto iterator = part.getFeatures();
+    while (iterator.nextFeature(feature)) {
+      if (ReferenceMapPreparation::cancelled(result, feedback)) return result;
+      QgsFeature next(merged.fields());
+      for (int i = 0; i < part.fields().count(); ++i) {
+        const int destination = merged.fields().indexOf(part.fields().at(i).name());
+        if (destination >= 0) next.setAttribute(destination, feature.attribute(i));
       }
-      QgsGeometry g = f.geometry();
-      if (g.isNull() || g.isEmpty()) continue;
-      g.convertToMultiType();
-      nf.setGeometry(g);
-      batch.append(nf);
+      QgsGeometry geometry = feature.geometry();
+      if (geometry.isNull() || geometry.isEmpty() || !geometry.convertToMultiType()) {
+        result.error = QStringLiteral("토양도에 읽을 수 없는 구역이 있습니다. 기존 지도는 유지됩니다. 잠시 후 다시 내려받으세요.");
+        return result;
+      }
+      next.setGeometry(geometry);
+      batch.append(next);
     }
-    if (!batch.isEmpty()) {
-      merged->dataProvider()->addFeatures(batch);
-      total += batch.size();
+    if (!merged.dataProvider()->addFeatures(batch)) {
+      result.error = QStringLiteral("토양도 일부를 합치지 못했습니다. 기존 지도는 유지됩니다. 다시 내려받으세요.");
+      return result;
     }
-    QFile::remove(jsonPath);
   }
+  if (merged.featureCount() == 0) {
+    result.error = QStringLiteral("이 범위에는 토양도 데이터가 없습니다. 다른 위치를 확인하세요. 기존 지도는 유지됩니다.");
+    return result;
+  }
+  merged.updateExtents();
+  ReferenceMapPreparation::saveVector(result, &merged, transformContext, feedback);
+  return result;
+}
 
-  if (total == 0) {
-    delete merged;
-    if (errorOut) {
-      *errorOut = netErr.isEmpty()
-                      ? QStringLiteral("이 범위에는 토양도 데이터가 없습니다. "
-                                       "(군사지역·간척지 등 미구축 지역이거나 바다입니다)")
-                      : QStringLiteral("흙토람 서버 연결 실패: %1").arg(netErr);
-    }
+QgsVectorLayer* SoilMapService::addPrepared(QgsProject* project, QgsMapCanvas* canvas,
+    const PreparedReferenceMap& prepared, QString* errorOut) {
+  if (!project || !prepared.isReady()) {
+    if (errorOut) *errorOut = prepared.error;
     return nullptr;
   }
-  merged->updateExtents();
-
-  // 같은 GPKG를 쓰는 기존 레이어를 먼저 내려 파일 잠금을 푼다.
   QStringList removeIds;
   for (QgsMapLayer* old : project->mapLayers()) {
-    if (!old) continue;
-    // 한글 레이어 제목은 QLatin1String으로 비교하면 UTF-8 바이트가 깨져 매치 실패한다.
-    if (old->name() == QString::fromUtf8(kLayerTitle) ||
-        old->name().startsWith(QString::fromUtf8(kLayerTitle)) ||
-        old->source().contains(outGpkgPath))
+    if (old && (old->name() == QString::fromUtf8(kLayerTitle) ||
+        old->name().startsWith(QString::fromUtf8(kLayerTitle) + QStringLiteral(" [")) ||
+        old->name() == QString::fromUtf8(kPictureTitle) ||
+        old->name().startsWith(QString::fromUtf8(kPictureTitle) + QStringLiteral(" ["))))
       removeIds.append(old->id());
   }
-  for (const QString& id : removeIds)
-    project->removeMapLayer(id);
-  if (QFile::exists(outGpkgPath) && !QFile::remove(outGpkgPath)) {
-    if (errorOut)
-      *errorOut = QStringLiteral("기존 토양도 파일을 덮어쓰지 못했습니다: %1").arg(outGpkgPath);
-    delete merged;
-    return nullptr;
-  }
-
-  QgsVectorFileWriter::SaveVectorOptions opts;
-  opts.driverName = QStringLiteral("GPKG");
-  opts.layerName = QStringLiteral("soil_map");
-  opts.fileEncoding = QStringLiteral("UTF-8");
-  QString werr, nf2, nl2;
-  const auto we = QgsVectorFileWriter::writeAsVectorFormatV3(
-      merged, outGpkgPath, project->transformContext(), opts, &werr, &nf2, &nl2);
-  delete merged;
-  if (we != QgsVectorFileWriter::NoError) {
-    if (errorOut) *errorOut = QStringLiteral("토양도 저장 실패: %1").arg(werr);
-    return nullptr;
-  }
-
-  auto* layer = new QgsVectorLayer(outGpkgPath + QStringLiteral("|layername=soil_map"),
+  auto* layer = new QgsVectorLayer(prepared.gpkgPath + QStringLiteral("|layername=soil_map"),
                                    QString::fromUtf8(kLayerTitle), QStringLiteral("ogr"));
   if (!layer->isValid()) {
     if (errorOut) *errorOut = QStringLiteral("저장한 토양도를 여는 데 실패했습니다.");
     delete layer;
     return nullptr;
   }
-  applyTerrainStyle(layer);
+  if (!applyTerrainStyle(layer)) {
+    if (errorOut) *errorOut = QStringLiteral("받은 지도에 필요한 항목이 없습니다. 기존 지도는 유지됩니다. 잠시 후 다시 내려받으세요.");
+    delete layer;
+    return nullptr;
+  }
   LayerOps::markReferenceLayer(layer);
   LayerOps::applyLegendCrsLabel(layer);
 
-  // 그림을 먼저 넣어 벡터·글자가 위에 남게 한다. 산능선 구멍으로 산악지 색이 보인다.
+  if (!project->addMapLayer(layer, true)) {
+    delete layer;
+    if (errorOut) *errorOut = QStringLiteral("토양도 레이어를 프로젝트에 넣지 못했습니다.");
+    return nullptr;
+  }
+  prepared.retainFiles();
+  for (const QString& id : removeIds) project->removeMapLayer(id);
+  LayerOps::placeInLegendGroup(project, layer, QStringLiteral("참조 지도"));
+  LayerOps::applyThematicOverlayScaleRange(layer);
+
+  // 그림은 벡터 아래에 배치해 구역과 글자가 계속 보이게 한다.
   auto* picture = new QgsRasterLayer(terrainPictureUri(), QString::fromUtf8(kPictureTitle),
                                      QStringLiteral("wms"));
   if (picture->isValid()) {
@@ -418,7 +395,11 @@ QgsVectorLayer* SoilMapService::downloadAndAdd(QgsProject* project, QgsMapCanvas
     if (QgsMapLayerLegend* lg = picture->legend())
       lg->setFlag(Qgis::MapLayerLegendFlag::ExcludeByDefault, true);
     LayerOps::applyLegendCrsLabel(picture);
-    if (project->addMapLayer(picture, true)) {
+    if (project->addMapLayer(picture, false)) {
+      QgsLayerTree* root = project->layerTreeRoot();
+      QgsLayerTreeLayer* vectorNode = root->findLayer(layer->id());
+      const int index = vectorNode ? root->children().indexOf(vectorNode) : -1;
+      root->insertLayer(index < 0 ? -1 : index + 1, picture);
       LayerOps::placeInLegendGroup(project, picture, QStringLiteral("참조 지도"));
       LayerOps::applyThematicOverlayScaleRange(picture);
     } else {
@@ -428,13 +409,6 @@ QgsVectorLayer* SoilMapService::downloadAndAdd(QgsProject* project, QgsMapCanvas
     delete picture;
   }
 
-  if (!project->addMapLayer(layer, true)) {
-    delete layer;
-    if (errorOut) *errorOut = QStringLiteral("토양도 레이어를 프로젝트에 넣지 못했습니다.");
-    return nullptr;
-  }
-  LayerOps::placeInLegendGroup(project, layer, QStringLiteral("참조 지도"));
-  LayerOps::applyThematicOverlayScaleRange(layer);
 
   if (canvas) {
     const QString workAuth = project->crs().isValid() ? project->crs().authid()

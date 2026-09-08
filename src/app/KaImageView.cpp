@@ -1,5 +1,7 @@
 #include "KaImageView.h"
 
+#include <QImageReader>
+
 #include <QGraphicsPixmapItem>
 #include <QGraphicsEllipseItem>
 #include <QGraphicsLineItem>
@@ -94,18 +96,46 @@ KaImageView::KaImageView(QWidget* parent)
   setCursor(Qt::CrossCursor);
 }
 
-bool KaImageView::loadPath(const QString& path) {
+bool KaImageView::applyPixmap(const QPixmap& pm) {
   clearMarks();
   scene()->clear();
   m_pix = nullptr;
   m_fitted = false;
-  QPixmap pm(path);
   if (pm.isNull()) return false;
   m_pix = scene()->addPixmap(pm);
   m_pix->setZValue(0);
   scene()->setSceneRect(QRectF(pm.rect()).adjusted(-20, -20, 20, 20));
   fitImage();
   return true;
+}
+
+bool KaImageView::loadPath(const QString& path) {
+  m_srcScale = 1.0;
+  m_lastError.clear();
+  // Qt 는 그림 한 장을 통째로 메모리에 편다. Qt6 기본 상한이 256MB 라서
+  // 항공사진 원판(1억 화소 이상)은 여기서 조용히 빈 그림으로 떨어진다.
+  // 왜 못 열었는지 남겨 두어야 위에서 다른 길로 갈 수 있다.
+  QImageReader reader(path);
+  reader.setAutoTransform(true);
+  const QImage img = reader.read();
+  if (img.isNull()) {
+    m_lastError = reader.errorString();
+    const QSize sz = reader.size();
+    if (sz.isValid())
+      m_lastError += QStringLiteral(" (%1 x %2 화소)").arg(sz.width()).arg(sz.height());
+    applyPixmap(QPixmap());
+    return false;
+  }
+  return applyPixmap(QPixmap::fromImage(img));
+}
+
+bool KaImageView::setPreview(const QPixmap& preview, int sourceWidth, int sourceHeight) {
+  m_lastError.clear();
+  if (preview.isNull() || preview.width() < 1 || sourceWidth < 1 || sourceHeight < 1)
+    return false;
+  // 보여 주는 건 축소본이지만 바깥에는 원본 픽셀로 말한다.
+  m_srcScale = double(sourceWidth) / double(preview.width());
+  return applyPixmap(preview);
 }
 
 void KaImageView::clearMarks() {
@@ -140,7 +170,7 @@ void KaImageView::addMarkItem(double pixelX, double pixelY, int number, const QC
   g->addToGroup(h);
   g->addToGroup(v);
   g->addToGroup(tx);
-  g->setPos(pixelX, pixelY);
+  g->setPos(pixelX / m_srcScale, pixelY / m_srcScale);
   g->setZValue(50);
   scene()->addItem(g);
   m_marks.append(g);
@@ -155,7 +185,7 @@ void KaImageView::setMarks(const QVector<QPointF>& pts, const QPointF* pending) 
 }
 
 QPoint KaImageView::viewPosForPixel(double pixelX, double pixelY) const {
-  return mapFromScene(QPointF(pixelX, pixelY));
+  return mapFromScene(QPointF(pixelX / m_srcScale, pixelY / m_srcScale));
 }
 
 void KaImageView::fitImage() {
@@ -181,7 +211,7 @@ void KaImageView::mousePressEvent(QMouseEvent* e) {
   }
   if (e->button() == Qt::LeftButton && m_pix) {
     const QPointF sc = mapToScene(e->pos());
-    emit pixelClicked(sc.x(), sc.y());
+    emit pixelClicked(sc.x() * m_srcScale, sc.y() * m_srcScale);
     e->accept();
     return;
   }

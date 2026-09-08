@@ -7,6 +7,30 @@ set(CMAKE_AUTOMOC ON)
 
 if (MSVC)
   add_compile_options(/MP)
+  # /Zc:__cplusplus : 없으면 CMAKE_CXX_STANDARD 20 을 줘도 __cplusplus 가 199711(C++98)로 보고되어
+  #                   라이브러리들의 C++20 기능 검출이 조용히 실패한다. (이 머신에서 실측 확인)
+  # /utf-8          : 소스/실행 문자셋 UTF-8 고정 (기존에 타깃마다 흩어져 있던 것을 여기서 일괄 적용)
+  add_compile_options(/Zc:__cplusplus /utf-8 /permissive-)
+  # 경고 수준 상향. 자체 코드는 따옴표 include, Qt/QGIS 는 꺾쇠 include 이므로
+  # /external:anglebrackets 로 외부 헤더 경고만 차단하고 우리 코드에는 /W4 를 적용한다.
+  add_compile_options(/W4 /external:anglebrackets /external:W0)
+endif()
+
+# LTO(링크 타임 최적화): 번역 단위 경계를 넘어 인라이닝한다. Release 에서만.
+# check_ipo_supported() 는 build/CMakeFiles 에 임시 테스트 프로젝트를 남겨
+# VS 제너레이터의 ALL_BUILD 를 깨뜨리므로(MSB3202) 쓰지 않는다.
+# MSVC 2022 는 /GL + /LTCG 를 확실히 지원하므로 바로 켠다.
+if(MSVC)
+  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE OFF)
+  message(STATUS "LTO: MSVC c2.dll 내부 오류 회피를 위해 OFF")
+else()
+  include(CheckIPOSupported)
+  check_ipo_supported(RESULT KA_IPO_OK OUTPUT KA_IPO_MSG)
+  if(KA_IPO_OK)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+  else()
+    message(STATUS "LTO 미지원: ${KA_IPO_MSG}")
+  endif()
 endif()
 
 option(KA_HGIS_BUILD_TESTS "Build tests" ON)
@@ -38,11 +62,13 @@ add_library(ka_core STATIC
   src/core/ChecklistEngine.cpp
   src/core/SurveyProjectFactory.cpp
   src/core/SurveyStorage.cpp
+  src/core/PreparedReferenceMap.cpp
   src/core/ExportService.cpp
   src/core/ProjectStateBuilder.cpp
   src/core/LayoutService.cpp
   src/core/LayerOps.cpp
   src/core/LocationSearch.cpp
+  src/core/AdminBoundaryService.cpp
   src/core/KoreaRegionCatalog.cpp
   src/core/WorkflowGuide.cpp
   src/core/VworldSettings.cpp
@@ -70,6 +96,7 @@ add_library(ka_core STATIC
   src/core/LayoutService.h
   src/core/LayerOps.h
   src/core/LocationSearch.h
+  src/core/AdminBoundaryService.h
   src/core/KoreaRegionCatalog.h
   src/core/WorkflowGuide.h
   src/core/VworldSettings.h
@@ -119,8 +146,10 @@ add_executable(ka-hgis
   src/app/app.rc
   src/app/main.cpp
   src/app/MainWindow.cpp
+  src/app/MainWindowContextMenus.cpp
   src/app/KaBeginnerRibbon.cpp
   src/app/KaApplication.cpp
+  src/app/KaReferenceDownloadJob.cpp
   src/app/KaTheme.cpp
   src/app/KaIcons.cpp
   src/app/KaCaptureMapTool.cpp
@@ -136,6 +165,7 @@ add_executable(ka-hgis
   src/app/KaStartPage.cpp
   src/app/KaCoordPointMapTool.cpp
   src/app/KaMeasureMapTool.cpp
+  src/app/KaAboveLabelsOverlay.cpp
   src/app/KaCanvasGridOverlay.cpp
   src/app/KaTrenchMoveTool.cpp
   src/app/KaVertexEditTool.cpp
@@ -148,9 +178,11 @@ add_executable(ka-hgis
   src/app/KaCrashGuard.cpp
   src/app/KaRegionLocator.cpp
   src/app/KaFileBrowserPanel.cpp
+  src/app/KaLayerOpacityRail.cpp
   src/app/MainWindow.h
   src/app/KaSurveyAreaDialog.h
   src/app/KaFileBrowserPanel.h
+  src/app/KaLayerOpacityRail.h
   src/app/KaBeginnerRibbon.h
   src/app/KaApplication.h
   src/app/KaTheme.h
@@ -168,6 +200,7 @@ add_executable(ka-hgis
   src/app/KaStartPage.h
   src/app/KaCoordPointMapTool.h
   src/app/KaMeasureMapTool.h
+  src/app/KaAboveLabelsOverlay.h
   src/app/KaCanvasGridOverlay.h
   src/app/KaTrenchMoveTool.h
   src/app/KaVertexEditTool.h
@@ -192,6 +225,7 @@ if(MSVC)
   target_link_options(ka-hgis PRIVATE
     "$<$<CONFIG:Release>:/DEBUG>" "$<$<CONFIG:Release>:/OPT:REF>" "$<$<CONFIG:Release>:/OPT:ICF>")
 endif()
+
 
 add_custom_command(TARGET ka-hgis POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:ka-hgis>/data/rules"
@@ -230,7 +264,8 @@ if(KA_HGIS_BUILD_TESTS)
   target_compile_definitions(ka_hgis_tests PRIVATE ${KA_TEST_DEFS})
   add_test(NAME checklist_engine COMMAND ka_hgis_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
-  add_executable(ka_workflow_tests tests/test_workflow.cpp)
+  add_executable(ka_workflow_tests tests/test_workflow.cpp
+    src/app/KaCaptureMapTool.cpp src/app/KaCaptureMapTool.h)
   target_link_libraries(ka_workflow_tests PRIVATE ${KA_TEST_LIBS})
   target_include_directories(ka_workflow_tests PRIVATE ${KA_INCLUDES})
   target_link_directories(ka_workflow_tests PRIVATE ${KA_LIBDIRS})
@@ -312,6 +347,7 @@ if(KA_HGIS_BUILD_TESTS)
                         ka_terrain_3d_tests
                         PROPERTIES WIN32_EXECUTABLE FALSE)
 
+
   add_executable(ka_theme_tests
     tests/test_theme.cpp
     src/app/KaTheme.cpp
@@ -333,6 +369,22 @@ if(KA_HGIS_BUILD_TESTS)
   target_include_directories(ka_recent_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
   add_test(NAME recent_surveys COMMAND ka_recent_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+  add_executable(ka_network_tests tests/test_network_services.cpp)
+  target_link_libraries(ka_network_tests PRIVATE ka_core Qt6::Test Qt6::Network)
+  add_test(NAME network_services COMMAND ka_network_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  set_tests_properties(network_services PROPERTIES TIMEOUT 30)
+
+  add_executable(ka_storage_safety_tests tests/test_storage_safety.cpp)
+  target_link_libraries(ka_storage_safety_tests PRIVATE ka_core Qt6::Test)
+  add_test(NAME storage_safety COMMAND ka_storage_safety_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  set_tests_properties(storage_safety PROPERTIES TIMEOUT 120)
+
+  add_executable(ka_reference_download_tests tests/test_reference_download.cpp
+    src/app/KaReferenceDownloadJob.cpp)
+  target_link_libraries(ka_reference_download_tests PRIVATE ka_core Qt6::Test Qt6::Network)
+  add_test(NAME reference_download COMMAND ka_reference_download_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  set_tests_properties(reference_download PROPERTIES TIMEOUT 60)
+
   # Exercise the actual window's save/open slots, including project signal callbacks.
   get_target_property(KA_SAVE_OPEN_SOURCES ka-hgis SOURCES)
   list(REMOVE_ITEM KA_SAVE_OPEN_SOURCES src/app/main.cpp src/app/KaApplication.cpp src/app/app.rc)
@@ -344,7 +396,18 @@ if(KA_HGIS_BUILD_TESTS)
     target_compile_options(ka_save_open_tests PRIVATE /utf-8 /FS)
   endif()
   add_test(NAME save_open_window COMMAND ka_save_open_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-  set_tests_properties(save_open_window PROPERTIES TIMEOUT 90)
+  set_tests_properties(save_open_window PROPERTIES TIMEOUT 240)
+
+  add_executable(ka_e2e_tests tests/test_e2e_opaque.cpp)
+  set_target_properties(ka_e2e_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  target_link_libraries(ka_e2e_tests PRIVATE ${KA_TEST_LIBS})
+  target_include_directories(ka_e2e_tests PRIVATE ${KA_INCLUDES})
+  target_link_directories(ka_e2e_tests PRIVATE ${KA_LIBDIRS})
+  target_compile_definitions(ka_e2e_tests PRIVATE ${KA_TEST_DEFS})
+  if (MSVC)
+    target_compile_options(ka_e2e_tests PRIVATE /utf-8 /W4)
+  endif()
+  add_test(NAME e2e_opaque_suite COMMAND ka_e2e_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
   # Windows: ctest without OSGeo4W PATH → 0xc0000135 (DLL not found).
   # ENVIRONMENT is a CMake list, so unescaped ';' would truncate PATH to the
@@ -358,7 +421,24 @@ if(KA_HGIS_BUILD_TESTS)
       "${OSGEO4W_ROOT}/bin"
     )
     string(JOIN "\\;" _ka_path_esc ${_ka_path})
-    set_tests_properties(checklist_engine workflow_engine georef_engine feature_presets buffer_ring measure_tape dem_trench_engine theme_qss recent_surveys section_layout_engine section_studio_engine terrain_3d_engine save_open_window PROPERTIES
+    set_tests_properties(checklist_engine workflow_engine georef_engine feature_presets buffer_ring measure_tape dem_trench_engine theme_qss recent_surveys section_layout_engine section_studio_engine terrain_3d_engine save_open_window e2e_opaque_suite network_services storage_safety reference_download PROPERTIES
       ENVIRONMENT "PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
+    # This qgis-dev uses a fixed qgis-project-XXXXXX.zip inside TEMP for project
+    # archives. Separate test processes must never share that staging file.
+    file(TO_CMAKE_PATH "$ENV{TEMP}" _ka_test_temp_root)
+    if(NOT IS_DIRECTORY "${_ka_test_temp_root}")
+      set(_ka_test_temp_root "${CMAKE_BINARY_DIR}/test-tmp")
+    endif()
+    string(SHA256 _ka_test_temp_id "${CMAKE_BINARY_DIR}")
+    string(SUBSTRING "${_ka_test_temp_id}" 0 12 _ka_test_temp_id)
+    foreach(_ka_test IN ITEMS checklist_engine workflow_engine georef_engine feature_presets
+        buffer_ring measure_tape dem_trench_engine theme_qss recent_surveys section_layout_engine
+        section_studio_engine terrain_3d_engine save_open_window e2e_opaque_suite network_services
+        storage_safety reference_download)
+      set(_ka_test_temp "${_ka_test_temp_root}/ka-hgis-tests-${_ka_test_temp_id}/${_ka_test}")
+      file(MAKE_DIRECTORY "${_ka_test_temp}")
+      set_property(TEST ${_ka_test} APPEND PROPERTY ENVIRONMENT
+        "TEMP=${_ka_test_temp}" "TMP=${_ka_test_temp}")
+    endforeach()
   endif()
 endif()

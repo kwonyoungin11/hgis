@@ -3,6 +3,11 @@
 #include <QString>
 #include <QVector>
 #include <QNetworkAccessManager>
+#include <QPointer>
+#include <QTimer>
+#include <memory>
+
+class QNetworkReply;
 
 struct LocationHit {
   QString title;
@@ -17,8 +22,12 @@ class LocationSearch : public QObject {
   Q_OBJECT
 public:
   explicit LocationSearch(QObject* parent = nullptr);
+  LocationSearch(std::unique_ptr<QNetworkAccessManager> network, int timeoutMs,
+                 QObject* parent = nullptr);
+  ~LocationSearch() override;
 
   void search(const QString& query);
+  void cancel();
   static QString vworldApiKey();
   static void setVworldApiKey(const QString& key);
 
@@ -31,7 +40,11 @@ private:
   void searchVworld(const QString& query);
   void handleNominatim(const QByteArray& body);
   void handleVworld(const QByteArray& body);
+  void completeRequest();
 
-  QNetworkAccessManager m_nam;
+  std::unique_ptr<QNetworkAccessManager> m_nam;
+  QPointer<QNetworkReply> m_reply;
+  QTimer m_deadline;
+  int m_timeoutMs;
   bool m_pending = false;
 };

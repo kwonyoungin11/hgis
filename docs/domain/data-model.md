@@ -1,6 +1,8 @@
 # ka-hgis 도메인 데이터 모델
 
-기본 좌표계: **EPSG:5179** (Korea 2000 / Unified CS, UTM-K GRS80)
+새 조사 작업 좌표계 기본값: **EPSG:5187**. 사용자는 **EPSG:5186 / EPSG:5187**을 선택할 수 있으며, 저장·다시 열기에서는 실제 조사/레이어 CRS를 보존한다. 근거: `SurveyProjectFactory::defaultWorkCrsAuthId()`와 현재 `HANDOFF.md`.
+
+제출 SHP 좌표계: **EPSG:5179** (Korea 2000 / Unified CS). `ExportService`의 좌표 변환 경로를 사용한다. 프로젝트 CRS 지정, 화면 재투영, 실제 피처 좌표 변환은 서로 다른 작업이다.
 
 작업 저장: **GeoPackage** (`survey.gpkg`)  
 제출: SHP/PDF (내보내기 전용)
@@ -53,6 +55,8 @@
 **제약:** 제출 검수 시 **≥ 2점**.
 
 ## YAML 스키마 원본 (배포 시 `data/schemas/ka_hgis_layers.yaml`)
+
+아래 YAML과 배포 스키마의 `default_crs: EPSG:5179`는 남아 있는 스키마 기본값이다. 이를 현재 새 조사의 작업 CRS 선택값으로 간주하거나 기존 데이터를 5179로 재지정하지 않는다. 런타임 변경이 필요한 경우 스키마 소비 코드를 확인하는 별도 작업으로 다룬다.
 
 ```yaml
 version: 1

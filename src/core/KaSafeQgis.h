@@ -23,7 +23,8 @@ QString kaProjectBackupPath(const QString& path);
 // temp file NEXT TO the target (same folder — QgsPathResolver resolves relative
 // datasources against the project file's directory, and rename must stay on one
 // volume), verifies it reads back, keeps one generation via kaProjectBackupPath,
-// then renames over the target. A crash mid-write leaves the previous file untouched.
+// then atomically replaces the target with QSaveFile (no direct-write fallback).
+// Failure restores the project's original filename and dirty state.
 bool kaWriteQgisProjectAtomic(QgsProject* project, const QString& path, QString* errorOut = nullptr);
 
 // QgsProject::clear after a half-finished read can ACCESS_VIOLATE in

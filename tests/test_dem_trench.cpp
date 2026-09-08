@@ -384,12 +384,12 @@ void TestDemTrench::tilePack_tileCountMatchesWebMercator() {
 }
 
 void TestDemTrench::layerTreeMenu_hasLabelToggleAndTrenchRatio() {
-  QFile f(QStringLiteral("src/app/MainWindow.cpp"));
-  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
+  QFile f(QStringLiteral("src/app/MainWindowContextMenus.cpp"));
+  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindowContextMenus.cpp");
   const QString src = QString::fromUtf8(f.readAll());
-  const int start = src.indexOf(QLatin1String("void MainWindow::onLayerTreeContextMenu"));
-  const int next = src.indexOf(QLatin1String("void MainWindow::renameSelectedLayer"));
-  QVERIFY2(start >= 0 && next > start, "onLayerTreeContextMenu");
+  const int start = src.indexOf(QLatin1String("void MainWindow::showLayerTreeContextMenu"));
+  const int next = src.indexOf(QLatin1String("void MainWindow::showLayerAreaSummary"));
+  QVERIFY2(start >= 0 && next > start, "showLayerTreeContextMenu");
   const QString fn = src.mid(start, next - start);
   QVERIFY2(fn.contains(QStringLiteral("글자")), "레이어 우클릭에 글자 켜기/끄기가 있어야 한다");
   QVERIFY2(fn.contains(QStringLiteral("시굴격자")), "조사구역 우클릭에 시굴격자 메뉴가 있어야 한다");

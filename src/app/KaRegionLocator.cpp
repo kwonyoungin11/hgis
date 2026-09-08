@@ -134,6 +134,10 @@ void KaRegionLocator::openAddressPopup(const QString& sido) {
     m_lot->setInputMethodHints(Qt::ImhNone);
     auto* go = new QPushButton(QStringLiteral("찾기"), m_popup);
     go->setDefault(true);
+    auto* fieldMap = new QPushButton(QStringLiteral("현장 지도"), m_popup);
+    fieldMap->setObjectName(QStringLiteral("regionFieldMap"));
+    fieldMap->setToolTip(QStringLiteral("고른 읍면동 위성만 남기고 유적 SHP를 올립니다"));
+    fieldMap->setAutoDefault(false);
     // 잘못 눌렀을 때 빠져나갈 길. Esc·바깥 클릭·같은 칩 다시 누르기와 같은 동작.
     auto* cancel = new QPushButton(QStringLiteral("취소"), m_popup);
     cancel->setObjectName(QStringLiteral("regionCancel"));
@@ -142,6 +146,7 @@ void KaRegionLocator::openAddressPopup(const QString& sido) {
     row->addWidget(m_dong, 1);
     row->addWidget(m_lot, 0);
     row->addWidget(go, 0);
+    row->addWidget(fieldMap, 0);
     row->addWidget(cancel, 0);
     auto* titleRow = new QHBoxLayout();
     titleRow->setSpacing(6);
@@ -159,6 +164,7 @@ void KaRegionLocator::openAddressPopup(const QString& sido) {
     connect(closeX, &QToolButton::clicked, this, &KaRegionLocator::closePanel);
     connect(cancel, &QPushButton::clicked, this, &KaRegionLocator::closePanel);
     connect(go, &QPushButton::clicked, this, &KaRegionLocator::emitSearch);
+    connect(fieldMap, &QPushButton::clicked, this, &KaRegionLocator::emitFieldMap);
     connect(m_lot, &QLineEdit::returnPressed, this, &KaRegionLocator::emitSearch);
     connect(m_dong->lineEdit(), &QLineEdit::returnPressed, this, &KaRegionLocator::emitSearch);
     connect(m_city, &QComboBox::currentIndexChanged, this, &KaRegionLocator::fillDongs);
@@ -202,4 +208,16 @@ void KaRegionLocator::emitSearch() {
   if (q.isEmpty()) return;
   closePanel();
   emit searchRequested(q);
+}
+
+void KaRegionLocator::emitFieldMap() {
+  const QString city = (m_city && m_city->currentIndex() > 0) ? m_city->currentText() : QString();
+  QString dong;
+  if (m_dong) {
+    dong = m_dong->currentText().trimmed();
+    if (dong == QStringLiteral("동·읍·면")) dong.clear();
+  }
+  if (city.isEmpty() || dong.isEmpty()) return;
+  closePanel();
+  emit regionFieldMapRequested(m_sido, city, dong);
 }

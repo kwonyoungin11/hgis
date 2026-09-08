@@ -25,6 +25,7 @@
 #include <QTreeView>
 #include <QMenu>
 #include <QMenuBar>
+#include <QMessageBox>
 #include <QWidget>
 #include <QSplashScreen>
 #include <QPainter>
@@ -38,6 +39,7 @@
 #include <QTimer>
 #include <functional>
 #include <cstdlib>
+#include <string>
 #include <QFileInfo>
 #ifdef Q_OS_WIN
 #ifndef NOMINMAX
@@ -191,6 +193,35 @@ static void applyBundledRuntime() {
   qputenv("PATH", (prepend.join(QLatin1Char(';')) + QLatin1Char(';') + old).toLocal8Bit());
 }
 
+static bool prepareSessionTempDirectory() {
+  QTemporaryDir session(QDir::temp().filePath(QStringLiteral("ka-hgis-XXXXXX")));
+  if (!session.isValid())
+    return false;
+  // QGIS 4.3 QgsArchive::zip uses a fixed qgis-project-XXXXXX.zip filename.
+  // Isolate all QGIS writes before starting Qt/QGIS or any worker threads.
+  // Saved projects may reference generated rasters here: do not delete these
+  // files at shutdown, or a later explicit reopen could lose its datasource.
+  session.setAutoRemove(false);
+  const QString path = QDir::toNativeSeparators(session.path());
+#ifdef Q_OS_WIN
+  const std::wstring nativePath = path.toStdWString();
+  // Update both the CRT and native process environment, preserving Unicode.
+  // No user/system environment or registry setting is changed.
+  if (_wputenv_s(L"TEMP", nativePath.c_str()) != 0 ||
+      _wputenv_s(L"TMP", nativePath.c_str()) != 0 ||
+      !SetEnvironmentVariableW(L"TEMP", nativePath.c_str()) ||
+      !SetEnvironmentVariableW(L"TMP", nativePath.c_str()))
+    return false;
+#else
+  const QByteArray encodedPath = QFile::encodeName(path);
+  if (!qputenv("TMPDIR", encodedPath) || !qputenv("TEMP", encodedPath) ||
+      !qputenv("TMP", encodedPath))
+    return false;
+#endif
+  // Fail closed if the installed Qt runtime resolves a different location.
+  return QDir(QDir::tempPath()).canonicalPath() == QDir(session.path()).canonicalPath();
+}
+
 QString KaApplication::resolvePrefixPath() {
   if (const char* e = std::getenv("QGIS_PREFIX_PATH")) {
     // applyBundledRuntime가 UTF-8로 넣는다(QGIS 내부 해석과 동일). 실패 시 로컬 인코딩 재시도.
@@ -285,8 +316,8 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
       if (!t.isEmpty()) toolbarTexts << t;
     }
     const QStringList need = {
-      QStringLiteral("만들까?"), QStringLiteral("열까?"), QStringLiteral("저장"),
-      QStringLiteral("그려볼까?"), QStringLiteral("배경"), QStringLiteral("도면")
+      QStringLiteral("새 조사"), QStringLiteral("열기"), QStringLiteral("저장"),
+      QStringLiteral("그리기"), QStringLiteral("배경"), QStringLiteral("도면")
     };
     QStringList missing;
     for (const QString& n : need) {
@@ -457,12 +488,12 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
       }
       return false;
     };
-    all = step(QStringLiteral("toolbar_new_action"), hasText(QStringLiteral("만들까?"))) && all;
-    all = step(QStringLiteral("toolbar_draw_toggle"), hasText(QStringLiteral("그려볼까?"))) && all;
+    all = step(QStringLiteral("toolbar_new_action"), hasText(QStringLiteral("새 조사"))) && all;
+    all = step(QStringLiteral("toolbar_draw_toggle"), hasText(QStringLiteral("그리기"))) && all;
     all = step(QStringLiteral("toolbar_basemap_toggle"), hasText(QStringLiteral("배경"))) && all;
     all = step(QStringLiteral("toolbar_submit_toggle"), hasText(QStringLiteral("도면"))) && all;
     all = step(QStringLiteral("toolbar_measure_tape"),
-               hasText(QStringLiteral("거리")) || hasText(QStringLiteral("재볼까?"))) && all;
+               hasText(QStringLiteral("거리"))) && all;
     all = step(QStringLiteral("toolbar_dem"), hasText(QStringLiteral("DEM"))) && all;
     bool demClasses = false;
     if (auto* btnDem = w->findChild<QToolButton*>(QStringLiteral("btnDem"))) {
@@ -679,6 +710,8 @@ int KaApplication::run(int argc, char** argv) {
   }
 #endif
 
+  const bool sessionTempReady = prepareSessionTempDirectory();
+
   // Keep 125/150/175% (4K) instead of snapping to 1x or 2x. Must precede QgsApplication.
   QGuiApplication::setHighDpiScaleFactorRoundingPolicy(
       Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
@@ -686,6 +719,17 @@ int KaApplication::run(int argc, char** argv) {
 #if KA_HGIS_HAS_QGIS
   // PROJ/GDAL 환경은 QgsApplication이 첫 좌표계 컨텍스트를 만들기 전에 준비돼야 한다.
   applyBundledRuntime();
+#endif
+  if (!sessionTempReady) {
+    QApplication app(argc, argv);
+    QMessageBox::critical(
+        nullptr, QStringLiteral("앱을 시작할 수 없습니다"),
+        QStringLiteral("작업에 필요한 임시 폴더를 준비하지 못했습니다.\n"
+                       "디스크의 남은 공간과 임시 폴더의 쓰기 권한을 확인한 뒤 다시 실행해 주세요.\n"
+                       "조사 파일은 변경하지 않았습니다."));
+    return 2;
+  }
+#if KA_HGIS_HAS_QGIS
   QgsApplication app(argc, argv, true);
 #else
   QApplication app(argc, argv);
@@ -729,6 +773,8 @@ int KaApplication::run(int argc, char** argv) {
   QgsApplication::setPkgDataPath(prefix);
   QgsApplication::initQgis();
   QgsNetworkAccessManager::instance()->setupDefaultProxyAndCache();
+  // 끊긴 현장 연결에서 WMS/XYZ 요청이 무제한 기다리지 않도록 한다.
+  QgsNetworkAccessManager::setTimeout(15000);
   // 타일 디스크 캐시를 키운다. 기본 50 MB는 조사 한 곳을 오가는 것만으로 넘쳐서
   // 같은 위성·지적 타일을 계속 다시 받는다. 설정 키(cache/size)는 이 QGIS
   // 버전에서 먹지 않아 캐시 객체에 직접 건다.
@@ -834,13 +880,12 @@ int KaApplication::run(int argc, char** argv) {
     }
 
     if (qaPhase1 || smokeQuit) {
-      // 자동 QA·스모크에서는 최근 작업 복원을 건너뛰고 기본 부팅 상태만 검사한다.
+      // 자동 QA·스모크에서는 최근 작업 복원을 건너뛰고 기본 부팅 상태를 검사한다.
       w.setRestoreLastSurveyEnabled(false);
-      // 상호작용 실행에서는 배경지도를 이벤트 루프로 미뤄 창을 먼저 띄운다.
-      // 자동 QA·스모크는 그 전에 끝나 버리므로, 여기서 직접 끝내 검사 범위를 지킨다.
-      w.loadBootBasemaps();
     }
     if (qaPhase1) {
+      // Phase1 QA는 지도 인프라까지 점검하므로 배경지도 로딩을 명시적으로 끝낸다.
+      w.loadBootBasemaps();
       const QString out = QDir(QCoreApplication::applicationDirPath())
                               .filePath(QStringLiteral("../qa/phase1-e2e.json"));
       const QString out2 = QStringLiteral("build/qa/phase1-e2e.json");

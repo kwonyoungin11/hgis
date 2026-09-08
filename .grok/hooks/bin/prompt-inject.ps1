@@ -19,7 +19,7 @@ $txt = Join-Path $here $name
 $ctx = if (Test-Path -LiteralPath $txt) {
   [System.IO.File]::ReadAllText($txt, [System.Text.Encoding]::UTF8)
 } else {
-  '[EXCAVATION-GIS LOOP] sequential-thinking + context7; QGIS+ArcGIS docs; graph+loop; export 5179.'
+  '[EXCAVATION-GIS LOOP] context7 for docs; STA if complexity>=3; QGIS+ArcGIS docs; graph+loop; export 5179.'
 }
 $payload = @{
   hookSpecificOutput = @{

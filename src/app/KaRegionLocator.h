@@ -18,6 +18,7 @@ public:
 
 signals:
   void searchRequested(const QString& query);
+  void regionFieldMapRequested(const QString& sido, const QString& city, const QString& dong);
 
 protected:
   bool eventFilter(QObject* watched, QEvent* event) override;
@@ -26,6 +27,7 @@ private:
   void openAddressPopup(const QString& sido);
   void fillDongs();
   void emitSearch();
+  void emitFieldMap();
   // 팝업을 닫고 시·도 칩도 함께 해제한다. 팝업 열림 == 칩 눌림이 유일한 규칙.
   void closePanel();
 

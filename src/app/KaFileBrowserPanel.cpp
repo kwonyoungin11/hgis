@@ -4,10 +4,15 @@
 #include <QDrag>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFont>
+#include <QFontMetrics>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QList>
 #include <QListWidgetItem>
 #include <QMimeData>
+#include <QResizeEvent>
+#include <QShowEvent>
 #include <QStandardPaths>
 #include <QStorageInfo>
 #include <QToolButton>
@@ -107,22 +112,22 @@ KaFileBrowserPanel::KaFileBrowserPanel(QWidget* parent) : QFrame(parent) {
     return b;
   };
 
-  m_btnPc = makeBtn(QStringLiteral("내PC"), QStringLiteral("btnBrowsePc"),
-                    QStringLiteral("내 컴퓨터 드라이브 목록으로 이동"));
+  m_btnPc = makeBtn(QStringLiteral("내 PC"), QStringLiteral("btnBrowsePc"),
+                    QStringLiteral("컴퓨터 드라이브 목록으로 이동합니다"));
   connect(m_btnPc, &QToolButton::clicked, this, [this]() { goTo(QString()); });
 
   m_btnDesk = makeBtn(QStringLiteral("바탕화면"), QStringLiteral("btnBrowseDesktop"),
-                      QStringLiteral("바탕화면 폴더로 바로 이동"));
+                      QStringLiteral("바탕화면 폴더로 이동합니다"));
   connect(m_btnDesk, &QToolButton::clicked, this, [this]() { goTo(resolvedDesktopPath()); });
 
   m_btnDocs = makeBtn(QStringLiteral("문서"), QStringLiteral("btnBrowseDocs"),
-                      QStringLiteral("문서 폴더로 바로 이동"));
+                      QStringLiteral("문서 폴더로 이동합니다"));
   connect(m_btnDocs, &QToolButton::clicked, this, [this]() {
     goTo(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation));
   });
 
-  m_btnDown = makeBtn(QStringLiteral("다운로드"), QStringLiteral("btnBrowseDownloads"),
-                      QStringLiteral("다운로드 폴더로 바로 이동"));
+  m_btnDown = makeBtn(QStringLiteral("내려받기"), QStringLiteral("btnBrowseDownloads"),
+                      QStringLiteral("내려받기 폴더로 이동합니다"));
   connect(m_btnDown, &QToolButton::clicked, this, [this]() {
     QString d = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
     if (d.isEmpty() || !QFileInfo(d).isDir())
@@ -130,12 +135,12 @@ KaFileBrowserPanel::KaFileBrowserPanel(QWidget* parent) : QFrame(parent) {
     goTo(d);
   });
 
-  m_btnPick = makeBtn(QStringLiteral("폴더직접찾기"), QStringLiteral("btnBrowseFolder"),
-                      QStringLiteral("조사 데이터 폴더를 직접 골라서 엽니다"));
+  m_btnPick = makeBtn(QStringLiteral("폴더 지정"), QStringLiteral("btnBrowseFolder"),
+                      QStringLiteral("조사 자료 폴더를 지정하여 엽니다"));
   connect(m_btnPick, &QToolButton::clicked, this, &KaFileBrowserPanel::pickFolder);
 
-  m_btnSd = makeBtn(QStringLiteral("SD카드"), QStringLiteral("btnBrowseSd"),
-                    QStringLiteral("SD카드·이동식 디스크를 찾아 엽니다"));
+  m_btnSd = makeBtn(QStringLiteral("SD 카드"), QStringLiteral("btnBrowseSd"),
+                    QStringLiteral("SD 카드·이동식 디스크를 찾아 엽니다"));
   connect(m_btnSd, &QToolButton::clicked, this, [this]() {
     const QString sd = findRemovableSdPath();
     if (sd.isEmpty())
@@ -145,7 +150,7 @@ KaFileBrowserPanel::KaFileBrowserPanel(QWidget* parent) : QFrame(parent) {
   });
 
   m_btnUp = makeBtn(QStringLiteral("상위"), QStringLiteral("btnBrowseUp"),
-                    QStringLiteral("상위 폴더(..)로 한 단계 이동"));
+                    QStringLiteral("상위 폴더로 한 단계 이동합니다"));
   m_btnUp->setStyleSheet(
       QStringLiteral("QToolButton#btnBrowseUp { "
                      "background-color: #E0F2FE; color: #0284C7; "
@@ -195,10 +200,64 @@ void KaFileBrowserPanel::resizeEvent(QResizeEvent* event) {
   updateButtonLayout(width());
 }
 
+void KaFileBrowserPanel::showEvent(QShowEvent* event) {
+  QFrame::showEvent(event);
+  updateButtonLayout(width());
+}
+
+void KaFileBrowserPanel::fitShortcutFonts(int width) {
+  auto fitRow = [](QHBoxLayout* lay, int rowWidth) {
+    if (!lay || rowWidth <= 0) return;
+    QList<QToolButton*> vis;
+    for (int i = 0; i < lay->count(); ++i) {
+      QLayoutItem* it = lay->itemAt(i);
+      if (!it) continue;
+      auto* b = qobject_cast<QToolButton*>(it->widget());
+      if (b && !b->isHidden()) vis.append(b);
+    }
+    if (vis.isEmpty()) return;
+    const int gaps = lay->spacing() * qMax(0, static_cast<int>(vis.size()) - 1);
+    const int each = qMax(16, (rowWidth - gaps) / vis.size());
+    for (QToolButton* b : vis) {
+      int px = 12;
+      for (; px >= 7; --px) {
+        QFont f = b->font();
+        f.setPixelSize(px);
+        if (QFontMetrics(f).horizontalAdvance(b->text()) + 14 <= each)
+          break;
+      }
+      QFont f = b->font();
+      f.setPixelSize(px);
+      b->setFont(f);
+      b->setMinimumWidth(0);
+      b->setMaximumWidth(each);
+      if (b->objectName() == QLatin1String("btnBrowseUp")) {
+        b->setStyleSheet(
+            QStringLiteral("QToolButton#btnBrowseUp { "
+                           "background-color: #E0F2FE; color: #0284C7; "
+                           "border: 1px solid #BAE6FD; border-radius: 6px; "
+                           "padding: 2px 6px; font-weight: 600; font-size: %1px; } "
+                           "QToolButton#btnBrowseUp:hover { "
+                           "background-color: #BAE6FD; border-color: #7DD3FC; color: #0369A1; }")
+                .arg(px));
+      } else {
+        b->setStyleSheet(QStringLiteral("font-size: %1px;").arg(px));
+      }
+    }
+  };
+  const int inner = qMax(40, width - 16);
+  fitRow(m_pathBar1, inner);
+  if (m_isTwoRows)
+    fitRow(m_pathBar2, inner);
+}
+
 void KaFileBrowserPanel::updateButtonLayout(int width) {
   if (!m_pathBar1 || !m_pathBar2 || !m_btnPc) return;
-  const bool wantTwoRows = (width > 0 && width < 315);
-  if (wantTwoRows == m_isTwoRows && m_pathBar1->count() > 0) return;
+  const bool wantTwoRows = (width > 0 && width < 420);
+  if (wantTwoRows == m_isTwoRows && m_pathBar1->count() > 0) {
+    fitShortcutFonts(width);
+    return;
+  }
   m_isTwoRows = wantTwoRows;
 
   // Clear existing items from layouts
@@ -211,7 +270,7 @@ void KaFileBrowserPanel::updateButtonLayout(int width) {
   clearLayout(m_pathBar2);
 
   if (!m_isTwoRows) {
-    // 1 row: [내PC] [바탕화면] [문서] [다운로드] [폴더직접찾기] [상위]
+    // 1 row: [내 PC] [바탕화면] [문서] [내려받기] [폴더 지정] [상위]
     m_pathBar1->addWidget(m_btnPc);
     m_pathBar1->addWidget(m_btnDesk);
     m_pathBar1->addWidget(m_btnDocs);
@@ -231,13 +290,14 @@ void KaFileBrowserPanel::updateButtonLayout(int width) {
     m_pathBar1->addWidget(m_btnDesk);
     m_pathBar1->addWidget(m_btnDocs);
     m_pathBar1->addStretch(1);
-    // Row 2: [다운로드] [SD카드] [폴더직접찾기] [상위]
+    // Row 2: [내려받기] [SD 카드] [폴더 지정] [상위]
     m_pathBar2->addWidget(m_btnDown);
     m_pathBar2->addWidget(m_btnSd);
     m_pathBar2->addWidget(m_btnPick);
     m_pathBar2->addWidget(m_btnUp);
     m_pathBar2->addStretch(1);
   }
+  fitShortcutFonts(width);
 }
 
 QStringList KaFileBrowserPanel::selectedFiles() const {

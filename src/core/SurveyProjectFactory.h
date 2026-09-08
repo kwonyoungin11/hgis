@@ -3,6 +3,8 @@
 
 class SurveyProjectFactory {
 public:
+  // Creates a new file pair only; never overwrites a same-named GPKG or QGZ.
+  // The GPKG schema is created without adding empty layers to the workspace.
   static QString createNewSurvey(const QString& directory,
                                  const QString& surveyName,
                                  QString* errorOut = nullptr,

@@ -4,7 +4,7 @@ User standing order: **개발사전설정을 규칙으로 항상 진행**. Slash
 
 ## Always
 
-1. `sequential-thinking` + `context7` (confess once if disconnected).
+1. `context7` when the topic is a library API. STA (`sequential-thinking-agent`) if complexity ≥ 3. Skip both on greetings.
 2. Official **English** QGIS + ArcGIS developer sites for the topic
    (`docs.qgis.org`, `api.qgis.org`, `docs/vendor/qgis-manual-3.44/`,
    `developers.arcgis.com`, `pro.arcgis.com`). Do not invent `Qgs*`.

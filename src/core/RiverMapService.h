@@ -1,5 +1,9 @@
 #pragma once
 
+#include "PreparedReferenceMap.h"
+
+class QgsCoordinateTransformContext;
+
 #include <QString>
 
 class QgsMapCanvas;
@@ -17,6 +21,14 @@ class QgsVectorLayer;
 //  - 한 번 내려받으면 GPKG로 남아 오프라인 현장에서도 쓸 수 있다.
 class RiverMapService {
 public:
+  // Worker-only preparation; no project, canvas or layer objects escape.
+  static PreparedReferenceMap prepare(const QgsRectangle& extent5186,
+      const QString& apiKey,
+      const QString& requestedBasePath, const QgsCoordinateTransformContext& transformContext,
+      QgsFeedback* feedback = nullptr, const ReferenceDownload& download = {});
+  // GUI-only registration; successful registration retains the generated files.
+  static QgsVectorLayer* addPrepared(QgsProject* project, QgsMapCanvas* canvas,
+      const PreparedReferenceMap& prepared, QString* errorOut = nullptr);
   // extent(EPSG:5186) 범위의 하천망을 내려받아 outGpkgPath에 저장하고
   // 프로젝트 「참조 지도」 그룹에 추가한다. 성공 시 추가된 레이어를 반환.
   static QgsVectorLayer* downloadAndAdd(QgsProject* project, QgsMapCanvas* canvas,

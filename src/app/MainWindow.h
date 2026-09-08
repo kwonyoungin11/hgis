@@ -6,12 +6,15 @@
 #include <QVector>
 #include <QHash>
 #include <QSet>
+#include <QPointer>
 #include <vector>
 #include "core/LocationSearch.h"
+#include "core/AdminBoundaryService.h"
 #include "core/TrenchGridGenerator.h"
 class QListWidget;
 class QListWidgetItem;
 class QAction;
+class QMenu;
 class QLabel;
 class QToolBar;
 class QToolButton;
@@ -19,8 +22,11 @@ class QLineEdit;
 class QComboBox;
 class QCheckBox;
 class QDoubleSpinBox;
-class QSlider;
 class QEvent;
+class KaAboveLabelsOverlay;
+class KaLayerOpacityRail;
+class KaReferenceDownloadJob;
+class QgsRectangle;
 class QShowEvent;
 class QCloseEvent;
 class QTabWidget;
@@ -51,7 +57,6 @@ class KaTerrain3dLayoutStudio;
 class KaStartPage;
 class KaCoordPointMapTool;
 class KaMeasureMapTool;
-class KaVertexEditTool;
 class KaFeatureSelectTool;
 class KaFoundLocationMark;
 class QSplitter;
@@ -87,11 +92,18 @@ public:
   void setRestoreLastSurveyEnabled(bool enabled) { m_restoreLastSurveyEnabled = enabled; }
   bool addVectorFromPath(const QString& path);
   bool addRasterFromPath(const QString& path);
+  bool tryAddDroppedUrls(const QList<QUrl>& urls);
   void showLayerTreeContextMenu(QgsLayerTreeView* treeView, const QPoint& pos);
+  void updateLayerOpacityControl();
   // "2000" 과 "1:2000" 을 모두 분모 2000 으로 읽는다. 0 이면 숫자가 아니다.
   static double scaleDenominatorFromUi(const QString& raw);
   void editCurrentLayerStyle(QgsMapLayer* layer = nullptr);
   void editCurrentLayerAttributes(QgsMapLayer* layer = nullptr);
+
+private:
+  enum class ReferenceMapKind { Soil, PaleoSoil, Geology, River };
+  void populateMapContextMenu(QMenu* menu, const QPoint& pos);
+  void showLayerAreaSummary(QgsVectorLayer* layer, bool showRatio);
 
 private slots:
   void newSurvey();
@@ -100,6 +112,8 @@ private slots:
   void downloadSoilTerrain();
   void downloadGeologyMap();
   void downloadRiverMap();
+  void startReferenceDownload(ReferenceMapKind kind, const QgsRectangle& extent,
+                              const QString& targetPath, const QString& apiKey = {});
   void saveProject();
   void saveProjectAs();
   // 작업공간을 조사 파일에 쓴다. 20초 타이머로 자동 호출하던 것을 없앴으므로,
@@ -116,7 +130,6 @@ private slots:
   void clipOverlappingLayers();
   void startSplitPolygonTool();
   void onWorkControlClicked(QListWidgetItem* item);
-  void updateLayerOpacityControl();
   void refreshWorkPanel();
   void saveEdits();
   void stopEdits();
@@ -223,8 +236,19 @@ private:
   void updateNextActionStatus();
   void setupFileBrowser();
   void clearSubToolbar();
+  // 지금 켜져 있는 도구에 파란 밑줄이 오게 체크 상태를 맞춘다.
+  void updateSubToolbarChecks();
+  // 큰 항공사진처럼 Qt 로 못 여는 원판은 GDAL 축소본으로 왼쪽 칸을 채운다.
+  bool loadAlignPreviewFromRaster();
+  // 레이어 체크를 한 번에 모두 끄고 켜는 단추. 라벨은 다음에 할 일을 보여 준다.
+  // 레이어 순서를 글자(라벨)에도 그대로 먹인다.
+  // 창 단축키(Delete·Ctrl+Z)를 열려 있는 조판 화면으로 넘긴다.
+  bool routeEditKeyToActiveStudio(bool isDelete);
+  void applyLabelStackOrder();
+  void refreshAboveLabelsOverlay();
+  void toggleAllLayersChecked();
+  void refreshLayerCheckAllButton();
   bool addSectionGeoTiffFromPath(const QString& path, const QString& crsAuthId);
-  bool tryAddDroppedUrls(const QList<QUrl>& urls);
   bool tryAddDroppedPaths(const QStringList& paths);
   QStringList selectedBrowserFiles() const;
   void loadSurveyLayers(const QString& gpkgOrStub);
@@ -243,6 +267,9 @@ private:
   void bindMapDisplayScreen();
   void setWorkCrs(const QString& authId);
   void searchLocation(const QString& query);
+  void applySurfaceSurveyFieldMap(const QString& sido, const QString& city, const QString& dong);
+  void onAdminBoundaryFetched(const AdminBoundaryParse& parsed);
+  void onAdminBoundaryFailed(const QString& message);
   void onLocationResults(const QVector<LocationHit>& hits);
   void onLocationFailed(const QString& message);
   void zoomToLocation(const LocationHit& hit);
@@ -276,6 +303,8 @@ private:
   static QString attributeFieldLabelKo(const QString& fieldName);
 #endif
   bool commitSurveyEdits(int* committedCount = nullptr);
+  bool confirmSaveBeforeOpeningSurvey();
+  bool validateStandaloneProjectForOpen(const QString& path);
   // 저장하지 않은 작업이 있는가. 프로젝트 dirty 플래그 + 커밋 안 된 편집 버퍼.
   bool surveyHasUnsavedChanges() const;
   // 저장 직후·열기 직후 호출해 "깨끗한 상태"로 되돌린다.
@@ -301,6 +330,7 @@ private:
 
   void refreshLayerEmptyState();
   QLabel* m_layerEmpty = nullptr;
+  QToolButton* m_layerCheckAllBtn = nullptr;
   QLabel* m_help = nullptr;
   QLabel* m_checkView = nullptr;
   KaStatusBar* m_status = nullptr;
@@ -314,10 +344,13 @@ private:
   QString m_browserPath;
   ChecklistEngine* m_checklist = nullptr;
   LocationSearch* m_locator = nullptr;
+  AdminBoundaryService* m_adminBoundary = nullptr;
   QString m_surveyPath;
   QString m_workCrs = QStringLiteral("EPSG:5187");
 #if KA_HGIS_HAS_QGIS
   void healTileLayer(QgsRasterLayer* layer);
+  void notifyBasemapFailure(bool timedOut);
+  bool m_basemapNoticePending = false;
 #endif
   // 타일 자동 복구 상태: 레이어별 재시도 횟수(화면 이동 시 초기화)와 예약 중 표시.
   QHash<QString, int> m_tileHealCount;
@@ -347,6 +380,9 @@ private:
   class KaTrenchMoveTool* m_trenchMoveTool = nullptr;
   class KaTrenchDialog* m_trenchDlg = nullptr;
   class KaCanvasGridOverlay* m_mapGrid = nullptr;
+  // 라벨 위에 위 레이어를 한 번 더 그리는 덧그림(2차 패스).
+  KaAboveLabelsOverlay* m_aboveLabels = nullptr;
+  int m_aboveLabelsCount = -1;
   QCheckBox* m_mapGridCheck = nullptr;
   QDoubleSpinBox* m_mapGridStep = nullptr;
   QDoubleSpinBox* m_mapGridRot = nullptr;
@@ -355,9 +391,7 @@ private:
   QColor m_mapGridColor = QColor(51, 65, 85, 210);
   QVector<QToolButton*> m_mapGridColorBtns;
   KaAttributeMapTool* m_attributeTool = nullptr;
-  QWidget* m_layerOpacityWidget = nullptr;
-  QSlider* m_layerOpacitySlider = nullptr;
-  QLabel* m_layerOpacityLabel = nullptr;
+  KaLayerOpacityRail* m_layerOpacityRail = nullptr;
   KaAlignMapTool* m_alignTool = nullptr;
   KaAlignPickTool* m_alignPickTool = nullptr;
   KaImageView* m_alignImage = nullptr;
@@ -377,7 +411,6 @@ private:
   QTimer* m_alignCursorTimer = nullptr;
   QgsMapToolPan* m_panTool = nullptr;
   QgsMapToolSelect* m_selectTool = nullptr;
-  KaVertexEditTool* m_vertexTool = nullptr;
   KaFeatureSelectTool* m_featureSelectTool = nullptr;
   KaFoundLocationMark* m_locationMark = nullptr;
   QString m_locationMarkTitle;
@@ -396,9 +429,14 @@ private:
   // 복원되지 않은 작업공간은 덮어쓰지 않는다. 수동 저장도 새 사본으로 안내한다.
   bool m_workspaceRestoreSuppressesAutosave = false;
   bool m_basemapBootPending = false;
-  bool m_restoreLastSurveyEnabled = true;
+  bool m_restoreLastSurveyEnabled = false;
   bool m_isLoadingBasemaps = false;
   bool m_isOpeningSurvey = false;
+  bool m_closingWindow = false;
+  bool m_canZoomPrevious = false;
+  bool m_canZoomNext = false;
+  QPointer<KaReferenceDownloadJob> m_referenceDownload;
+  quint64 m_surveyGeneration = 0;
   bool m_surveySessionReady = false;
   bool m_mapScreenBound = false;
   QTimer* m_displayRefresh = nullptr;

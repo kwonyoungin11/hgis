@@ -34,7 +34,9 @@ bool invert(const Affine& a, double mx, double my, double* sx, double* sy);
 QTransform toQTransform(const Affine& a);
 double rmsMeters(const Affine& a, const QVector<Pair>& pairs);
 
-Affine fromPairs(const QVector<Pair>& pairs);
+// sourceYDown: 왼쪽 좌표가 그림 픽셀(행 번호가 아래로 증가)이면 true.
+// 래스터 정합이 여기 해당한다. CAD·벡터는 왼쪽도 지도 좌표라 false.
+Affine fromPairs(const QVector<Pair>& pairs, bool sourceYDown = false);
 Affine fitSrcBoxToExtent(double srcMinX, double srcMinY, double srcMaxX, double srcMaxY,
                          const QgsRectangle& dest);
 Affine fitRasterToExtent(int pixelW, int pixelH, const QgsRectangle& dest);

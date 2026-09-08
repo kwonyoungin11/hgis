@@ -476,10 +476,10 @@ void TestTerrain3d::layoutStudio_has2dChromeCards() {
   QFile f(QStringLiteral("src/app/KaTerrain3dLayoutStudio.cpp"));
   QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "KaTerrain3dLayoutStudio.cpp");
   const QString body = QString::fromUtf8(f.readAll());
-  QVERIFY2(body.contains(QString::fromUtf8("무엇을 넣을까?")), "2D와 같은 넣을까 카드");
-  QVERIFY2(body.contains(QString::fromUtf8("방위를 넣을까?")), "2D와 같은 방위 카드");
-  QVERIFY2(body.contains(QString::fromUtf8("도면 정보를 고칠까?")), "2D와 같은 도명 카드");
-  QVERIFY2(body.contains(QString::fromUtf8("범례를 넣을까?")), "범례는 버튼으로만");
+  QVERIFY2(body.contains(QString::fromUtf8("조판 항목")), "2D와 같은 조판 항목 카드");
+  QVERIFY2(body.contains(QString::fromUtf8("방위")), "2D와 같은 방위 카드");
+  QVERIFY2(body.contains(QString::fromUtf8("도면 정보")), "2D와 같은 도명 카드");
+  QVERIFY2(body.contains(QString::fromUtf8("범례")), "범례는 버튼으로만");
 }
 
 void TestTerrain3d::terrain3dSheet_legendOffUntilAsked() {

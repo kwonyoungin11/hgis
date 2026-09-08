@@ -77,15 +77,15 @@ void TestRecent::bootStaysOnHome_doesNotAutoOpenLastSurvey() {
   QFile f(QStringLiteral("src/app/MainWindow.cpp"));
   QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
   const QString src = QString::fromUtf8(f.readAll());
-  QVERIFY2(src.contains(QLatin1String("QTimer::singleShot(0, this, &MainWindow::restoreLastSurvey)")),
-           "다시 실행하면 마지막 조사를 열어야 한다");
-  QVERIFY2(src.contains(QLatin1String("OpenSurveyMode::LayersOnly")),
-           "부팅 복원은 내장/.qgz를 읽지 말고 GPKG 테이블만 연다");
+  QVERIFY2(!src.contains(QLatin1String("QTimer::singleShot(0, this, &MainWindow::restoreLastSurvey)")),
+           "프로그램 실행만으로 마지막 조사를 자동으로 열면 안 된다");
+  QVERIFY2(!src.contains(QLatin1String("applyStartupMap();\n  refreshWorkPanel();")),
+           "생성자에서 지도/배경지도 초기화를 시작하면 홈 시작이 느려진다");
   QFile h(QStringLiteral("src/app/MainWindow.h"));
   QVERIFY2(h.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.h");
   const QString hdr = QString::fromUtf8(h.readAll());
-  QVERIFY2(hdr.contains(QLatin1String("m_restoreLastSurveyEnabled = true")),
-           "자동 복원 기본값은 켜짐(GPKG 전용)");
+  QVERIFY2(hdr.contains(QLatin1String("m_restoreLastSurveyEnabled = false")),
+           "자동 복원 기본값은 꺼짐이어야 한다");
 }
 
 // 20초 자동 저장은 없앴다. 저장은 사용자가 「저장」을 누를 때만 일어난다.

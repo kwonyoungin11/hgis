@@ -1,0 +1,86 @@
+---
+description: ka-hgis 빌드·검증 절차와 실측된 환경 사실. 빌드, 테스트, 플래그, 정적분석 작업 시 적용.
+alwaysApply: false
+globs: CMakeLists.txt,CMakePresets.json,src/**/*.cpp,src/**/*.h,tests/**/*.cpp
+---
+
+# 빌드 · 검증 (2026-09-07 실측 확정)
+
+추측하지 말고 이 문서의 명령을 그대로 쓴다. 아래 내용은 전부 이 머신에서 실행해 확인한 것이다.
+
+## 빌드 (프리셋 사용)
+
+```powershell
+cmake --preset vs                 # 구성 — 기존 build/ 재사용 (VS 2022 x64)
+cmake --build --preset release    # 빌드
+ctest --preset release            # 테스트 14종
+```
+
+- **클린 전체 빌드 86초, 증분 14초.** 오래 걸린다고 중단하지 말 것.
+- VS 제너레이터는 **멀티 컨피그**다. `--config Release`(또는 `--preset release`)를 빠뜨리면
+  Debug 로 빌드되어 "왜 느리지" 오판으로 직행한다.
+
+## 컴파일 플래그 — 임의로 빼지 말 것
+
+`CMakeLists.txt` 상단 `if (MSVC)` 블록:
+
+```cmake
+add_compile_options(/MP)
+add_compile_options(/Zc:__cplusplus /utf-8 /permissive-)
+add_compile_options(/W4 /external:anglebrackets /external:W0)
+```
+
+- **`/Zc:__cplusplus`** — 없으면 `CMAKE_CXX_STANDARD 20` 을 줘도 `__cplusplus` 가 `199711`(C++98)로
+  보고되어 라이브러리의 C++20 기능 검출이 조용히 실패한다. 실측: 없음 `199711` → 있음 `202002`.
+- **`/external:anglebrackets /external:W0`** — 자체 코드는 따옴표 include, Qt/QGIS 는 꺾쇠 include 이므로
+  이 조합으로 외부 헤더 경고만 차단하고 우리 코드에는 `/W4` 가 걸린다. (실측: 자체 `"..."` 54곳 / Qt `<Q..>` 814곳)
+- **LTO** 는 `if(MSVC)` 에서 `CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON` 으로 직접 켠다.
+  `check_ipo_supported()` 는 `build/CMakeFiles/_CMakeLTOTest-CXX` 를 남겨 ALL_BUILD 를 깨뜨린다(MSB3202). **쓰지 말 것.**
+
+### 현재 경고 현황 (클린 빌드 기준 74건, 에러 0)
+
+| 코드 | 건수 | 내용 |
+|---|---|---|
+| C4996 | 65 | QGIS deprecated API — `QgsLayoutItemLabel::setFont/setFontColor`, `QgsLayoutItemLegend::setStyleFont`, `QgsMapLayer::setAbstract` |
+| C4505 | 3 | 죽은 함수 — `LocationSearch.cpp:31 readKeyFromSecretsFile`, `MainWindow.cpp:4210 projectLayerNames` |
+| C4189 | 3 | 미사용 지역변수 |
+| C4100 | 2 | 미사용 매개변수 |
+| C4458 | 1 | `AndongWindow.cpp:216` 지역변수 `data` 가 멤버를 가림 |
+
+경고를 늘리지 말 것. 줄이는 건 환영. `/WX`(경고를 에러로)는 위 74건을 정리한 뒤에 켠다.
+
+## 정적 분석
+
+```powershell
+# compile_commands.json 갱신 (VS 제너레이터는 이 파일을 만들지 않는다)
+# Developer PowerShell 에서:
+cmake --preset compiledb
+copy build-clangd\compile_commands.json build\compile_commands.json
+
+clang-tidy -p build src/core/LayerOps.cpp
+```
+
+`clang-tidy` 는 `C:\Program Files\LLVM\bin\` 에 있다 (LLVM 22.1.8). **PATH 에 없으므로 전체 경로로 부른다.**
+`.clang-tidy` 는 버그·성능 위주로 좁혀 놨다. 스타일 대량 정리는 주석에 적힌 방법으로 따로 돌린다.
+
+## 알려진 실패 — 쫓지 말 것
+
+**`workflow_engine` 테스트는 현재 실패한다 (14개 중 1개).**
+
+원인은 코드가 아니라 인증키다:
+```
+GDALWMS: The server returned exception code 'INVALID_KEY': 등록되지 않은 인증키입니다.
+```
+
+- 컴파일 플래그와 **무관**하다. 원본 CMakeLists 로 되돌려도 동일하게 실패함을 확인했다.
+- 관련 단서: `config/secrets.ini` 는 존재하지만, 그 파일을 읽는 `readKeyFromSecretsFile()`
+  (`src/core/LocationSearch.cpp:31`)이 **어디서도 호출되지 않는다**(C4505 경고). 즉 secrets.ini 에
+  키를 넣어도 무시된다. `vworldApiKey()` 는 환경변수 `VWORLD_API_KEY` → `VworldSettings::loadApiKey()` 만 본다.
+- 이 테스트가 실패한다고 "빌드가 깨졌다"고 보고하지 말 것. 나머지 13개가 통과하면 정상이다.
+
+## 완료 보고 기준
+
+1. `cmake --build --preset release` — 에러 0, 경고 74건 이하
+2. `ctest --preset release` — 13/14 통과 (workflow_engine 제외)
+3. 성능을 바꿨으면 전/후 수치 제시
+4. 안 돌려봤으면 "안 돌려봤다"고 말한다

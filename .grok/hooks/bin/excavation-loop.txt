@@ -8,7 +8,8 @@ no fork, no removeAllMapLayers, no empty domain auto-add, no VWorld key, no DXF,
 
 0) 내부 재작성(출력 금지): Role Context Objective Instructions Constraints Output Tone Evaluation Edge.
 1) SKILL: 매칭 스킬을 Read. 워커는 .grok/agents/<name>.md 를 직접 읽는다.
-2) MCP: GIS/API/FEATURE면 sequential-thinking + context7 (GetDynamicTools→Call).
+2) MCP: 라이브러리면 context7. 복잡도 3+면 Task sequential-thinking-agent (STA).
+   인사·한 줄은 STA/sequentialthinking MCP 금지.
    없으면 한 줄 고백 후 docs/vendor/qgis-manual-3.44/ + docs.qgis.org + api.qgis.org.
    USER COMMAND WINS. Qgs* 창작 금지.
 3) GRAPH 하나 + 전문가팀 항상: QUICK=부모(타이포만).

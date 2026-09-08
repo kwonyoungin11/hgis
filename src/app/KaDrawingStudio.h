@@ -23,7 +23,9 @@ class QLineEdit;
 class QShowEvent;
 class QSpinBox;
 class QTimer;
+class QSplitter;
 class QWidget;
+class KaLayerOpacityRail;
 class QgsProject;
 class QgsMapCanvas;
 class QgsLayoutView;
@@ -35,6 +37,7 @@ class QgsLayoutItemMap;
 class QgsLayoutItemScaleBar;
 class QgsLayerTreeView;
 class QgsLayerTreeModel;
+class QgsMapLayer;
 class QgsVectorLayer;
 class QgsCoordinateReferenceSystem;
 class QgsRectangle;
@@ -55,6 +58,8 @@ public:
   static bool promptPaper(QWidget* parent, double* widthMm, double* heightMm);
   void resetPaper(double widthMm, double heightMm, bool preserveExisting = true);
   void refreshMapFromProject();
+  void updateLayerOpacityControl();
+  void repaintMapLayers();
   // 입체지형 3D 그림을 맵 칸에 올리고, 축척·방위는 DEM 범위에 맞춘다.
   void placeTerrain3dPicture(const QString& pngPath, const QgsRectangle& groundExtent,
                              const QgsCoordinateReferenceSystem& crs);
@@ -74,6 +79,9 @@ public slots:
   void undoLastCoordCallout();
   void endPlaceCoordPoint();
   bool isPlacingCoordPoint() const;
+  // 창 단축키(Delete·Ctrl+Z)가 이 화면 대신 가로채므로, 바깥에서 넘겨받는다.
+  void handleDeleteKey();
+  void handleUndoKey();
   void deleteSelectedItems();
   void removeSelectedLayers();
   void undoLastChange();
@@ -110,6 +118,8 @@ private:
   QgsPrintLayout* layout() const;
   QgsLayoutItemMap* mapItem() const;
   void applyLayersToMap(QgsLayoutItemMap* map, bool includeLiveBasemap, bool refitExtent);
+  // 라벨 위에 위 레이어를 한 번 더 그리는 덧지도를 본 지도에 맞춘다.
+  void syncAboveLabelsMap(QgsLayoutItemMap* base);
   QgsVectorLayer* blankMapLayer();
   static void ensureLayoutGuiRegistered(QgsMapCanvas* mapCanvas);
   void startPlace(PlaceKind kind);
@@ -160,6 +170,13 @@ private:
   QgsLayerTreeView* m_layerTree = nullptr;
   QgsLayerTreeModel* m_layerModel = nullptr;
   class KaFileBrowserPanel* m_filesPanel = nullptr;
+  // 일부러 지운 범례는 글자 설정을 만져도 되살아나지 않는다.
+  bool m_legendRemoved = false;
+  KaLayerOpacityRail* m_opacityRail = nullptr;
+  // 투명도·밝기 막대가 지금 어느 레이어를 보고 있는지. 막대를 만질 때
+  // 트리의 현재 항목이 바뀌어 있을 수 있어, 켤 때 잡아 둔 레이어를 쓴다.
+  QPointer<QgsMapLayer> m_railLayer;
+  QSplitter* m_studioSplit = nullptr;
   // 도곽 +/테두리 자는 격자 설정에서 켠다. 간격 0 = 축척에 맞춰 자동(1-2-5).
   bool m_gridEnabled = false;
   bool m_gridShowNums = false;

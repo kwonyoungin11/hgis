@@ -53,10 +53,17 @@ bool solve3(double a11, double a12, double a13, double a21, double a22, double a
   return true;
 }
 
-Affine helmertFromTwo(const Pair& p0, const Pair& p1) {
+// 그림 픽셀은 위에서 아래로 y 가 커지고(행 번호), 지도는 아래에서 위로 커진다.
+// 그래서 그림 → 지도 변환에는 반드시 상하 뒤집기가 들어가야 한다(행렬식 < 0).
+// 뒤집기 없는 회전만으로 두 점을 맞추면 그 두 점은 정확히 붙지만 나머지 그림은
+// 두 점을 잇는 선을 축으로 거울처럼 뒤집힌 자리에 놓인다 — 현장에서 「점은 맞는데
+// 사진이 엉뚱한 데로 간다」로 나타난다. sourceYDown 이 그 뒤집기를 켠다.
+// (CAD·벡터 정합은 왼쪽도 지도 좌표라 y 가 위로 커지므로 뒤집지 않는다.)
+Affine helmertFromTwo(const Pair& p0, const Pair& p1, bool sourceYDown) {
   Affine out;
+  const double ky = sourceYDown ? -1.0 : 1.0;
   const double dsx = p1.srcX - p0.srcX;
-  const double dsy = p1.srcY - p0.srcY;
+  const double dsy = ky * (p1.srcY - p0.srcY);
   const double dmx = p1.mapX - p0.mapX;
   const double dmy = p1.mapY - p0.mapY;
   const double lenS = std::hypot(dsx, dsy);
@@ -66,10 +73,11 @@ Affine helmertFromTwo(const Pair& p0, const Pair& p1) {
   const double ang = std::atan2(dmy, dmx) - std::atan2(dsy, dsx);
   const double c = std::cos(ang);
   const double s = std::sin(ang);
+  // (sx, ky*sy) 에 회전을 건 뒤 ky 를 행렬 안으로 접어 넣는다.
   out.a = scale * c;
-  out.b = -scale * s;
+  out.b = -scale * s * ky;
   out.d = scale * s;
-  out.e = scale * c;
+  out.e = scale * c * ky;
   out.c = p0.mapX - out.a * p0.srcX - out.b * p0.srcY;
   out.f = p0.mapY - out.d * p0.srcX - out.e * p0.srcY;
   out.valid = true;
@@ -151,14 +159,16 @@ double rmsMeters(const Affine& a, const QVector<Pair>& pairs) {
   return std::sqrt(acc / n);
 }
 
-Affine fromPairs(const QVector<Pair>& pairs) {
+Affine fromPairs(const QVector<Pair>& pairs, bool sourceYDown) {
   Affine out;
   if (pairs.size() < 2) return out;
   if (pairs.size() == 2) {
-    out = helmertFromTwo(pairs[0], pairs[1]);
+    out = helmertFromTwo(pairs[0], pairs[1], sourceYDown);
   } else {
+    // 3점 이상이면 일반 어파인이라 데이터가 뒤집기까지 스스로 담아낸다.
+    // 다만 점이 한 줄로 서면 풀리지 않아 2점 식으로 내려오므로 여기도 넘겨준다.
     out = affineLeastSquares(pairs);
-    if (!out.valid) out = helmertFromTwo(pairs[0], pairs[1]);
+    if (!out.valid) out = helmertFromTwo(pairs[0], pairs[1], sourceYDown);
   }
   if (out.valid) {
     out.pairCount = pairs.size();

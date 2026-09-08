@@ -1,5 +1,9 @@
 #pragma once
 
+#include "PreparedReferenceMap.h"
+
+class QgsCoordinateTransformContext;
+
 #include <QColor>
 #include <QHash>
 #include <QString>
@@ -22,6 +26,13 @@ class QgsVectorLayer;
 //  - 한 번 내려받으면 GPKG로 남아 오프라인 현장에서도 쓸 수 있다.
 class GeologyMapService {
 public:
+  // Worker-only preparation; no project, canvas or layer objects escape.
+  static PreparedReferenceMap prepare(const QgsRectangle& extent5186,
+      const QString& requestedBasePath, const QgsCoordinateTransformContext& transformContext,
+      QgsFeedback* feedback = nullptr, const ReferenceDownload& download = {});
+  // GUI-only registration; successful registration retains the generated files.
+  static QgsMapLayer* addPrepared(QgsProject* project, QgsMapCanvas* canvas,
+      const PreparedReferenceMap& prepared, QString* errorOut = nullptr);
   // extent(EPSG:5186) 범위의 암상 폴리곤을 내려받아 outGpkgPath에 저장하고
   // 프로젝트 「참조 지도」 그룹에 추가한다. 본토는 l_50k_geology_litho_latest,
   // 제주(남단 ~33.97°N 밖)는 l_jeju_50k_geology_litho_view. 둘 다 같은 기호·지층

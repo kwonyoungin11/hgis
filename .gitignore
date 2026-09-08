@@ -34,7 +34,10 @@ Desktop.ini
 .codegraph/
 .omo/
 .opencode/
-.agents/
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/ka-hgis-gis/
 .claude/
 .repowise/
 .mcp.json

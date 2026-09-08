@@ -10,6 +10,7 @@
 #include <qgspointlocator.h>
 #include <qgsgeometry.h>
 #include <qgscoordinatetransform.h>
+#include <qgsexception.h>
 #include <qgsproject.h>
 #include <qgsmapsettings.h>
 #include <QKeyEvent>
@@ -38,6 +39,7 @@ void KaCaptureMapTool::setMode(Mode mode) {
 }
 
 void KaCaptureMapTool::setTargetLayer(QgsVectorLayer* layer) {
+  if (m_layer != layer && m_draggingVertex) cancelVertexDrag();
   m_layer = layer;
 }
 
@@ -137,7 +139,7 @@ bool KaCaptureMapTool::mapPointFromEvent(QgsMapMouseEvent* e, QgsPointXY* out, b
       isInter = (hit.layer() == nullptr);
     }
   }
-  if (std::isnan(out->x()) || std::isnan(out->y())) return false;
+  if (!std::isfinite(out->x()) || !std::isfinite(out->y())) return false;
   updateSnapMarker(*out, snapped, isInter);
   if (snappedOut) *snappedOut = snapped;
   return true;
@@ -226,11 +228,16 @@ void KaCaptureMapTool::canvasPressEvent(QgsMapMouseEvent* e) {
     if (m_points.isEmpty() && m_mode != Mode::Point) {
       QgsFeatureId fid = -1;
       int vertex = -1;
-      if (hitSavedVertex(mapPt, &fid, &vertex)) {
-        m_draggingVertex = true;
-        m_dragFid = fid;
-        m_dragVertex = vertex;
-        previewMovedVertex(mapPt);
+      try {
+        if (hitSavedVertex(mapPt, &fid, &vertex)) {
+          m_draggingVertex = true;
+          m_dragFid = fid;
+          m_dragVertex = vertex;
+          previewMovedVertex(mapPt);
+          return;
+        }
+      } catch (const QgsCsException&) {
+        emit vertexMoveFailed(QStringLiteral("지도와 도형의 위치를 맞추지 못했습니다. 작업을 저장한 뒤 조사를 다시 열어 주세요."));
         return;
       }
     }
@@ -255,8 +262,10 @@ void KaCaptureMapTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
     QgsPointXY mapPt;
     if (mapPointFromEvent(e, &mapPt))
       finishVertexDrag(mapPt);
-    else
+    else {
       cancelVertexDrag();
+      emit vertexMoveFailed(QStringLiteral("꼭짓점 위치를 읽지 못했습니다. 지도 안에서 다시 옮겨 주세요."));
+    }
     return;
   }
   if (e->button() != Qt::RightButton) return;
@@ -433,11 +442,12 @@ void KaCaptureMapTool::finish() {
   emit geometryCaptured(geom);
 }
 
-bool KaCaptureMapTool::hitSavedVertex(const QgsPointXY& mapPt, QgsFeatureId* fid, int* vertex) const {
+bool KaCaptureMapTool::hitSavedVertex(const QgsPointXY& mapPt, QgsFeatureId* fid, int* vertex) {
   if (!fid || !vertex || !m_layer || !m_layer->isValid() || !canvas())
     return false;
   const double px = std::max(1e-6, canvas()->mapSettings().mapUnitsPerPixel());
   const double tol2 = (px * 16.0) * (px * 16.0);
+  const QgsPointXY layerPt = toLayerCoordinates(m_layer, mapPt);
   QgsFeature f;
   QgsFeatureIterator it = m_layer->getFeatures();
   double best = 1e300;
@@ -448,7 +458,9 @@ bool KaCaptureMapTool::hitSavedVertex(const QgsPointXY& mapPt, QgsFeatureId* fid
       continue;
     int at = -1, before = -1, after = -1;
     double d2 = 0.0;
-    f.geometry().closestVertex(mapPt, at, before, after, d2);
+    const QgsPointXY closest = f.geometry().closestVertex(layerPt, at, before, after, d2);
+    if (at >= 0)
+      d2 = mapPt.sqrDist(toMapCoordinates(m_layer, closest));
     if (at < 0 || d2 > tol2 || d2 >= best)
       continue;
     best = d2;
@@ -469,7 +481,15 @@ void KaCaptureMapTool::previewMovedVertex(const QgsPointXY& mapPt) {
   if (!f.isValid() || !f.hasGeometry())
     return;
   QgsGeometry g = f.geometry();
-  if (!g.moveVertex(mapPt.x(), mapPt.y(), m_dragVertex))
+  QgsPointXY layerPt;
+  try {
+    layerPt = toLayerCoordinates(m_layer, mapPt);
+  } catch (const QgsCsException&) {
+    cancelVertexDrag();
+    emit vertexMoveFailed(QStringLiteral("지도와 도형의 위치를 맞추지 못했습니다. 작업을 저장한 뒤 조사를 다시 열어 주세요."));
+    return;
+  }
+  if (!g.moveVertex(layerPt.x(), layerPt.y(), m_dragVertex))
     return;
   if (!m_rubber) {
     const Qgis::GeometryType gt = m_layer->geometryType();
@@ -482,24 +502,46 @@ void KaCaptureMapTool::previewMovedVertex(const QgsPointXY& mapPt) {
 }
 
 void KaCaptureMapTool::finishVertexDrag(const QgsPointXY& mapPt) {
-  if (!m_draggingVertex || !m_layer || m_dragFid < 0 || m_dragVertex < 0) {
+  if (!m_draggingVertex) return;
+  if (!m_layer || m_dragFid < 0 || m_dragVertex < 0) {
     cancelVertexDrag();
+    emit vertexMoveFailed(QStringLiteral("꼭짓점을 옮기지 못했습니다. 고칠 도형을 다시 선택해 주세요."));
+    return;
+  }
+  const QPointer<QgsVectorLayer> layer = m_layer;
+  const QgsFeatureId fid = m_dragFid;
+  const int vertex = m_dragVertex;
+  // Finish the gesture before editing/commit signals can invoke another UI action.
+  cancelVertexDrag();
+  QgsPointXY layerPt;
+  try {
+    layerPt = toLayerCoordinates(layer, mapPt);
+  } catch (const QgsCsException&) {
+    emit vertexMoveFailed(QStringLiteral("지도와 도형의 위치를 맞추지 못했습니다. 작업을 저장한 뒤 조사를 다시 열어 주세요."));
     return;
   }
   QString err;
-  const bool ok = LayerOps::moveFeatureVertex(m_layer, static_cast<qint64>(m_dragFid), m_dragVertex,
-                                              mapPt.x(), mapPt.y(), &err);
-  if (ok) {
-    if (!m_layer->commitChanges(false))
-      m_layer->rollBack();
-    if (!m_layer->isEditable())
-      m_layer->startEditing();
-    if (m_layer->geometryType() == Qgis::GeometryType::Polygon)
-      LayerOps::applyAreaM2Labels(m_layer);
-    m_layer->triggerRepaint();
-    emit vertexMoved();
+  const bool ok = LayerOps::moveFeatureVertex(layer, static_cast<qint64>(fid), vertex,
+                                              layerPt.x(), layerPt.y(), &err);
+  if (!ok) {
+    emit vertexMoveFailed(QStringLiteral("꼭짓점을 옮기지 못했습니다. %1 고칠 도형을 다시 선택해 주세요.").arg(err));
+    return;
   }
-  cancelVertexDrag();
+  if (!layer) {
+    emit vertexMoveFailed(QStringLiteral("꼭짓점을 저장하지 못했습니다. 조사 레이어가 열려 있는지 확인해 주세요."));
+    return;
+  }
+  if (!layer->commitChanges(false)) {
+    // QGIS retains the complete edit buffer on failure so the user can retry.
+    emit vertexMoveFailed(QStringLiteral("꼭짓점 변경을 저장하지 못했습니다. 편집 내용은 화면에 남아 있습니다. "
+                                        "저장 위치의 권한과 여유 공간을 확인한 뒤 Ctrl+S로 다시 저장해 주세요."));
+    return;
+  }
+  if (!layer) return;
+  if (layer->geometryType() == Qgis::GeometryType::Polygon)
+    LayerOps::applyAreaM2Labels(layer);
+  if (layer) layer->triggerRepaint();
+  emit vertexMoved();
 }
 
 void KaCaptureMapTool::cancelVertexDrag() {

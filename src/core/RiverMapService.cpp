@@ -87,7 +87,8 @@ QString vworldExceptionText(const QByteArray& body) {
 // VWorld WFS는 인증키와 DOMAIN 파라미터가 필요하고(배경지도와 같은 키),
 // MAXFEATURES 상한이 1000이라 STARTINDEX로 나눠 받는다.
 QString fetchRiverGeojson(const QgsRectangle& extent4326, const QString& apiKey,
-                          QString* errorOut) {
+                          QString* errorOut, const QString& path, QgsFeedback* feedback,
+                          const ReferenceDownload& download) {
   constexpr int kPageSize = 1000;
   constexpr int kMaxPages = 10;
   QJsonObject rootDoc;
@@ -111,25 +112,25 @@ QString fetchRiverGeojson(const QgsRectangle& extent4326, const QString& apiKey,
             .arg(extent4326.xMaximum(), 0, 'f', 8)
             .arg(apiKey);
 
-    QgsBlockingNetworkRequest req;
     QNetworkRequest netReq{QUrl(url)};
     netReq.setHeader(QNetworkRequest::UserAgentHeader,
                      QStringLiteral("Mozilla/5.0 (Windows NT 10.0; Win64; x64) ka-hgis/0.3"));
     netReq.setRawHeader("Referer", "https://localhost");
-    if (req.get(netReq) != QgsBlockingNetworkRequest::NoError) {
-      if (errorOut) *errorOut = req.errorMessage();
-      return {};
-    }
-    const QByteArray body = req.reply().content();
+    QByteArray body;
+    if (!ReferenceMapPreparation::download(netReq, &body, errorOut, feedback, download)) return {};
+
     if (body.isEmpty() || !body.trimmed().startsWith('{')) {
       const QString reason = vworldExceptionText(body);
       if (errorOut)
         *errorOut = reason.isEmpty()
                         ? QStringLiteral("서버가 GeoJSON 대신 다른 응답을 보냈습니다. "
                                          "VWorld 인증키를 확인하세요.")
-                        : QStringLiteral("VWorld: %1").arg(reason);
+                        : (reason.contains(QLatin1String("KEY"), Qt::CaseInsensitive)
+                               ? QStringLiteral("VWorld 인증키가 거부되었습니다. 배경지도 설정에서 키를 확인한 뒤 다시 내려받으세요.")
+                               : QStringLiteral("VWorld가 하천 지도를 보내지 못했습니다. 인터넷 연결을 확인한 뒤 잠시 후 다시 내려받으세요."));
       return {};
     }
+    if (!ReferenceMapPreparation::validateFeatureCollection(body, errorOut)) return {};
     const QJsonDocument doc = QJsonDocument::fromJson(body);
     if (!doc.isObject()) {
       if (errorOut) *errorOut = QStringLiteral("VWorld 응답(JSON)을 해석하지 못했습니다.");
@@ -140,16 +141,16 @@ QString fetchRiverGeojson(const QgsRectangle& extent4326, const QString& apiKey,
     if (page == 0) rootDoc = obj;
     for (const QJsonValue& v : feats) allFeatures.append(v);
     if (feats.size() < kPageSize) break;  // 마지막 페이지
+    if (page + 1 == kMaxPages) {
+      if (errorOut) *errorOut = QStringLiteral("하천 데이터가 한 번에 받을 수 있는 양을 넘었습니다. 범위를 좁혀 다시 내려받으세요. 기존 지도는 유지됩니다.");
+      return {};
+    }
   }
 
   rootDoc.insert(QStringLiteral("features"), allFeatures);
-  const QString path = QDir::temp().filePath(QStringLiteral("ka-hgis-river.geojson"));
-  QFile f(path);
-  if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-    if (errorOut) *errorOut = QStringLiteral("임시 파일을 쓰지 못했습니다.");
-    return {};
-  }
-  f.write(QJsonDocument(rootDoc).toJson(QJsonDocument::Compact));
+  const QByteArray combined = QJsonDocument(rootDoc).toJson(QJsonDocument::Compact);
+  if (!ReferenceMapPreparation::validateCompleteFeatureCollection(combined, errorOut) ||
+      !ReferenceMapPreparation::writeResponse(path, combined, errorOut)) return {};
   return path;
 }
 
@@ -227,77 +228,86 @@ bool RiverMapService::applyRiverStyle(QgsVectorLayer* layer) {
 }
 
 QgsVectorLayer* RiverMapService::downloadAndAdd(QgsProject* project, QgsMapCanvas* canvas,
-                                                const QgsRectangle& extent5186,
-                                                const QString& apiKey,
-                                                const QString& outGpkgPath,
-                                                QString* errorOut) {
-  if (!project) {
-    if (errorOut) *errorOut = QStringLiteral("프로젝트가 없습니다.");
-    return nullptr;
-  }
+    const QgsRectangle& extent5186, const QString& apiKey, const QString& outGpkgPath,
+    QString* errorOut) {
+  if (!project) return nullptr;
+  const auto prepared = prepare(extent5186, apiKey, outGpkgPath, project->transformContext());
+  return addPrepared(project, canvas, prepared, errorOut);
+}
+
+PreparedReferenceMap RiverMapService::prepare(const QgsRectangle& extent5186,
+    const QString& apiKey, const QString& requestedBasePath,
+    const QgsCoordinateTransformContext& transformContext, QgsFeedback* feedback,
+    const ReferenceDownload& download) {
+  PreparedReferenceMap result;
+  result.tableName = QStringLiteral("river_map");
+  if (ReferenceMapPreparation::cancelled(result, feedback)) return result;
   if (apiKey.trimmed().isEmpty()) {
-    if (errorOut)
-      *errorOut = QStringLiteral(
+    result.error = QStringLiteral(
           "VWorld 인증키가 없습니다. 지도 탭의 배경지도 설정에서 키를 먼저 등록하세요.");
-    return nullptr;
+    return result;
   }
   const QgsRectangle fetch5186 =
       LayerOps::expandExtentToMaxSpan(extent5186, maxSpanMeters());
-  if (fetch5186.isEmpty() || fetch5186.width() > maxSpanMeters() ||
+  if (fetch5186.isEmpty() || !fetch5186.isFinite() || fetch5186.width() > maxSpanMeters() ||
       fetch5186.height() > maxSpanMeters()) {
-    if (errorOut)
-      *errorOut = QStringLiteral(
+    result.error = QStringLiteral(
           "범위가 너무 넓습니다. 지도를 조사지역(한 변 %1km 이하)으로 확대한 뒤 다시 "
           "내려받으세요.")
           .arg(maxSpanMeters() / 1000.0, 0, 'f', 0);
-    return nullptr;
+    return result;
   }
 
   QgsRectangle ext4326;
   try {
     const QgsCoordinateTransform tr(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")),
                                     QgsCoordinateReferenceSystem(QStringLiteral("EPSG:4326")),
-                                    QgsCoordinateTransformContext());
+                                    transformContext);
     ext4326 = tr.transformBoundingBox(fetch5186);
   } catch (const QgsException&) {
-    if (errorOut) *errorOut = QStringLiteral("좌표 변환에 실패했습니다.");
-    return nullptr;
+    result.error = QStringLiteral("좌표 변환에 실패했습니다.");
+    return result;
   }
 
+  if (!ReferenceMapPreparation::initializeStorage(result, requestedBasePath)) return result;
   QString netErr;
-  const QString jsonPath = fetchRiverGeojson(ext4326, apiKey, &netErr);
+  const QString jsonPath = fetchRiverGeojson(ext4326, apiKey, &netErr,
+      QDir(result.storage->path()).filePath(QStringLiteral("river.geojson")), feedback, download);
+  if (ReferenceMapPreparation::cancelled(result, feedback)) return result;
   if (jsonPath.isEmpty()) {
-    if (errorOut)
-      *errorOut = netErr.isEmpty() ? QStringLiteral("수계도를 내려받지 못했습니다.")
+    result.error = netErr.isEmpty() ? QStringLiteral("수계도를 내려받지 못했습니다.")
                                    : QStringLiteral("VWorld 서버 연결 실패: %1").arg(netErr);
-    return nullptr;
+    return result;
   }
 
   QgsVectorLayer src(jsonPath, QStringLiteral("part"), QStringLiteral("ogr"));
   if (!src.isValid() || src.featureCount() == 0) {
     QFile::remove(jsonPath);
-    if (errorOut)
-      *errorOut = QStringLiteral("이 범위에는 하천망 데이터가 없습니다. "
+    result.error = QStringLiteral("이 범위에는 하천망 데이터가 없습니다. "
                                  "(국가·지방하천이 없는 지역입니다)");
-    return nullptr;
+    return result;
   }
 
   // 4326 응답을 5186으로 재투영하며 메모리 레이어로 복사한다.
-  auto* merged = new QgsVectorLayer(QStringLiteral("MultiPolygon?crs=EPSG:5186"),
+  auto merged = std::make_unique<QgsVectorLayer>(QStringLiteral("MultiPolygon?crs=EPSG:5186"),
                                     QStringLiteral("merge"), QStringLiteral("memory"));
-  merged->dataProvider()->addAttributes(src.fields().toList());
+  if (!merged->dataProvider()->addAttributes(src.fields().toList())) {
+    result.error = QStringLiteral("하천 지도 항목을 준비하지 못했습니다. 다시 내려받으세요.");
+    return result;
+  }
   merged->updateFields();
 
   const QgsFields memFields = merged->fields();
   const QgsFields srcFields = src.fields();
   const QgsCoordinateTransform to5186(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:4326")),
                                       QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")),
-                                      QgsCoordinateTransformContext());
+                                      transformContext);
 
   QgsFeatureList batch;
   QgsFeatureIterator it = src.getFeatures();
   QgsFeature f;
   while (it.nextFeature(f)) {
+    if (ReferenceMapPreparation::cancelled(result, feedback)) return result;
     QgsFeature nf(memFields);
     for (int i = 0; i < srcFields.count(); ++i) {
       const int dst = memFields.indexOf(srcFields.at(i).name());
@@ -305,56 +315,60 @@ QgsVectorLayer* RiverMapService::downloadAndAdd(QgsProject* project, QgsMapCanva
     }
     QgsGeometry g = f.geometry();
     try {
-      if (g.transform(to5186) != Qgis::GeometryOperationResult::Success) continue;
+      if (g.transform(to5186) != Qgis::GeometryOperationResult::Success) {
+        result.error = QStringLiteral("하천 좌표를 변환하지 못했습니다. 기존 지도는 유지됩니다. 다시 내려받으세요.");
+        return result;
+      }
     } catch (const QgsException&) {
-      continue;
+      result.error = QStringLiteral("하천 좌표를 변환하지 못했습니다. 기존 지도는 유지됩니다. 다시 내려받으세요.");
+      return result;
     }
-    g.convertToMultiType();
+    if (g.isNull() || g.isEmpty() || !g.convertToMultiType()) {
+      result.error = QStringLiteral("하천 지도에 읽을 수 없는 구역이 있습니다. 기존 지도는 유지됩니다.");
+      return result;
+    }
     nf.setGeometry(g);
     batch.append(nf);
   }
   QFile::remove(jsonPath);
   if (batch.isEmpty()) {
-    delete merged;
-    if (errorOut) *errorOut = QStringLiteral("이 범위에는 하천망 데이터가 없습니다.");
-    return nullptr;
+    result.error = QStringLiteral("이 범위에는 하천망 데이터가 없습니다.");
+    return result;
   }
-  merged->dataProvider()->addFeatures(batch);
+  if (!merged->dataProvider()->addFeatures(batch)) {
+    result.error = QStringLiteral("하천 지도 일부를 준비하지 못했습니다. 기존 지도는 유지됩니다.");
+    return result;
+  }
   merged->updateExtents();
 
-  // 같은 GPKG를 쓰는 기존 레이어를 먼저 내려 파일 잠금을 푼다.
-  QStringList removeIds;
-  for (QgsMapLayer* old : project->mapLayers()) {
-    if (!old) continue;
-    if (old->name() == QString::fromUtf8(kLayerTitle) ||
-        old->name().startsWith(QString::fromUtf8(kLayerTitle) + QStringLiteral(" [")) ||
-        old->source().contains(outGpkgPath))
-      removeIds.append(old->id());
-  }
-  for (const QString& id : removeIds)
-    project->removeMapLayer(id);
+  ReferenceMapPreparation::saveVector(result, merged.get(), transformContext, feedback);
+  return result;
+}
 
-  QgsVectorFileWriter::SaveVectorOptions opts;
-  opts.driverName = QStringLiteral("GPKG");
-  opts.layerName = QStringLiteral("river_map");
-  opts.fileEncoding = QStringLiteral("UTF-8");
-  QString werr, nf2, nl2;
-  const auto we = QgsVectorFileWriter::writeAsVectorFormatV3(
-      merged, outGpkgPath, project->transformContext(), opts, &werr, &nf2, &nl2);
-  delete merged;
-  if (we != QgsVectorFileWriter::NoError) {
-    if (errorOut) *errorOut = QStringLiteral("수계도 저장 실패: %1").arg(werr);
+QgsVectorLayer* RiverMapService::addPrepared(QgsProject* project, QgsMapCanvas* canvas,
+    const PreparedReferenceMap& prepared, QString* errorOut) {
+  if (!project || !prepared.isReady()) {
+    if (errorOut) *errorOut = prepared.error;
     return nullptr;
   }
-
-  auto* layer = new QgsVectorLayer(outGpkgPath + QStringLiteral("|layername=river_map"),
+  QStringList removeIds;
+  for (QgsMapLayer* old : project->mapLayers()) {
+    if (old && (old->name() == QString::fromUtf8(kLayerTitle) ||
+        old->name().startsWith(QString::fromUtf8(kLayerTitle) + QStringLiteral(" ["))))
+      removeIds.append(old->id());
+  }
+  auto* layer = new QgsVectorLayer(prepared.gpkgPath + QStringLiteral("|layername=river_map"),
                                    QString::fromUtf8(kLayerTitle), QStringLiteral("ogr"));
   if (!layer->isValid()) {
     if (errorOut) *errorOut = QStringLiteral("저장한 수계도를 여는 데 실패했습니다.");
     delete layer;
     return nullptr;
   }
-  applyRiverStyle(layer);
+  if (!applyRiverStyle(layer)) {
+    if (errorOut) *errorOut = QStringLiteral("받은 지도에 필요한 항목이 없습니다. 기존 지도는 유지됩니다. 잠시 후 다시 내려받으세요.");
+    delete layer;
+    return nullptr;
+  }
   LayerOps::markReferenceLayer(layer);
   LayerOps::applyLegendCrsLabel(layer);
   if (!project->addMapLayer(layer, true)) {
@@ -362,6 +376,8 @@ QgsVectorLayer* RiverMapService::downloadAndAdd(QgsProject* project, QgsMapCanva
     if (errorOut) *errorOut = QStringLiteral("수계도 레이어를 프로젝트에 넣지 못했습니다.");
     return nullptr;
   }
+  prepared.retainFiles();
+  for (const QString& id : removeIds) project->removeMapLayer(id);
   LayerOps::placeInLegendGroup(project, layer, QStringLiteral("참조 지도"));
   LayerOps::applyThematicOverlayScaleRange(layer);
   if (canvas) {

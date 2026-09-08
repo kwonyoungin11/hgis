@@ -9,4 +9,4 @@ argument-hint: "<topic>"
 
 Read `.grok/rules/21-predev.md`.
 
-sequential-thinking + context7 → official QGIS+ArcGIS English docs → small plan → expert team + designers → TDD RED → then `src/`. Compile env: `C:\CMake\bin` + `. .\scripts\dev-env.ps1`.
+context7 (library docs) → STA if complexity ≥ 3 → official QGIS+ArcGIS English docs → small plan → expert team + designers → TDD RED → then `src/`. Compile env: `C:\CMake\bin` + `. .\scripts\dev-env.ps1`.

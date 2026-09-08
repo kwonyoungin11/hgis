@@ -35,6 +35,39 @@ void KaVertexEditTool::setLayer(QgsVectorLayer* layer) {
   m_layer = layer;
 }
 
+// 선택 도구가 고른 도형을 그대로 편집 대상으로 삼는다. 도형을 고르면 곧바로
+// 수정점이 보여야 하므로 여기서 마커까지 띄운다.
+void KaVertexEditTool::setTarget(QgsVectorLayer* layer, QgsFeatureId fid) {
+  if (m_layer == layer && m_fid == fid) {
+    showVertexMarkers();
+    return;
+  }
+  clearSelection();
+  m_layer = layer;
+  m_fid = fid;
+  if (m_layer && m_fid >= 0) showVertexMarkers();
+}
+
+void KaVertexEditTool::clearTarget() {
+  clearSelection();
+}
+
+void KaVertexEditTool::previewVertexMove(int index, const QgsPointXY& toLayerPt) {
+  if (index < 0) return;
+  QgsGeometry geom = selectedGeometry();
+  if (geom.isNull()) return;
+  const int count = geom.constGet() ? static_cast<int>(geom.constGet()->nCoordinates()) : 0;
+  geom.moveVertex(toLayerPt.x(), toLayerPt.y(), index);
+  // 면의 첫 점과 닫는 점은 같은 자리여야 한다. 하나를 옮기면 짝도 옮긴다.
+  if (geom.type() == Qgis::GeometryType::Polygon && count > 1) {
+    if (index == 0) geom.moveVertex(toLayerPt.x(), toLayerPt.y(), count - 1);
+    if (index == count - 1) geom.moveVertex(toLayerPt.x(), toLayerPt.y(), 0);
+  }
+  refreshRubber(geom);
+  if (index < m_marks.size() && m_marks[index])
+    m_marks[index]->setCenter(toMap(toLayerPt));
+}
+
 void KaVertexEditTool::activate() {
   if (canvas()) {
     m_savedMenuPolicy = canvas()->contextMenuPolicy();
@@ -333,18 +366,7 @@ void KaVertexEditTool::canvasMoveEvent(QgsMapMouseEvent* e) {
   if (!e) return;
   if (!m_dragging || m_dragIndex < 0) return;
   // 끄는 동안에는 고무줄과 표시만 움직인다. 커밋은 놓을 때 한 번.
-  QgsGeometry geom = selectedGeometry();
-  if (geom.isNull()) return;
-  const QgsPointXY to = toLayer(snapMapPoint(e));
-  const int count = geom.constGet() ? static_cast<int>(geom.constGet()->nCoordinates()) : 0;
-  geom.moveVertex(to.x(), to.y(), m_dragIndex);
-  if (geom.type() == Qgis::GeometryType::Polygon && count > 1) {
-    if (m_dragIndex == 0) geom.moveVertex(to.x(), to.y(), count - 1);
-    if (m_dragIndex == count - 1) geom.moveVertex(to.x(), to.y(), 0);
-  }
-  refreshRubber(geom);
-  if (m_dragIndex < m_marks.size() && m_marks[m_dragIndex])
-    m_marks[m_dragIndex]->setCenter(toMap(to));
+  previewVertexMove(m_dragIndex, toLayer(snapMapPoint(e)));
 }
 
 void KaVertexEditTool::canvasReleaseEvent(QgsMapMouseEvent* e) {

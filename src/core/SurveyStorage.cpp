@@ -6,6 +6,7 @@
 #include <QFileInfo>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QScopeGuard>
 #include <QSet>
 #include <QTemporaryDir>
 
@@ -231,9 +232,15 @@ AbsorbResult absorbExternalVectors(QgsProject* project, const QString& gpkgPath)
       continue;
     }
     used.insert(target);
+    const QString storedSource = QStringLiteral("%1|layername=%2").arg(gpkgPath, target);
+    QgsVectorLayer probe(storedSource, vl->name(), QStringLiteral("ogr"));
+    if (!probe.isValid() || probe.featureCount() != vl->featureCount()) {
+      r.failed << vl->name();
+      continue;
+    }
     // 스타일·라벨은 레이어 객체에 남아 있으므로 데이터소스만 사본으로 돌린다.
     const QString name = vl->name();
-    vl->setDataSource(QStringLiteral("%1|layername=%2").arg(gpkgPath, target), name,
+    vl->setDataSource(storedSource, name,
                       QStringLiteral("ogr"));
     if (vl->isValid())
       r.imported << name;
@@ -253,6 +260,17 @@ bool writeEmbedded(QgsProject* project, const QString& gpkgPath, QString* errorO
     return false;
   }
   const QString abs = QFileInfo(gpkgPath).absoluteFilePath();
+  const QString previousFileName = project->fileName();
+  const QString previousHome = project->presetHomePath();
+  const bool wasDirty = project->isDirty();
+  bool written = false;
+  const auto restoreOnFailure = qScopeGuard([&] {
+    if (!written) {
+      project->setFileName(previousFileName);
+      project->setPresetHomePath(previousHome);
+      project->setDirty(wasDirty);
+    }
+  });
   project->setFileName(abs);
   project->setPresetHomePath(QFileInfo(abs).absolutePath());
   const QString uri = projectUri(gpkgPath);
@@ -261,6 +279,7 @@ bool writeEmbedded(QgsProject* project, const QString& gpkgPath, QString* errorO
     return false;
   }
   LayerOps::saveGpkgDefaultStyles(project, abs);
+  written = true;
   return true;
 }
 

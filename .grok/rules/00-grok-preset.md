@@ -11,7 +11,7 @@ Cursor+Grok 브릿지(`.cursor/rules/grok-ka-hgis.mdc` → `.grok/NOW.md`)는 �
 | Built-in tools | default path | skip them in favor of MCP |
 | `lsp` (clangd) | after C++ edits | guess `Qgs*` signatures |
 | context7 MCP | unfamiliar `Qgs*` after in-repo miss | invent QGIS API |
-| sequential-thinking MCP | FEATURE/ARCHITECTURE / debug | one-line typo |
+| STA `sequential-thinking-agent` | complexity 3–5 (FEATURE/ARCHITECTURE/debug) | score 1–2, greeting, typo |
 | Skills | `/ka-experts` `/ka-graph` `/gis-verify` `/ka-hgis-verify` `/ka-drawing-studio` `/ka-submit-package` `/ka-georef-align` `/unlazy` | `/using-superpowers` |
 | Workflows | `ka-ship` `ka-council` `ka-verify` `feature-ship` | 40-agent graphs for one file |
 | Hooks | safety + one verify reminder | treat Stop as full CI |

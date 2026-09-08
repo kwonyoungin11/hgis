@@ -17,8 +17,26 @@ struct Tokens {
 
 const Tokens& tokens();
 
+struct ButtonMetrics {
+  int ribbonIconSize = 40;
+  int ribbonFontSize = 13;
+  int ribbonMinWidth = 64;
+  int ribbonHeight = 82;
+  int buttonPadding = 2;
+  int buttonSpacing = 4;
+  int scaleButtonHeight = 30;
+  int scaleButtonMinWidth = 54;
+  int scaleFontSize = 13;
+  int layoutIconSize = 32;
+  int layoutButtonHeight = 64;
+  int panelMargin = 8;
+};
+
+const ButtonMetrics& buttonMetrics();
+
 QPalette palette();
 QString embeddedStyleSheet();
+QString resolvedStyleSheet(const QString& sheet);
 QStringList styleSheetCandidates();
 QString resolveStyleSheetPath();
 QString loadStyleSheet();

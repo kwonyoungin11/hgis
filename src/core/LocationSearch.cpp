@@ -13,6 +13,13 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QStandardPaths>
+#include <cmath>
+
+static bool readCoordinate(const QJsonValue& value, double& coordinate) {
+  bool ok = value.isDouble();
+  coordinate = value.isString() ? value.toString().toDouble(&ok) : value.toDouble();
+  return ok && std::isfinite(coordinate);
+}
 
 static QString secretsPath() {
   const QStringList cands = {
@@ -37,7 +44,40 @@ static QString readKeyFromSecretsFile() {
   return k;
 }
 
-LocationSearch::LocationSearch(QObject* parent) : QObject(parent) {}
+LocationSearch::LocationSearch(QObject* parent)
+    : LocationSearch(std::make_unique<QNetworkAccessManager>(), 20000, parent) {}
+
+LocationSearch::LocationSearch(std::unique_ptr<QNetworkAccessManager> network, int timeoutMs,
+                               QObject* parent)
+    : QObject(parent), m_nam(network ? std::move(network)
+                                   : std::make_unique<QNetworkAccessManager>()),
+      m_timeoutMs(timeoutMs > 0 ? timeoutMs : 20000) {
+  m_deadline.setSingleShot(true);
+  connect(&m_deadline, &QTimer::timeout, this, [this]() {
+    cancel();
+    emit failed(QStringLiteral("위치 검색 서버의 응답 시간이 초과되었습니다. 인터넷 연결을 확인한 뒤 다시 검색하세요."));
+  });
+}
+
+LocationSearch::~LocationSearch() { cancel(); }
+
+void LocationSearch::cancel() {
+  m_deadline.stop();
+  m_pending = false;
+  if (m_reply) {
+    QNetworkReply* reply = m_reply.data();
+    m_reply.clear();
+    disconnect(reply, nullptr, this, nullptr);
+    reply->abort();
+    reply->deleteLater();
+  }
+}
+
+void LocationSearch::completeRequest() {
+  m_deadline.stop();
+  m_reply.clear();
+  m_pending = false;
+}
 
 QString LocationSearch::vworldApiKey() {
   const QByteArray env = qgetenv("VWORLD_API_KEY");
@@ -56,10 +96,12 @@ void LocationSearch::search(const QString& query) {
     return;
   }
   if (m_pending) {
-    emit failed(QStringLiteral("이전 검색이 진행 중입니다"));
+    emit failed(QStringLiteral("이전 위치를 검색하고 있습니다. 검색이 끝난 뒤 다시 검색하세요."));
     return;
   }
   m_pending = true;
+  // One deadline covers both providers; a slow fallback cannot extend it indefinitely.
+  m_deadline.start(m_timeoutMs);
   if (!vworldApiKey().isEmpty())
     searchVworld(q);
   else
@@ -81,13 +123,15 @@ void LocationSearch::searchNominatim(const QString& query) {
   req.setHeader(QNetworkRequest::UserAgentHeader,
                 QStringLiteral("ka-hgis/0.3 (Korean archaeology HGIS; contact: local)"));
   req.setRawHeader("Accept", "application/json");
+  req.setTransferTimeout(m_timeoutMs);
 
-  QNetworkReply* reply = m_nam.get(req);
+  QNetworkReply* reply = m_nam->get(req);
+  m_reply = reply;
   connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-    m_pending = false;
+    completeRequest();
     reply->deleteLater();
     if (reply->error() != QNetworkReply::NoError) {
-      emit failed(QStringLiteral("검색 네트워크 오류: %1").arg(reply->errorString()));
+      emit failed(QStringLiteral("위치 검색 서버에 연결하지 못했습니다. 인터넷 연결을 확인하고 잠시 후 다시 검색하세요."));
       return;
     }
     handleNominatim(reply->readAll());
@@ -97,7 +141,7 @@ void LocationSearch::searchNominatim(const QString& query) {
 void LocationSearch::handleNominatim(const QByteArray& body) {
   const QJsonDocument doc = QJsonDocument::fromJson(body);
   if (!doc.isArray()) {
-    emit failed(QStringLiteral("검색 응답 형식 오류"));
+    emit failed(QStringLiteral("위치 검색 서버가 올바른 결과를 보내지 않았습니다. 잠시 후 다시 검색하세요."));
     return;
   }
   QVector<LocationHit> hits;
@@ -107,15 +151,18 @@ void LocationSearch::handleNominatim(const QByteArray& body) {
     h.title = o.value(QStringLiteral("display_name")).toString();
     h.detail = o.value(QStringLiteral("type")).toString() + QStringLiteral(" / ")
                + o.value(QStringLiteral("class")).toString();
-    h.lat = o.value(QStringLiteral("lat")).toString().toDouble();
-    h.lon = o.value(QStringLiteral("lon")).toString().toDouble();
+    if (!readCoordinate(o.value(QStringLiteral("lat")), h.lat)
+        || !readCoordinate(o.value(QStringLiteral("lon")), h.lon)
+        || h.lat < -90 || h.lat > 90 || h.lon < -180 || h.lon > 180)
+      continue;
     const QJsonArray bb = o.value(QStringLiteral("boundingbox")).toArray();
     if (bb.size() == 4) {
-      h.south = bb.at(0).toString().toDouble();
-      h.north = bb.at(1).toString().toDouble();
-      h.west = bb.at(2).toString().toDouble();
-      h.east = bb.at(3).toString().toDouble();
-      h.hasBbox = true;
+      h.hasBbox = readCoordinate(bb.at(0), h.south)
+                  && readCoordinate(bb.at(1), h.north)
+                  && readCoordinate(bb.at(2), h.west)
+                  && readCoordinate(bb.at(3), h.east)
+                  && h.south >= -90 && h.north <= 90 && h.south < h.north
+                  && h.west >= -180 && h.east <= 180 && h.west < h.east;
     }
     if (!h.title.isEmpty()) hits.push_back(h);
   }
@@ -143,11 +190,12 @@ void LocationSearch::searchVworld(const QString& query) {
 
   QNetworkRequest req(url);
   req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("ka-hgis/0.3"));
-  QNetworkReply* reply = m_nam.get(req);
+  req.setTransferTimeout(m_timeoutMs);
+  QNetworkReply* reply = m_nam->get(req);
+  m_reply = reply;
   connect(reply, &QNetworkReply::finished, this, [this, reply, query]() {
     reply->deleteLater();
     if (reply->error() != QNetworkReply::NoError) {
-      m_pending = false;
       searchNominatim(query);
       return;
     }
@@ -156,11 +204,10 @@ void LocationSearch::searchVworld(const QString& query) {
     const QString status = root.value(QStringLiteral("response")).toObject()
                                .value(QStringLiteral("status")).toString();
     if (status != QLatin1String("OK")) {
-      m_pending = false;
       searchNominatim(query);
       return;
     }
-    m_pending = false;
+    completeRequest();
     handleVworld(body);
   });
 }
@@ -180,16 +227,14 @@ void LocationSearch::handleVworld(const QByteArray& body) {
     h.detail = addr.value(QStringLiteral("parcel")).toString();
     if (h.detail.isEmpty()) h.detail = addr.value(QStringLiteral("road")).toString();
     const QJsonObject pt = o.value(QStringLiteral("point")).toObject();
-    h.lon = pt.value(QStringLiteral("x")).toString().toDouble();
-    h.lat = pt.value(QStringLiteral("y")).toString().toDouble();
-    if (h.lon == 0 && h.lat == 0) {
-      h.lon = pt.value(QStringLiteral("x")).toDouble();
-      h.lat = pt.value(QStringLiteral("y")).toDouble();
-    }
-    if (!h.title.isEmpty() && h.lon != 0) hits.push_back(h);
+    if (!readCoordinate(pt.value(QStringLiteral("x")), h.lon)
+        || !readCoordinate(pt.value(QStringLiteral("y")), h.lat)
+        || h.lat < -90 || h.lat > 90 || h.lon < -180 || h.lon > 180)
+      continue;
+    if (!h.title.isEmpty()) hits.push_back(h);
   }
   if (hits.isEmpty())
-    emit failed(QStringLiteral("VWorld 결과 없음"));
+    emit failed(QStringLiteral("검색한 위치를 찾지 못했습니다. 주소·지번·장소 이름을 확인한 뒤 다시 검색하세요."));
   else
     emit finished(hits);
 }

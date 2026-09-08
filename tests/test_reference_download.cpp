@@ -1,0 +1,345 @@
+#include <QtTest>
+#include <QElapsedTimer>
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QTcpServer>
+#include <QTemporaryDir>
+#include <QUrlQuery>
+#include <QPointer>
+#include <QTcpSocket>
+#include <QThread>
+#include <QTimer>
+#include "app/KaReferenceDownloadJob.h"
+#include <qgsrasterlayer.h>
+#include <qgsrasterdataprovider.h>
+#include <qgsrasterblock.h>
+
+#include "core/GeologyMapService.h"
+#include "core/LayerOps.h"
+#include "core/RiverMapService.h"
+#include "core/SoilMapService.h"
+#include <qgsapplication.h>
+#include <qgscoordinatetransformcontext.h>
+#include <qgsfeedback.h>
+#include <qgsexception.h>
+#include <qgsnetworkaccessmanager.h>
+#include <qgsproject.h>
+#include <qgsrectangle.h>
+#include <qgsvectorlayer.h>
+
+class TestReferenceDownload : public QObject {
+  Q_OBJECT
+private slots:
+  void preparedFilesAreOwnedUntilAccepted();
+  void partialSoilFailurePreservesOriginal();
+  void riverPageLimitIsFailure();
+  void failedRegistrationPreservesOldLayer();
+  void cancelledPreparationCanRetry();
+  void noResponseTimesOut();
+  void workerCancellationLeavesGuiResponsive();
+  void geologyServerErrorIsNotNoDataFallback();
+  void trickleResponseHasAbsoluteDeadline();
+  void localCapabilitiesPreserveWmsEndpoint();
+  void qgisExceptionBecomesFailure();
+};
+
+namespace {
+const QgsRectangle kExtent(200000, 450000, 200100, 450100);
+QByteArray soilData() {
+  return R"({"type":"FeatureCollection","crs":{"type":"name","properties":{"name":"EPSG:5186"}},"features":[{"type":"Feature","properties":{"soil_type_geo":"04"},"geometry":{"type":"Polygon","coordinates":[[[200000,450000],[200010,450000],[200010,450010],[200000,450010],[200000,450000]]]}}]})";
+}
+QByteArray riverData() {
+  return QStringLiteral(R"({"type":"FeatureCollection","features":[{"type":"Feature","properties":{"riv_nm":"시험하천","riv_level":"국가하천"},"geometry":{"type":"Polygon","coordinates":[[[127,37],[127.001,37],[127.001,37.001],[127,37.001],[127,37]]]}}]})").toUtf8();
+}
+ReferenceDownload soilSuccess() {
+  return [](const QNetworkRequest& request, QByteArray* body, QString*, QgsFeedback*) {
+    const QUrlQuery query(request.url());
+    if (query.queryItemValue(QStringLiteral("resultType")) == QLatin1String("hits"))
+      *body = query.queryItemValue(QStringLiteral("typeNames")).endsWith(QLatin1String("SOIL_1"))
+          ? QByteArray("<FeatureCollection numberMatched=\"1\"/>")
+          : QByteArray("<FeatureCollection numberMatched=\"0\"/>");
+    else *body = soilData();
+    return true;
+  };
+}
+QByteArray wmsCapabilities(const QString& layerName, const QString& endpoint) {
+  return QStringLiteral(R"(<WMS_Capabilities version="1.3.0" xmlns="http://www.opengis.net/wms" xmlns:xlink="http://www.w3.org/1999/xlink">
+<Service><Name>WMS</Name><Title>Test</Title></Service><Capability>
+<Request><GetMap><Format>image/png</Format><DCPType><HTTP><Get><OnlineResource xlink:href="%1"/></Get></HTTP></DCPType></GetMap></Request>
+<Layer><Title>Root</Title><CRS>EPSG:4326</CRS><EX_GeographicBoundingBox><westBoundLongitude>124</westBoundLongitude><eastBoundLongitude>130</eastBoundLongitude><southBoundLatitude>33</southBoundLatitude><northBoundLatitude>39</northBoundLatitude></EX_GeographicBoundingBox>
+<Layer><Name>%2</Name><Title>Test layer</Title><CRS>EPSG:4326</CRS><BoundingBox CRS="EPSG:4326" minx="33" miny="124" maxx="39" maxy="130"/></Layer></Layer>
+</Capability></WMS_Capabilities>)").arg(endpoint, layerName).toUtf8();
+}
+QByteArray readFile(const QString& path) {
+  QFile file(path);
+  if (!file.open(QIODevice::ReadOnly)) return {};
+  return file.readAll();
+}
+}
+
+
+
+void TestReferenceDownload::preparedFilesAreOwnedUntilAccepted() {
+  QTemporaryDir directory;
+  const QString base = directory.filePath(QStringLiteral("soil.gpkg"));
+  QString generation;
+  {
+    const auto result = SoilMapService::prepare(kExtent, base, {}, nullptr, soilSuccess());
+    QVERIFY2(result.isReady(), qPrintable(result.error));
+    generation = result.gpkgPath;
+    QVERIFY(QFile::exists(generation));
+    QVERIFY(!QFile::exists(base));
+    QgsVectorLayer check(generation + QStringLiteral("|layername=soil_map"), {}, QStringLiteral("ogr"));
+    QVERIFY(check.isValid());
+    QCOMPARE(check.featureCount(), 1);
+    QCOMPARE(check.crs().authid(), QStringLiteral("EPSG:5186"));
+  }
+  QVERIFY(!QFile::exists(generation));
+}
+
+void TestReferenceDownload::partialSoilFailurePreservesOriginal() {
+  QTemporaryDir directory;
+  const QString base = directory.filePath(QStringLiteral("soil.gpkg"));
+  QFile original(base);
+  QVERIFY(original.open(QIODevice::WriteOnly));
+  original.write("original-reference");
+  original.close();
+  const auto success = soilSuccess();
+  const ReferenceDownload failSecond = [success](const QNetworkRequest& request, QByteArray* body,
+                                               QString* error, QgsFeedback* feedback) {
+    const QUrlQuery query(request.url());
+    if (query.queryItemValue(QStringLiteral("typeNames")).endsWith(QLatin1String("SOIL_2"))) {
+      *error = QStringLiteral("시험 서버 연결 실패");
+      return false;
+    }
+    return success(request, body, error, feedback);
+  };
+  const auto result = SoilMapService::prepare(kExtent, base, {}, nullptr, failSecond);
+  QCOMPARE(result.status, PreparedReferenceMap::Status::Failed);
+  QVERIFY(!result.error.isEmpty());
+  QCOMPARE(readFile(base), QByteArray("original-reference"));
+}
+
+void TestReferenceDownload::riverPageLimitIsFailure() {
+  QTemporaryDir directory;
+  QJsonObject page = QJsonDocument::fromJson(riverData()).object();
+  QJsonArray features;
+  const QJsonValue feature = page.value(QStringLiteral("features")).toArray().first();
+  for (int i = 0; i < 1000; ++i) features.append(feature);
+  page.insert(QStringLiteral("features"), features);
+  const QByteArray fullPage = QJsonDocument(page).toJson(QJsonDocument::Compact);
+  int calls = 0;
+  const auto result = RiverMapService::prepare(kExtent, QStringLiteral("TEST_KEY"),
+      directory.filePath(QStringLiteral("river.gpkg")), {}, nullptr,
+      [&](const QNetworkRequest&, QByteArray* body, QString*, QgsFeedback*) {
+        ++calls;
+        *body = fullPage;
+        return true;
+      });
+  QCOMPARE(calls, 10);
+  QCOMPARE(result.status, PreparedReferenceMap::Status::Failed);
+  QVERIFY(result.error.contains(QStringLiteral("양을 넘었습니다")));
+}
+
+void TestReferenceDownload::failedRegistrationPreservesOldLayer() {
+  QgsProject project;
+  auto* old = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5186"),
+      QStringLiteral("수계도(하천망)"), QStringLiteral("memory"));
+  project.addMapLayer(old);
+  const QString oldId = old->id();
+  PreparedReferenceMap broken;
+  broken.status = PreparedReferenceMap::Status::Ready;
+  broken.gpkgPath = QStringLiteral("/nonexistent/ka-hgis-test-reference.gpkg");
+  QString error;
+  QVERIFY(!RiverMapService::addPrepared(&project, nullptr, broken, &error));
+  QCOMPARE(project.mapLayer(oldId), old);
+  QCOMPARE(project.mapLayers().size(), 1);
+  QVERIFY(!error.isEmpty());
+}
+
+void TestReferenceDownload::cancelledPreparationCanRetry() {
+  QTemporaryDir directory;
+  const QString base = directory.filePath(QStringLiteral("river.gpkg"));
+  QgsFeedback feedback;
+  int calls = 0;
+  const auto cancelled = RiverMapService::prepare(kExtent, QStringLiteral("TEST_KEY"), base, {}, &feedback,
+      [&](const QNetworkRequest&, QByteArray*, QString*, QgsFeedback*) {
+        ++calls;
+        feedback.cancel();
+        return false;
+      });
+  QCOMPARE(cancelled.status, PreparedReferenceMap::Status::Cancelled);
+  QCOMPARE(calls, 1);
+  const auto retry = RiverMapService::prepare(kExtent, QStringLiteral("TEST_KEY"), base, {}, nullptr,
+      [](const QNetworkRequest&, QByteArray* body, QString*, QgsFeedback*) {
+        *body = riverData();
+        return true;
+      });
+  QVERIFY2(retry.isReady(), qPrintable(retry.error));
+  QgsProject project;
+  QString retainedPath = retry.gpkgPath;
+  QString error;
+  QVERIFY2(RiverMapService::addPrepared(&project, nullptr, retry, &error), qPrintable(error));
+  QVERIFY(QFile::exists(retainedPath));
+  QVERIFY(!QFile::exists(base));
+}
+
+void TestReferenceDownload::noResponseTimesOut() {
+  QTcpServer server;
+  QVERIFY(server.listen(QHostAddress::LocalHost));
+  QNetworkRequest request(QUrl(QStringLiteral("http://127.0.0.1:%1/map").arg(server.serverPort())));
+  QByteArray body;
+  QString error;
+  QElapsedTimer timer;
+  timer.start();
+  QVERIFY(!ReferenceMapPreparation::download(request, &body, &error, nullptr, {}, 100));
+  QVERIFY2(timer.elapsed() < 5000, qPrintable(QString::number(timer.elapsed())));
+  QVERIFY(!error.isEmpty());
+}
+
+void TestReferenceDownload::workerCancellationLeavesGuiResponsive() {
+  QTcpServer server;
+  QVERIFY(server.listen(QHostAddress::LocalHost));
+  const QNetworkRequest request(QUrl(QStringLiteral("http://127.0.0.1:%1/cancel").arg(server.serverPort())));
+  bool complete = false;
+  bool workerAffinity = false;
+  bool guiCallback = false;
+  PreparedReferenceMap::Status status = PreparedReferenceMap::Status::Failed;
+  auto* task = new KaReferenceDownloadJob(QStringLiteral("취소 검사"),
+      [&](QgsFeedback* feedback) {
+        workerAffinity = feedback->thread() == QThread::currentThread();
+        PreparedReferenceMap result;
+        QByteArray body;
+        ReferenceMapPreparation::download(request, &body, &result.error, feedback, {}, 1000);
+        ReferenceMapPreparation::cancelled(result, feedback);
+        return result;
+      }, [&](const PreparedReferenceMap& result) {
+        status = result.status;
+        guiCallback = QThread::currentThread() == QCoreApplication::instance()->thread();
+        complete = true;
+      });
+  const QPointer<KaReferenceDownloadJob> guard(task);
+  QgsApplication::taskManager()->addTask(task);
+  QTRY_VERIFY_WITH_TIMEOUT(server.hasPendingConnections(), 2000);
+  task->cancel();
+  QTRY_VERIFY_WITH_TIMEOUT(complete, 2500);
+  QCOMPARE(status, PreparedReferenceMap::Status::Cancelled);
+  QVERIFY(workerAffinity);
+  QVERIFY(guiCallback);
+  QTRY_VERIFY_WITH_TIMEOUT(guard.isNull(), 2000);
+}
+
+void TestReferenceDownload::trickleResponseHasAbsoluteDeadline() {
+  QTcpServer server;
+  QVERIFY(server.listen(QHostAddress::LocalHost));
+  QObject::connect(&server, &QTcpServer::newConnection, &server, [&] {
+    auto* socket = server.nextPendingConnection();
+    socket->write("HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\n");
+    auto* trickle = new QTimer(socket);
+    connect(trickle, &QTimer::timeout, socket, [socket] { socket->write("x"); });
+    trickle->start(20);
+  });
+  const QNetworkRequest request(QUrl(QStringLiteral("http://127.0.0.1:%1/trickle").arg(server.serverPort())));
+  bool complete = false;
+  QString error;
+  qint64 elapsed = 0;
+  auto* task = new KaReferenceDownloadJob(QStringLiteral("전체 시간 제한 검사"),
+      [&](QgsFeedback* feedback) {
+        PreparedReferenceMap result;
+        QByteArray body;
+        QElapsedTimer timer;
+        timer.start();
+        ReferenceMapPreparation::download(request, &body, &result.error, feedback, {}, 150);
+        elapsed = timer.elapsed();
+        return result;
+      }, [&](const PreparedReferenceMap& result) { error = result.error; complete = true; });
+  const QPointer<KaReferenceDownloadJob> guard(task);
+  QgsApplication::taskManager()->addTask(task);
+  QTRY_VERIFY_WITH_TIMEOUT(complete, 2000);
+  QVERIFY(elapsed < 1500);
+  QVERIFY(error.contains(QStringLiteral("응답이 늦어")));
+  QTRY_VERIFY_WITH_TIMEOUT(guard.isNull(), 2000);
+}
+
+void TestReferenceDownload::localCapabilitiesPreserveWmsEndpoint() {
+  QTcpServer server;
+  QVERIFY(server.listen(QHostAddress::LocalHost));
+  QTemporaryDir directory;
+  const QByteArray xml = wmsCapabilities(QStringLiteral("test"),
+      QStringLiteral("http://127.0.0.1:%1/maps?").arg(server.serverPort()));
+  const QString path = directory.filePath(QStringLiteral("capabilities.xml"));
+  QString error;
+  QVERIFY(ReferenceMapPreparation::writeResponse(path, xml, &error));
+  const QString uri = QStringLiteral("crs=EPSG:4326&format=image/png&layers=test&styles=&url=%1")
+      .arg(QString::fromLatin1(QUrl::toPercentEncoding(QUrl::fromLocalFile(path).toString())));
+  QgsRasterLayer layer(uri, QStringLiteral("local capabilities"), QStringLiteral("wms"));
+  QVERIFY2(layer.isValid(), qPrintable(layer.error().summary()));
+  QVERIFY(!server.hasPendingConnections());
+  QCOMPARE(layer.crs().authid(), QStringLiteral("EPSG:4326"));
+  QVERIFY(layer.extent().width() > 0);
+  // Metadata exposes the advertised GetMap endpoint despite the local capabilities URL.
+  QVERIFY(layer.htmlMetadata().contains(QStringLiteral("127.0.0.1:%1/maps").arg(server.serverPort())));
+}
+
+void TestReferenceDownload::geologyServerErrorIsNotNoDataFallback() {
+  QTemporaryDir directory;
+  const auto failed = GeologyMapService::prepare(kExtent, directory.filePath(QStringLiteral("geology.gpkg")), {},
+      nullptr, [](const QNetworkRequest&, QByteArray* body, QString*, QgsFeedback*) {
+        *body = "<ServiceExceptionReport>unavailable</ServiceExceptionReport>";
+        return true;
+      });
+  QCOMPARE(failed.status, PreparedReferenceMap::Status::Failed);
+  QVERIFY(failed.rasterUri.isEmpty());
+  const auto empty = GeologyMapService::prepare(kExtent, directory.filePath(QStringLiteral("geology.gpkg")), {},
+      nullptr, [](const QNetworkRequest& request, QByteArray* body, QString*, QgsFeedback*) {
+        if (request.url().query().contains(QLatin1String("GetCapabilities")))
+          *body = wmsCapabilities(QStringLiteral("geoOpen:L_50K_Geology_Map"), QStringLiteral("https://data.kigam.re.kr/geoserver/ows?"));
+        else *body = "{\"type\":\"FeatureCollection\",\"features\":[]}";
+        return true;
+      });
+  QVERIFY2(empty.isReady(), qPrintable(empty.error));
+  QVERIFY(!empty.rasterUri.isEmpty());
+  QVERIFY(!empty.warnings.isEmpty());
+  QVERIFY(empty.rasterUri.contains(QLatin1String("file")));
+  QVERIFY(QFile::exists(QDir(empty.storage->path()).filePath(QStringLiteral("capabilities.xml"))));
+  QgsRasterLayer check(empty.rasterUri, QStringLiteral("prepared local capabilities"), QStringLiteral("wms"));
+  QVERIFY(check.isValid());
+  QVERIFY(check.htmlMetadata().contains(QStringLiteral("https://data.kigam.re.kr/geoserver/ows")));
+}
+
+void TestReferenceDownload::qgisExceptionBecomesFailure() {
+  bool complete = false;
+  bool guiCallback = false;
+  PreparedReferenceMap captured;
+  auto* task = new KaReferenceDownloadJob(QStringLiteral("QGIS 예외 검사"),
+      [](QgsFeedback*) -> PreparedReferenceMap { throw QgsException(QStringLiteral("test")); },
+      [&](const PreparedReferenceMap& result) {
+        captured = result;
+        guiCallback = QThread::currentThread() == QCoreApplication::instance()->thread();
+        complete = true;
+      });
+  const QPointer<KaReferenceDownloadJob> guard(task);
+  QgsApplication::taskManager()->addTask(task);
+  QTRY_VERIFY_WITH_TIMEOUT(complete, 2000);
+  QCOMPARE(captured.status, PreparedReferenceMap::Status::Failed);
+  QVERIFY(!captured.error.isEmpty());
+  QVERIFY(guiCallback);
+  QTRY_VERIFY_WITH_TIMEOUT(guard.isNull(), 2000);
+}
+
+int main(int argc, char** argv) {
+  QgsApplication app(argc, argv, false);
+  const QString prefix = qEnvironmentVariable("QGIS_PREFIX_PATH", QStringLiteral("D:/OSGeo4W/apps/qgis-dev"));
+  QgsApplication::setPrefixPath(prefix, true);
+  QgsApplication::setPluginPath(prefix + QStringLiteral("/plugins"));
+  QgsApplication::initQgis();
+  QgsNetworkAccessManager::instance();
+  TestReferenceDownload tests;
+  const int result = QTest::qExec(&tests, argc, argv);
+  QgsApplication::exitQgis();
+  return result;
+}
+
+#include "test_reference_download.moc"

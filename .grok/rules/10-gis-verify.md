@@ -15,7 +15,7 @@ This product is a field HGIS on QGIS libraries (Architecture B). Map / layer / C
 
 ## Roles (Grok subagents)
 
-When the user reports a map problem, spawn these in parallel — read-only first — plus context7 / sequential-thinking:
+When the user reports a map problem, spawn these in parallel — read-only first — plus context7, and STA if complexity ≥ 3:
 
 - **qgis-api**: cookbook + `Qgs*` wiring (addMapLayer, destinationCrs, WMS URI, extent)
 - **gis-protocol**: VWorld/WMS/WMTS/XYZ live or documented request

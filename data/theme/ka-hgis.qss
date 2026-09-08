@@ -1,4 +1,4 @@
-/* ka-hgis field chrome — cool neutral gray + deep blue accent (pro GIS).
+/* ka-hgis field chrome — warm orange-beige paper + deep blue accent (pro GIS).
    SSOT: hex only; no image functions; no bare QWidget/QGraphicsView/QFrame. */
 
 /* ---- GIS exclude (contract 1). No fill/border color here. ---- */
@@ -9,7 +9,7 @@ QgsMapCanvas, QWidget#mapCanvas, QgsLayoutView, QWidget#layoutView {
 
 /* ---- Window face ---- */
 QMainWindow, QDialog, QMessageBox, QInputDialog, QColorDialog, QDialogButtonBox {
-  background: #F2F3F5;
+  background: #F7E8D3;
   color: #1F2328;
   font-family: "Malgun Gothic", "Segoe UI";
   font-size: 13px;
@@ -103,7 +103,7 @@ QPushButton:default:hover, QPushButton#btnAdjustDone:hover, QPushButton.primary:
   border-bottom: 2px solid #103E7A;
 }
 QPushButton:disabled {
-  background: #E9EBEE;
+  background: #EFDBC0;
   color: #A5ABB3;
   border-color: #D5D9DE;
 }
@@ -118,8 +118,8 @@ QToolButton {
   background: transparent;
   padding: 6px 10px;
 }
-QToolButton:hover { background: #F2F3F5; color: #1F2328; }
-QToolButton:pressed { background: #E9EBEE; }
+QToolButton:hover { background: #F7E8D3; color: #1F2328; }
+QToolButton:pressed { background: #EFDBC0; }
 QToolButton:checked {
   background: transparent;
   color: #124B94;
@@ -128,7 +128,7 @@ QToolButton:checked {
   font-weight: 700;
 }
 QToolButton:checked:hover {
-  background: #F2F3F5;
+  background: #F7E8D3;
   color: #124B94;
   border: 2px solid transparent;
   border-bottom: 2px solid #175AB0;
@@ -140,11 +140,11 @@ QToolButton#btnPrimary {
   border: 2px solid transparent;
 }
 QToolButton#btnPrimary:hover {
-  background: #F2F3F5;
+  background: #F7E8D3;
   color: #1F2328;
   border: 2px solid transparent;
 }
-QToolButton#btnPrimary:pressed { background: #E9EBEE; }
+QToolButton#btnPrimary:pressed { background: #EFDBC0; }
 QToolButton#btnPrimary:checked {
   background: transparent;
   color: #124B94;
@@ -178,7 +178,7 @@ QToolBar#studioToolbar QToolButton {
   color: #4C535B;
 }
 QToolBar#subToolbar {
-  background: #FBFCFD;
+  background: #FDF5EA;
   border-top: 1px solid #D5D9DE;
   border-bottom: 1px solid #D5D9DE;
 }
@@ -189,23 +189,23 @@ QToolBar#subToolbar QToolButton:checked {
   border-bottom: 2px solid #1E67C6;
 }
 QToolBar#mainToolbar {
-  spacing: 2px;
+  spacing: @buttonSpacing@px;
   padding: 4px 8px;
 }
 QToolBar#mainToolbar QToolButton {
-  min-width: 58px;
-  min-height: 58px;
-  padding: 3px 5px;
-  font-size: 11px;
+  min-width: 0;
+  min-height: 0;
+  padding: @buttonPadding@px;
+  font-size: @ribbonFontSize@px;
   background: transparent;
   border: 2px solid transparent;
   border-radius: 0;
 }
 QToolBar#mainToolbar QToolButton:hover {
-  background: #F2F3F5;
+  background: #F7E8D3;
   border: 2px solid transparent;
 }
-QToolBar#mainToolbar QToolButton:pressed { background: #E9EBEE; }
+QToolBar#mainToolbar QToolButton:pressed { background: #EFDBC0; }
 QToolBar#mainToolbar QToolButton::menu-indicator {
   image: none;
   width: 0px;
@@ -217,7 +217,7 @@ QToolBar#mainToolbar QToolButton:checked {
   border-bottom: 2px solid #1E67C6;
 }
 QToolBar#mainToolbar QToolButton:checked:hover {
-  background: #F2F3F5;
+  background: #F7E8D3;
   color: #124B94;
   border: 2px solid transparent;
   border-bottom: 2px solid #175AB0;
@@ -239,13 +239,14 @@ QLabel#ribbonGroupCaption {
   background: transparent;
 }
 QWidget#beginnerRibbon QToolButton {
-  min-width: 62px;
-  min-height: 58px;
-  margin: 2px 1px;
-  padding: 3px 2px;
+  /* Outer button dimensions come from KaTheme::ButtonMetrics in C++. */
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: @buttonPadding@px;
   background: #FFFFFF;
   color: #1F2328;
-  font-size: 11px;
+  font-size: @ribbonFontSize@px;
   border: 1px solid #D5D9DE;
   border-bottom: 2px solid #BAC2CC;
   border-radius: 8px;
@@ -259,8 +260,8 @@ QWidget#beginnerRibbon QToolButton:hover {
 QWidget#beginnerRibbon QToolButton:pressed {
   background: #EEF2F6;
   border-bottom: 1px solid #BAC2CC;
-  margin-top: 3px;
-  min-height: 57px;
+  margin-top: 0;
+  min-height: 0;
 }
 QWidget#beginnerRibbon QToolButton:checked {
   background: #FFFFFF;
@@ -315,7 +316,7 @@ QWidget#regionLocator QToolButton#regionChip:checked {
   border-radius: 8px;
 }
 QToolBar#studioToolRail {
-  background: #FBFCFD;
+  background: #FDF5EA;
   spacing: 1px;
   padding: 2px 4px;
   border: none;
@@ -328,6 +329,21 @@ QToolBar#studioToolRail QToolButton {
   font-size: 12px;
   color: #575E66;
 }
+QToolButton#layerCheckAllBtn {
+  background: #FDF5EA;
+  border: 1px solid #EDD8B9;
+  border-radius: 8px;
+  padding: 2px 10px;
+  color: #4C535B;
+  font-size: 12px;
+  font-weight: 600;
+}
+QToolButton#layerCheckAllBtn:hover {
+  border-color: #1E67C6;
+  color: #1E67C6;
+}
+QToolButton#layerCheckAllBtn:pressed { background: #EFDBC0; }
+QToolButton#layerCheckAllBtn:disabled { color: #A5ABB3; border-color: #EDD8B9; }
 QLabel#subToolbarCaption { color: #6E757D; font-weight: 600; padding: 0 8px; background: transparent; }
 
 /* ---- Fields ---- */
@@ -345,7 +361,7 @@ QLineEdit:focus, QComboBox:focus, QAbstractSpinBox:focus {
   border-color: #1E67C6;
 }
 QLineEdit:disabled, QComboBox:disabled, QAbstractSpinBox:disabled {
-  background: #F2F3F5;
+  background: #F7E8D3;
   color: #A5ABB3;
 }
 QToolBar#mainToolbar QToolButton#regionChip {
@@ -394,7 +410,7 @@ QComboBox QAbstractItemView, QColorDialog QAbstractSpinBox {
 
 /* ---- Trees / layer list ---- */
 QTreeView, QgsLayerTreeView, QListWidget, QTableWidget, QTableView {
-  background: #FBFCFD;
+  background: #FDF5EA;
   color: #1F2328;
   border: 1px solid #D5D9DE;
   border-radius: 8px;
@@ -414,17 +430,17 @@ QTableWidget::item:selected, QTableView::item:selected {
 }
 QTreeView::item:hover, QgsLayerTreeView::item:hover, QListWidget::item:hover,
 QTableWidget::item:hover, QTableView::item:hover {
-  background: #E9EBEE;
+  background: #EFDBC0;
 }
 QHeaderView::section {
-  background: #F2F3F5;
+  background: #F7E8D3;
   color: #6E757D;
   border: 1px solid #D5D9DE;
   padding: 6px 8px;
 }
 
 /* ---- Cards / docks / splitter ---- */
-QFrame#mapCard, QFrame#layersCard, QFrame#filesCard,
+QFrame#mapCard, QFrame#layersCard, QFrame#filesCard, QFrame#studioFilesPanel,
 QFrame#itemInspector, QFrame#mapAdjustBar, QFrame#drawerCard,
 QFrame#studioLeftCol, QFrame#studioBottomBar,
 QFrame#terrainLayersCard, QFrame#terrainFilesCard {
@@ -445,10 +461,10 @@ QFrame#studioLeftCol {
   border-radius: 0px;
   border: none;
   border-right: 1px solid #D5D9DE;
-  background: #F2F3F5;
+  background: #F7E8D3;
 }
 QWidget#terrain3dPanel {
-  background: #F2F3F5;
+  background: #F7E8D3;
   border-right: 1px solid #D5D9DE;
 }
 QFrame#studioBottomBar {
@@ -464,10 +480,11 @@ QWidget#sampleStrip {
   border-bottom: 1px solid #D5D9DE;
 }
 QToolButton.sampleTile {
-  min-width: 56px;
-  min-height: 54px;
-  padding: 4px 6px;
-  font-size: 11px;
+  /* C++ uses layoutButtonHeight and scaleButtonMinWidth for outer size. */
+  min-width: 0;
+  min-height: 0;
+  padding: @buttonPadding@px;
+  font-size: @scaleFontSize@px;
   font-weight: 600;
   color: #1F2328;
   background: #FFFFFF;
@@ -475,7 +492,7 @@ QToolButton.sampleTile {
   border-radius: 8px;
 }
 QToolButton.sampleTile:hover {
-  background: #E9EBEE;
+  background: #EFDBC0;
   border-color: #C3C8CF;
   color: #1F2328;
 }
@@ -490,9 +507,11 @@ QToolButton.sampleTile:checked:hover {
   border-color: #175AB0;
 }
 QToolButton#scaleChip {
-  min-width: 56px;
-  min-height: 36px;
-  font-size: 12px;
+  /* C++ uses scaleButtonHeight and scaleButtonMinWidth for outer size. */
+  min-width: 0;
+  min-height: 0;
+  padding: @buttonPadding@px;
+  font-size: @scaleFontSize@px;
   font-weight: 700;
   color: #1F2328;
   background: #FFFFFF;
@@ -516,6 +535,15 @@ QLabel#emptyState {
 }
 /* ---- View tabs (홈/지도) ---- */
 QTabWidget::pane { border: none; }
+/* ---- 바깥 라운드 ----
+   탭 안쪽 면을 조금 들여 놓아 창의 베이지 바탕이 테두리처럼 보이게 하고,
+   그 위에 얹히는 본문 판을 둥글게 깎는다. 배경만 바뀌며 배치는 그대로다. */
+QTabWidget#viewTabs::pane { border: none; margin: 0 8px 8px 8px; }
+QWidget#centralRoot, QWidget#startPage {
+  background: #FDF5EA;
+  border: 1px solid #EDD8B9;
+  border-radius: 14px;
+}
 QTabBar { background: transparent; font-weight: 600; }
 QTabBar::tab {
   background: transparent;
@@ -527,20 +555,54 @@ QTabBar::tab {
 }
 QTabBar::tab:selected { color: #124B94; border-bottom: 2px solid #1E67C6; }
 /* ---- Left Dock (레이어 위 / 파일함 아래 동시 노출) ---- */
-QSplitter#leftSplit {
+QSplitter#leftSplit,
+QSplitter#studioLeftSplit,
+QSplitter#studioMainSplit {
   background: transparent;
 }
-QSplitter#leftSplit::handle {
+QSplitter#leftSplit::handle,
+QSplitter#studioLeftSplit::handle {
   background: #D5D9DE;
   height: 6px;
   margin: 2px 12px;
   border-radius: 3px;
 }
-QSplitter#leftSplit::handle:hover {
+QSplitter#studioMainSplit::handle {
+  background: #D5D9DE;
+  width: 6px;
+  margin: 12px 2px;
+  border-radius: 3px;
+}
+QSplitter#leftSplit::handle:hover,
+QSplitter#studioLeftSplit::handle:hover,
+QSplitter#studioMainSplit::handle:hover {
   background: #1E67C6;
 }
+QFrame#layerOpacityRail {
+  background: rgba(255, 255, 255, 230);
+  border: 1px solid #D5D9DE;
+  border-radius: 8px;
+}
+QFrame#layerOpacityRail QLabel {
+  color: #475569;
+  font-size: 11px;
+  font-weight: 700;
+}
+QFrame#layerOpacityRail QSlider::groove:vertical {
+  background: #E5E7EB;
+  width: 6px;
+  border-radius: 3px;
+}
+QFrame#layerOpacityRail QSlider::handle:vertical {
+  background: #1E67C6;
+  border: 1px solid #175AB0;
+  height: 14px;
+  margin: 0 -5px;
+  border-radius: 7px;
+}
 QFrame#layersCard,
-QFrame#filesCard {
+QFrame#filesCard,
+QFrame#studioFilesPanel {
   background: #FFFFFF;
   border: 1px solid #D5D9DE;
   border-bottom: 2px solid #BAC2CC;
@@ -555,7 +617,7 @@ QFrame#filesInner {
 }
 
 /* ---- Side panel buttons (레이어·파일함) ---- */
-QFrame#layersCard QToolButton, QFrame#filesCard QToolButton {
+QFrame#layersCard QToolButton {
   font-size: 12px;
   padding: 4px 10px;
   border: 1px solid #D5D9DE;
@@ -564,20 +626,33 @@ QFrame#layersCard QToolButton, QFrame#filesCard QToolButton {
   border-radius: 6px;
   color: #4C535B;
 }
-QFrame#layersCard QToolButton:hover, QFrame#filesCard QToolButton:hover {
+QFrame#filesCard QToolButton,
+QFrame#studioFilesPanel QToolButton {
+  padding: 4px 6px;
+  border: 1px solid #D5D9DE;
+  border-bottom: 2px solid #BAC2CC;
+  background: #FFFFFF;
+  border-radius: 6px;
+  color: #4C535B;
+}
+QFrame#layersCard QToolButton:hover,
+QFrame#filesCard QToolButton:hover,
+QFrame#studioFilesPanel QToolButton:hover {
   background: #F8FAFC;
   border-color: #C3C8CF;
   border-bottom: 2px solid #ACB5C0;
   color: #1F2328;
 }
-QFrame#layersCard QToolButton:pressed, QFrame#filesCard QToolButton:pressed {
+QFrame#layersCard QToolButton:pressed,
+QFrame#filesCard QToolButton:pressed,
+QFrame#studioFilesPanel QToolButton:pressed {
   background: #E8F0FA;
   border-bottom: 1px solid #BAC2CC;
 }
 
 QDockWidget { border: 1px solid #D5D9DE; color: #1F2328; titlebar-close-icon: none; }
 QDockWidget::title {
-  background: #F2F3F5;
+  background: #F7E8D3;
   color: #1F2328;
   padding: 8px;
   border-bottom: 1px solid #D5D9DE;
@@ -630,7 +705,7 @@ QMenu::item:selected { background: #E8F0FA; color: #1F2328; }
 QMenu::item:disabled { color: #A5ABB3; }
 
 QStatusBar {
-  background: #F2F3F5;
+  background: #F7E8D3;
   color: #6E757D;
   font-weight: 600;
   border-top: 1px solid #D5D9DE;
@@ -639,7 +714,7 @@ QStatusBar QLabel { color: #6E757D; }
 
 /* ---- Status bar instrument panel ---- */
 QStatusBar#kaStatusBar {
-  background: #FBFCFD;
+  background: #FDF5EA;
   color: #575E66;
   min-height: 34px;
   padding: 0 6px;
@@ -708,7 +783,7 @@ QToolTip {
   font-size: 13px;
 }
 
-QScrollBar:vertical, QScrollBar:horizontal { background: #F2F3F5; border: none; }
+QScrollBar:vertical, QScrollBar:horizontal { background: #F7E8D3; border: none; }
 QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
   background: #C3C8CF;
   border: none;

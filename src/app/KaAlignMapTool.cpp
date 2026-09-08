@@ -137,6 +137,9 @@ bool KaAlignMapTool::beginLayer(QgsMapLayer* layer, const QgsCoordinateReference
         return false;
       }
       LayerOps::markReferenceLayer(mem);
+      if (vl->customProperty(QStringLiteral("ka_hgis/imported_reference")).toBool() ||
+          GeorefService::isCadPath(vl->source().section(QLatin1Char('|'), 0, 0)))
+        mem->setCustomProperty(QStringLiteral("ka_hgis/imported_reference"), true);
       LayerOps::applySimpleVectorStyle(mem, QColor(0, 0, 0, 0), QColor(0, 0, 0), 0.2, 3.5, true,
                                        false);
       if (QgsProject* proj = QgsProject::instance()) {
@@ -362,7 +365,7 @@ bool KaAlignMapTool::applyMove(QString* errorOut) {
     if (errorOut) *errorOut = QStringLiteral("점을 2개 이상 찍은 뒤 「이동」을 누르세요");
     return false;
   }
-  m_affine = GeorefService::fromPairs(m_pairs);
+  m_affine = GeorefService::fromPairs(m_pairs, m_raster);
   if (!m_affine.valid) {
     if (errorOut) *errorOut = QStringLiteral("점 배치로 변환을 만들 수 없습니다");
     return false;
@@ -376,6 +379,8 @@ bool KaAlignMapTool::applyMove(QString* errorOut) {
     if (!GeorefService::persistAlignedRaster(rl, m_affine, workCrs(), errorOut)) {
       const QString src = rl->source();
       const QString name = rl->name();
+      const bool importedReference =
+          rl->customProperty(QStringLiteral("ka_hgis/imported_reference")).toBool();
       if (!QFile::exists(GeorefService::worldFilePathFor(src)))
         return false;
       QgsProject* proj = QgsProject::instance();
@@ -392,6 +397,8 @@ bool KaAlignMapTool::applyMove(QString* errorOut) {
       }
       if (workCrs().isValid()) neu->setCrs(workCrs());
       LayerOps::markReferenceLayer(neu);
+      if (importedReference)
+        neu->setCustomProperty(QStringLiteral("ka_hgis/imported_reference"), true);
       LayerOps::setAlignPending(neu, false);
       LayerOps::applyLegendCrsLabel(neu);
       GeorefService::styleAlignedRasterOverlay(neu);
@@ -432,7 +439,7 @@ bool KaAlignMapTool::saveAligned(QString* savedPath, QString* errorOut) {
     return false;
   }
   if (m_pairs.size() >= 2) {
-    m_affine = GeorefService::fromPairs(m_pairs);
+    m_affine = GeorefService::fromPairs(m_pairs, m_raster);
     applyPreview();
   }
   if (m_raster) {

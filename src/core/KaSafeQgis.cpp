@@ -4,8 +4,12 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
+#include <QSaveFile>
+#include <QScopeGuard>
 #include <QSet>
 #include <QTemporaryDir>
+#include <QTemporaryFile>
+#include <exception>
 
 #include <qgis.h>
 #include <qgsproject.h>
@@ -64,62 +68,127 @@ QString kaProjectBackupPath(const QString& path) {
 }
 
 bool kaWriteQgisProjectAtomic(QgsProject* project, const QString& path, QString* errorOut) {
+  if (errorOut) errorOut->clear();
   auto fail = [&](const QString& m) {
     if (errorOut) *errorOut = m;
     return false;
   };
   if (!project || path.isEmpty()) return fail(QStringLiteral("저장 경로가 없습니다."));
-  const QFileInfo fi(path);
-  QDir().mkpath(fi.absolutePath());
-  const QString finalPath = fi.absoluteFilePath();
-  // Same folder, suffix preserved. Same folder because QgsPathResolver writes relative
-  // datasources against the project file's directory and rename must stay on one volume;
-  // suffix preserved because QgsZipUtils::isZipFile keys on ".qgz" — a temp named
-  // "x.qgz.writing" is written as plain XML and renaming it to .qgz yields a file that
-  // QgsProject::read can no longer open.
-  const QString tmpPath = siblingWithTag(fi, QStringLiteral(".ka-writing"));
-  const QString bakPath = kaProjectBackupPath(finalPath);
-
-  QFile::remove(tmpPath);
-  project->setFileName(tmpPath);
-  const bool wrote = project->write();
-  project->setFileName(finalPath);  // keep the project pointing at the real file
-  if (!wrote) {
-    QFile::remove(tmpPath);
-    return fail(QStringLiteral("프로젝트를 쓰지 못했습니다: %1").arg(project->error()));
-  }
-  // A zero-byte or missing temp file means the write claimed success but produced
-  // nothing. Renaming that over a good project is how the file got destroyed.
-  const QFileInfo tmpFi(tmpPath);
-  if (!tmpFi.exists() || tmpFi.size() <= 0) {
-    QFile::remove(tmpPath);
-    return fail(QStringLiteral("저장 결과가 비어 있어 기존 파일을 그대로 두었습니다."));
-  }
-  // Prove it opens before it replaces a good file. Layers are not resolved, so this
-  // only checks that the container and XML are intact — which is what silently broke.
-  {
-    QgsProject probe;
-    if (!probe.read(tmpPath, Qgis::ProjectReadFlag::DontResolveLayers |
-                                 Qgis::ProjectReadFlag::DontLoadLayouts)) {
-      QFile::remove(tmpPath);
-      return fail(QStringLiteral("저장한 파일을 다시 열 수 없어 기존 파일을 그대로 두었습니다."));
+  const QString originalFileName = project->fileName();
+  const bool originalDirty = project->isDirty();
+  bool completed = false;
+  const auto restoreProjectOnFailure = qScopeGuard([&] {
+    if (!completed) {
+      project->setFileName(originalFileName);
+      project->setDirty(originalDirty);
     }
-  }
-
-  if (QFile::exists(finalPath)) {
-    QFile::remove(bakPath);
-    if (!QFile::rename(finalPath, bakPath)) {
-      // Cannot step the old file aside — better to keep it than to risk a partial swap.
+  });
+  try {
+    const QFileInfo fi(path);
+    if (!QDir().mkpath(fi.absolutePath()))
+      return fail(QStringLiteral("작업 화면의 저장 폴더를 만들 수 없습니다. 쓰기 가능한 다른 폴더를 선택해 주세요."));
+    const QString finalPath = fi.absoluteFilePath();
+    // Same folder, suffix preserved. Same folder because QgsPathResolver writes relative
+    // datasources against the project file's directory and rename must stay on one volume;
+    // suffix preserved because QgsZipUtils::isZipFile keys on ".qgz" — a temp named
+    // "x.qgz.writing" is written as plain XML and renaming it to .qgz yields a file that
+    // QgsProject::read can no longer open.
+    QTemporaryFile temporary(siblingWithTag(fi, QStringLiteral(".ka-writing-XXXXXX")));
+    if (!temporary.open())
+      return fail(
+          QStringLiteral("작업 화면의 임시 파일을 만들 수 없습니다. 남은 공간과 폴더의 쓰기 권한을 확인해 주세요."));
+    const QString tmpPath = temporary.fileName();
+    temporary.close();
+    const auto removeTemporaryFiles = qScopeGuard([&] {
       QFile::remove(tmpPath);
-      return fail(QStringLiteral("기존 파일을 백업하지 못해 저장을 멈췄습니다: %1").arg(finalPath));
+      QFile::remove(tmpPath + QLatin1Char('~'));
+    });
+    // Reserve a unique sibling name, but leave no empty archive for QGIS/libzip
+    // to interpret as an existing corrupt QGZ. The scope guard owns the file
+    // subsequently created by project->write(), including its failure paths.
+    if (!temporary.remove())
+      return fail(QStringLiteral("작업 화면의 임시 파일을 준비하지 못했습니다. 저장 폴더의 쓰기 권한을 확인한 뒤 다시 저장해 주세요."));
+    temporary.setAutoRemove(false);
+    const QString bakPath = kaProjectBackupPath(finalPath);
+
+    project->setFileName(tmpPath);
+    const bool wrote = project->write();
+    if (!wrote) {
+      return fail(
+          QStringLiteral(
+              "작업 화면을 저장하지 못했습니다. 기존 파일은 그대로입니다. 남은 공간과 쓰기 권한을 확인해 주세요.\n%1")
+              .arg(project->error()));
     }
+    // A zero-byte or missing temp file means the write claimed success but produced
+    // nothing. Renaming that over a good project is how the file got destroyed.
+    const QFileInfo tmpFi(tmpPath);
+    if (!tmpFi.exists() || tmpFi.size() <= 0) {
+      return fail(QStringLiteral("저장 결과가 비어 있어 기존 파일을 그대로 두었습니다."));
+    }
+    // Prove it opens before it replaces a good file. Layers are not resolved, so this
+    // only checks that the container and XML are intact — which is what silently broke.
+    {
+      QgsProject probe;
+      if (!probe.read(tmpPath, Qgis::ProjectReadFlag::DontResolveLayers | Qgis::ProjectReadFlag::DontLoadLayouts)) {
+        return fail(QStringLiteral("저장한 파일을 다시 열 수 없어 기존 파일을 그대로 두었습니다."));
+      }
+    }
+
+    const auto atomicCopy = [](const QString& source, const QString& target, QString* detail) {
+      QFile input(source);
+      QSaveFile output(target);
+      output.setDirectWriteFallback(false);
+      if (!input.open(QIODevice::ReadOnly)) {
+        *detail = input.errorString();
+        return false;
+      }
+      if (!output.open(QIODevice::WriteOnly)) {
+        *detail = output.errorString();
+        return false;
+      }
+      while (!input.atEnd()) {
+        const QByteArray bytes = input.read(1024 * 1024);
+        if (input.error() != QFileDevice::NoError) {
+          *detail = input.errorString();
+          return false;
+        }
+        if (output.write(bytes) != bytes.size()) {
+          *detail = output.errorString();
+          return false;
+        }
+      }
+      if (!output.commit()) {
+        *detail = output.errorString();
+        return false;
+      }
+      return true;
+    };
+    QString detail;
+    if (QFile::exists(finalPath)) {
+      // Preserve a complete previous generation without moving the live file away.
+      if (!atomicCopy(finalPath, bakPath, &detail)) {
+        return fail(QStringLiteral("이전 작업 화면의 백업을 만들지 못해 저장을 멈췄습니다. 기존 파일은 그대로입니다. "
+                                   "저장 폴더의 공간과 권한을 확인해 주세요.\n%1")
+                        .arg(detail));
+      }
+    }
+    project->setFileName(finalPath);
+    if (!atomicCopy(tmpPath, finalPath, &detail)) {
+      return fail(QStringLiteral("작업 화면 파일을 교체하지 못했습니다. 기존 파일은 그대로입니다. 파일을 사용하는 다른 "
+                                 "프로그램을 닫고 다시 저장해 주세요.\n%1")
+                      .arg(detail));
+    }
+    completed = true;
+    return true;
+  } catch (const std::exception& ex) {
+    return fail(
+        QStringLiteral(
+            "작업 화면 저장 중 오류가 발생했습니다. 작업을 유지한 채 다시 저장하거나 다른 이름으로 저장해 주세요.\n%1")
+            .arg(QString::fromUtf8(ex.what())));
+  } catch (...) {
+    return fail(QStringLiteral(
+        "작업 화면 저장 중 오류가 발생했습니다. 작업을 유지한 채 다시 저장하거나 다른 이름으로 저장해 주세요."));
   }
-  if (!QFile::rename(tmpPath, finalPath)) {
-    if (QFile::exists(bakPath)) QFile::rename(bakPath, finalPath);  // put it back
-    QFile::remove(tmpPath);
-    return fail(QStringLiteral("저장 파일을 바꿔 넣지 못했습니다: %1").arg(finalPath));
-  }
-  return true;
 }
 
 bool kaSafeClearQgisProject(QgsProject* project) {

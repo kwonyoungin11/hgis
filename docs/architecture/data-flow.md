@@ -1,6 +1,9 @@
 ﻿# ka-hgis data-flow graph (production sprint)
 
 ## Critical path (P0)
+
+> Historical sprint overview. The 7-step UI, attribute gate and initial five-layer schema describe that sprint; they are not instructions to restore those flows. For current UI, lazy legend creation, explicit saving and supported domain keys, read `AGENTS.md`, `.codex/NOW.md` and current handoffs. Follow actual callers when changing the critical path.
+
 ```mermaid
 flowchart LR
   Boot[KaApplication.boot] --> UI[MainWindow 7-step]

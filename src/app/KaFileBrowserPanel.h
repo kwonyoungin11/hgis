@@ -49,9 +49,11 @@ public:
 
 protected:
   void resizeEvent(QResizeEvent* event) override;
+  void showEvent(QShowEvent* event) override;
 
 private:
   void updateButtonLayout(int width);
+  void fitShortcutFonts(int width);
 
   KaFileListView* m_list = nullptr;
   QString m_path;

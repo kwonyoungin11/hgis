@@ -2,9 +2,9 @@
 name: orchestrator-protocol
 description: >
   Always-on 3-step orchestrator for every user request, every prompt, every task.
-  Forces context7 MCP, sequential-thinking MCP, prompt rewrite, parallel expert
-  agents, and matching skills. Use on any message, question, bug, feature, review,
-  or when the user runs /orchestrator-protocol.
+  Forces context7 when library docs are needed, STA on complexity 3+, prompt
+  rewrite, parallel expert agents, and matching skills. Use on any message,
+  question, bug, feature, review, or when the user runs /orchestrator-protocol.
 ---
 
 # Orchestrator protocol
@@ -13,10 +13,9 @@ Run on **every** user request. Do not wait to be asked.
 
 ## 1. Tools
 
-Call `search_tool` then `use_tool` for:
-
-- `context7` — current library/API docs
-- `sequential-thinking` — decompose the request
+- `context7` — current library/API docs (skip for greetings / no-library asks)
+- Complexity 1–2: parent CoT only. Do **not** call `sequentialthinking` MCP.
+- Complexity 3–5: `Task` `sequential-thinking-agent` (STA). MCP thinking is optional inside STA.
 
 ## 2. Rewrite
 

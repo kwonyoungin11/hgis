@@ -68,8 +68,11 @@ public:
 
   static int ensureDefaultLayouts(QgsProject* project);
   static int rebuildDefaultLayouts(QgsProject* project);
-  // 도면만들기 user_sheet: ka_map, scale>0, 레이어 있음.
-  static bool isComposedStudioSheet(QgsProject* project);
+  /// 사용자가 직접 도면만들기(KaDrawingStudio) 또는 단면도에서 배치한 조판이 실질적인 내용을 갖는지.
+  /// 유효한 축척(scale > 0), 유한한 지도 범위, 비-참조 유효 레이어(피처 수 > 0인 벡터 또는 유효한 래스터)를 점검한다.
+  /// layout_blank 등 더미 메모리 레이어 및 참조 지도는 명시적으로 배제한다.
+  static bool isComposedStudioSheet(QgsProject* project,
+                                   const QString& layoutName = QStringLiteral("user_sheet"));
   static QString exportLayoutPdf(QgsProject* project, const QString& layoutName,
                                  const QString& pdfPath, QString* errorOut = nullptr);
   static QStringList defaultLayoutNames();

@@ -4,6 +4,10 @@
 
 Accepted (user confirmed B)
 
+### Current implementation note (2026-09-08)
+
+Architecture B remains accepted. The C++17 / LTR package names below record the original baseline, not the current build prescription. Current `CMakeLists.txt` uses C++20, Qt6 and OSGeo4W `apps/qgis-dev`; `scripts/dev-env.ps1` discovers the installed SDK. Follow the current build and preserve its ABI. Do not downgrade the standard or switch SDK distributions to match this historical text.
+
 ## Context
 
 - ArcGIS 라이선스 종료 → 필드 고고학 도면·문화재 제출 워크플로 대체 필요

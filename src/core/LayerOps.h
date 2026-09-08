@@ -14,6 +14,8 @@ class QgsRectangle;
 class QgsPointXY;
 class QgsFeature;
 class QgsLayerTreeGroup;
+class QgsGeometry;
+class QgsCoordinateReferenceSystem;
 
 class LayerOps {
 public:
@@ -21,6 +23,7 @@ public:
   static constexpr const char* kGroupReference = "참조 지도";
   static constexpr const char* kPropLayerKey = "ka_hgis/layer_key";
   static constexpr const char* kPropLayerRole = "ka_hgis/layer_role";
+  static constexpr const char* kAdminEmdKey = "admin_emd";
   static constexpr const char* kRoleSurvey = "survey";
   static constexpr const char* kRoleReference = "reference";
   static constexpr const char* kPropAlignPending = "ka_hgis/align_pending";
@@ -44,8 +47,11 @@ public:
     Osm
   };
 
+  // addToMap: 재투영 결과를 범례에 올릴지. 제출용 5179는 false — 작업 CRS 지도에
+  // 업로드 레이어를 섞지 않는다. project 는 변환 맥락용으로 그대로 넘긴다.
   static QString reprojectVectorLayer(QgsVectorLayer* layer, const QString& targetCrsAuthId,
-                                      const QString& outPath, QgsProject* project, QString* errorOut = nullptr);
+                                      const QString& outPath, QgsProject* project,
+                                      QString* errorOut = nullptr, bool addToMap = true);
 
   static int ensureControlPointQualityFields(QgsVectorLayer* controlPoints);
 
@@ -63,6 +69,12 @@ public:
   static bool setShapefileEncoding(QgsVectorLayer* layer, const QString& encoding);
   // Vector labeling only. Cadastral WMS/XYZ text is baked into tiles.
   static bool hasToggleableLabels(const QgsMapLayer* layer);
+  // 레이어가 밑에 있으면 글자도 밑으로. 레이어 순서가 바뀔 때마다 부른다.
+  static void applyLayerOrderToLabels(QgsProject* project, QgsMapCanvas* canvas = nullptr);
+  // 라벨 뒤(위)에 한 번 더 그려야 하는 레이어들. 맨 위가 앞이다.
+  // QGIS 는 도형을 모두 그린 뒤 라벨을 한 번에 얹으므로, 위 레이어가 아래
+  // 레이어의 글자에 가린다. 그 레이어들을 2차 패스로 다시 그리기 위한 목록이다.
+  static QList<QgsMapLayer*> layersDrawnAboveLabels(QgsProject* project);
   static bool labelsVisible(const QgsMapLayer* layer);
   static bool setLabelsVisible(QgsMapLayer* layer, bool on);
   static bool applySimpleVectorStyle(QgsVectorLayer* layer, const QColor& fill, const QColor& stroke,
@@ -176,6 +188,10 @@ public:
   static bool setLayerOpacity(QgsProject* project, QgsMapCanvas* canvas, const QString& name, double opacity);
   static bool setMapLayerOpacity(QgsMapLayer* layer, double opacity, QgsMapCanvas* canvas = nullptr);
   static double mapLayerOpacity(const QgsMapLayer* layer);
+  // 그림(래스터) 밝기. -255~255, 0이 원본. 벡터에는 밝기가 없다.
+  static bool canAdjustBrightness(const QgsMapLayer* layer);
+  static bool setMapLayerBrightness(QgsMapLayer* layer, int brightness, QgsMapCanvas* canvas = nullptr);
+  static int mapLayerBrightness(const QgsMapLayer* layer);
   static bool isReferenceOrBasemapLayer(const QgsMapLayer* layer);
 
   static bool toggleLayerVisibility(QgsProject* project, QgsMapCanvas* canvas, const QString& name, bool visible);
@@ -219,15 +235,26 @@ public:
   static bool zoomToProjectDataLayers(QgsMapCanvas* canvas, QgsProject* project);
   static bool isolateAndZoomToLayer(QgsProject* project, QgsMapCanvas* canvas, QgsMapLayer* layer,
                                     bool keepReference = true);
+  static bool isAdminEmdLayer(const QgsMapLayer* layer);
+  static bool isImportedSiteLayer(const QgsMapLayer* layer);
+  static QgsVectorLayer* findImportedSiteLayer(QgsProject* project);
+  static bool applyInvertedPaperMask(QgsVectorLayer* layer);
+  static QgsVectorLayer* upsertAdminEmdMask(QgsProject* project, const QgsGeometry& geom,
+                                            const QgsCoordinateReferenceSystem& srcCrs,
+                                            const QString& workCrsAuthId, const QString& titleKo);
+  static bool isolateSurfaceSurveyView(QgsProject* project, QgsMapCanvas* canvas,
+                                       QgsMapLayer* siteLayer = nullptr);
   static void zoomToFullMax(QgsMapCanvas* canvas);
   static void applyKoreaMapLimits(QgsProject* project, QgsMapCanvas* canvas);
   static bool clampCanvasToKorea(QgsMapCanvas* canvas);
 
   static QString convertToShp5179(QgsVectorLayer* layer, const QString& outShpPath,
-                                  QgsProject* project, QString* errorOut = nullptr);
+                                  QgsProject* project, QString* errorOut = nullptr,
+                                  bool addToMap = false);
 
   static QString convertFileToShp5179(const QString& inPath, const QString& outShpPath,
-                                      QgsProject* project, QString* errorOut = nullptr);
+                                      QgsProject* project, QString* errorOut = nullptr,
+                                      bool addToMap = false);
 
   static QString georeferenceImageSimple(const QString& imagePath, QgsVectorLayer* controlPoints,
                                          QgsProject* project, QgsMapCanvas* canvas, QString* errorOut = nullptr);

@@ -33,7 +33,7 @@ const Tokens kTokens = {
     QColor(0xFF, 0xFF, 0xFF),  // bevelLight
     QColor(0xC3, 0xC8, 0xCF),  // bevelDark
     QColor(0xFF, 0xFF, 0xFF),  // canvasNeutral
-    QColor(0xF2, 0xF3, 0xF5),  // desk
+    QColor(0xF7, 0xE8, 0xD3),  // desk — warm orange-beige paper
     QColor(0xC0, 0x3A, 0x2B),  // danger
     QColor(0x2E, 0x7D, 0x4F),  // ok
 };
@@ -150,6 +150,34 @@ void setGroup(QPalette& pal, QPalette::ColorGroup g, const Tokens& t, bool disab
 
 const Tokens& tokens() { return kTokens; }
 
+const ButtonMetrics& buttonMetrics() {
+  static const ButtonMetrics metrics;
+  return metrics;
+}
+
+QString resolvedStyleSheet(const QString& sheet) {
+  const auto& metrics = buttonMetrics();
+  const struct { const char* name; int value; } replacements[] = {
+      {"ribbonIconSize", metrics.ribbonIconSize},
+      {"ribbonFontSize", metrics.ribbonFontSize},
+      {"ribbonMinWidth", metrics.ribbonMinWidth},
+      {"ribbonHeight", metrics.ribbonHeight},
+      {"buttonPadding", metrics.buttonPadding},
+      {"buttonSpacing", metrics.buttonSpacing},
+      {"scaleButtonHeight", metrics.scaleButtonHeight},
+      {"scaleButtonMinWidth", metrics.scaleButtonMinWidth},
+      {"scaleFontSize", metrics.scaleFontSize},
+      {"layoutIconSize", metrics.layoutIconSize},
+      {"layoutButtonHeight", metrics.layoutButtonHeight},
+      {"panelMargin", metrics.panelMargin},
+  };
+  QString resolved = sheet;
+  for (const auto& entry : replacements)
+    resolved.replace(QLatin1Char('@') + QString::fromLatin1(entry.name) + QLatin1Char('@'),
+                     QString::number(entry.value));
+  return resolved;
+}
+
 QPalette palette() {
   QPalette pal;
   setGroup(pal, QPalette::Active, kTokens, false);
@@ -216,7 +244,7 @@ void apply(QApplication* app) {
   app->setFont(ui);
   app->setStyle(new ChromeStyle);
   app->setPalette(palette());
-  app->setStyleSheet(loadStyleSheet());
+  app->setStyleSheet(resolvedStyleSheet(loadStyleSheet()));
 }
 
 void excludeMapSurface(QWidget* w) {
