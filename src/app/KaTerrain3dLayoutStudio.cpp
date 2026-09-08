@@ -2,6 +2,7 @@
 
 #include "KaBeginnerRibbon.h"
 #include "KaIcons.h"
+#include "KaTheme.h"
 #include "core/LayoutService.h"
 #include "core/Terrain3dLayoutService.h"
 
@@ -140,7 +141,7 @@ KaTerrain3dLayoutStudio::KaTerrain3dLayoutStudio(QgsProject* project, QWidget* p
 
   m_view = new QgsLayoutView(mid);
   m_view->setObjectName(QStringLiteral("terrain3dLayoutView"));
-  m_view->setBackgroundBrush(QBrush(QColor(229, 231, 235)));
+  m_view->setBackgroundBrush(QBrush(KaTheme::tokens().desk));
   m_view->setFocusPolicy(Qt::StrongFocus);
   m_toolSelect = new QgsLayoutViewToolSelect(m_view);
   m_toolPan = new QgsLayoutViewToolPan(m_view);
@@ -154,12 +155,12 @@ KaTerrain3dLayoutStudio::KaTerrain3dLayoutStudio(QgsProject* project, QWidget* p
   midLay->addWidget(m_status);
 
   auto* undoAct = new QAction(QStringLiteral("되돌리기"), this);
-  undoAct->setShortcut(QKeySequence::Undo);
+  if (!parentWidget()) undoAct->setShortcut(QKeySequence::Undo);
   undoAct->setShortcutContext(Qt::WidgetWithChildrenShortcut);
   connect(undoAct, &QAction::triggered, this, &KaTerrain3dLayoutStudio::undoLastChange);
   addAction(undoAct);
   auto* delAct = new QAction(QStringLiteral("지우기"), this);
-  delAct->setShortcut(Qt::Key_Delete);
+  if (!parentWidget()) delAct->setShortcut(Qt::Key_Delete);
   delAct->setShortcutContext(Qt::WidgetWithChildrenShortcut);
   connect(delAct, &QAction::triggered, this, &KaTerrain3dLayoutStudio::deleteSelectedItems);
   addAction(delAct);

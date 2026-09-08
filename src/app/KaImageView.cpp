@@ -1,5 +1,6 @@
 #include "KaImageView.h"
 
+#include "KaTheme.h"
 #include <QImageReader>
 
 #include <QGraphicsPixmapItem>
@@ -91,7 +92,7 @@ KaImageView::KaImageView(QWidget* parent)
   setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
   setResizeAnchor(QGraphicsView::AnchorViewCenter);
   setRenderHint(QPainter::SmoothPixmapTransform, true);
-  setBackgroundBrush(QColor(246, 241, 232));
+  setBackgroundBrush(KaTheme::tokens().desk);
   setMouseTracking(true);
   setCursor(Qt::CrossCursor);
 }

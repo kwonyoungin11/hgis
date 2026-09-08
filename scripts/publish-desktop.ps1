@@ -8,9 +8,11 @@ $dst = Join-Path $dstDir "ka-hgis.exe"
 if (-not (Test-Path -LiteralPath $src)) { throw "Release ka-hgis.exe missing. Build first." }
 if (-not (Test-Path -LiteralPath $dstDir)) { throw "dist\ka-hgis-portable missing." }
 
-Get-Process -Name ka-hgis -ErrorAction SilentlyContinue | ForEach-Object {
-  Stop-Process -Id $_.Id -Force
-  Start-Sleep -Milliseconds 400
+& (Join-Path $PSScriptRoot 'verify-release.ps1') -CheckOnly
+if ($LASTEXITCODE -ne 0) { throw 'Release verification did not pass. Portable was not changed.' }
+
+if (Get-Process -Name ka-hgis -ErrorAction SilentlyContinue) {
+  throw "HGIS is still running. Close it after saving, then publish again. No process was stopped."
 }
 Copy-Item -LiteralPath $src -Destination $dst -Force
 $qssSrc = Join-Path $root "data\theme\ka-hgis.qss"

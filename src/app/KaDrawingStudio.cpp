@@ -346,29 +346,29 @@ QIcon scaleBarPreviewIcon(const char* style) {
   pm.fill(Qt::transparent);
   QPainter p(&pm);
   p.setRenderHint(QPainter::Antialiasing, true);
-  p.setPen(QPen(QColor(214, 211, 209), 1));
-  p.setBrush(QColor(250, 250, 249));
+  p.setPen(QPen(KaTheme::tokens().border, 1));
+  p.setBrush(KaTheme::tokens().bevelLight);
   p.drawRoundedRect(QRectF(1, 4, 70, 32), 5, 5);
   const QString s = QString::fromUtf8(style);
   if (s == QLatin1String("Line Ticks Up")) {
-    p.setPen(QPen(QColor(68, 64, 60), 1.6));
+    p.setPen(QPen(KaTheme::tokens().ink, 1.6));
     p.drawLine(QPointF(10, 26), QPointF(62, 26));
     for (int i = 0; i < 5; ++i) {
       const double x = 10.0 + i * 13.0;
       p.drawLine(QPointF(x, 26), QPointF(x, 14));
     }
   } else if (s == QLatin1String("Single Box")) {
-    p.setPen(QPen(QColor(68, 64, 60), 1));
+    p.setPen(QPen(KaTheme::tokens().ink, 1));
     for (int i = 0; i < 4; ++i) {
-      p.setBrush(i % 2 == 0 ? QColor(68, 64, 60) : QColor(250, 250, 249));
+      p.setBrush(i % 2 == 0 ? KaTheme::tokens().ink : KaTheme::tokens().bevelLight);
       p.drawRect(QRectF(10 + i * 13, 16, 13, 10));
     }
   } else {
-    p.setPen(QPen(QColor(68, 64, 60), 1));
+    p.setPen(QPen(KaTheme::tokens().ink, 1));
     for (int row = 0; row < 2; ++row) {
       for (int i = 0; i < 4; ++i) {
         const bool dark = ((i + row) % 2) == 0;
-        p.setBrush(dark ? QColor(68, 64, 60) : QColor(250, 250, 249));
+        p.setBrush(dark ? KaTheme::tokens().ink : KaTheme::tokens().bevelLight);
         p.drawRect(QRectF(10 + i * 13, 12 + row * 8, 13, 8));
       }
     }
@@ -400,9 +400,14 @@ QToolButton* makeRailTile(QWidget* parent, const QIcon& icon, const QString& tex
   b->setAutoRaise(true);
   b->setCursor(Qt::PointingHandCursor);
   b->setToolTip(text);
-  b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-  b->setFixedHeight(KaTheme::buttonMetrics().layoutButtonHeight);
   b->setProperty("class", QStringLiteral("sampleTile"));
+  b->ensurePolished();
+  b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  const auto& metrics = KaTheme::buttonMetrics();
+  b->setMinimumWidth(metrics.scaleButtonMinWidth);
+  const int contentHeight = iconSize.height() + 2 * b->fontMetrics().lineSpacing()
+                            + 2 * metrics.buttonPadding + 6;
+  b->setFixedHeight(std::max(metrics.layoutButtonHeight, contentHeight));
   return b;
 }
 }
@@ -804,11 +809,14 @@ KaDrawingStudio::KaDrawingStudio(QgsProject* project, QgsMapCanvas* mapCanvas,
   ensureBlankLayout();
   buildUi();
   autoPlaceDefaultSheet();
-  auto* undoAct = new QAction(QStringLiteral("되돌리기"), this);
-  undoAct->setShortcut(QKeySequence::Undo);
-  undoAct->setShortcutContext(Qt::WindowShortcut);
-  connect(undoAct, &QAction::triggered, this, &KaDrawingStudio::undoLastChange);
-  addAction(undoAct);
+  // The embedded studio shares MainWindow's shortcut router. Registering a
+  // second WindowShortcut makes Ctrl+Z ambiguous and neither action runs.
+  if (!parent) {
+    auto* undoAct = new QAction(QStringLiteral("되돌리기"), this);
+    undoAct->setShortcut(QKeySequence::Undo);
+    connect(undoAct, &QAction::triggered, this, &KaDrawingStudio::undoLastChange);
+    addAction(undoAct);
+  }
 }
 
 void KaDrawingStudio::openPaperSettingsDialog() {
@@ -963,9 +971,9 @@ void KaDrawingStudio::attachLayoutToView() {
     if (m_view && !m_view->tool())
       m_view->setTool(m_toolSelect);
   }
-  const QColor desk(229, 231, 235);
-  ly->setBackgroundBrush(QBrush(desk));
-  m_view->setBackgroundBrush(QBrush(desk));
+  // Scene backgrounds also reach exports with transparent pages; preserve that color.
+  ly->setBackgroundBrush(QBrush(QColor(229, 231, 235)));
+  m_view->setBackgroundBrush(QBrush(KaTheme::tokens().desk));
   connect(ly, &QgsLayout::selectedItemChanged, this, &KaDrawingStudio::onLayoutSelectionChanged,
           Qt::UniqueConnection);
   updateInspector(nullptr);
@@ -1132,7 +1140,7 @@ void KaDrawingStudio::buildUi() {
   m_view->setObjectName(QStringLiteral("layoutView"));
   KaTheme::excludeMapSurface(m_view);
   m_view->setFrameShape(QFrame::NoFrame);
-  m_view->setBackgroundBrush(QBrush(QColor(232, 228, 220)));
+  m_view->setBackgroundBrush(QBrush(KaTheme::tokens().desk));
   m_view->setFocusPolicy(Qt::StrongFocus);
   m_view->setAlignment(Qt::AlignCenter);
   m_view->setTransformationAnchor(QGraphicsView::AnchorViewCenter);
@@ -1187,18 +1195,18 @@ void KaDrawingStudio::buildUi() {
   auto* legendRow = new QHBoxLayout;
   legendRow->setSpacing(14);
   auto* legendBtn = makeRailTile(m_cardLegend, KaIcons::icon(QStringLiteral("layout_legend")),
-                                 QStringLiteral("범례"), QSize(22, 22));
+                                 QStringLiteral("범례"), QSize(KaTheme::buttonMetrics().layoutIconSize, KaTheme::buttonMetrics().layoutIconSize));
   connect(legendBtn, &QToolButton::clicked, this, [this]() {
     beginPlaceLegend();
     if (m_cardLegend) m_cardLegend->setFocus();
   });
   auto* pdfBtn = makeRailTile(m_cardLegend, KaIcons::icon(QStringLiteral("pdf")),
-                              QStringLiteral("PDF 내보내기"), QSize(22, 22));
+                              QStringLiteral("PDF 내보내기"), QSize(KaTheme::buttonMetrics().layoutIconSize, KaTheme::buttonMetrics().layoutIconSize));
   pdfBtn->setObjectName(QStringLiteral("btnPrimary"));
   pdfBtn->setToolTip(QStringLiteral("지금 용지를 PDF 파일로 저장합니다"));
   connect(pdfBtn, &QToolButton::clicked, this, &KaDrawingStudio::savePdf);
   auto* paperBtn = makeRailTile(m_cardLegend, KaIcons::icon(QStringLiteral("layout_map_frame")),
-                                QStringLiteral("용지/방향"), QSize(22, 22));
+                                QStringLiteral("용지/방향"), QSize(KaTheme::buttonMetrics().layoutIconSize, KaTheme::buttonMetrics().layoutIconSize));
   paperBtn->setToolTip(QStringLiteral("A4/A3 용지 크기 및 가로/세로 방향을 전환합니다"));
   connect(paperBtn, &QToolButton::clicked, this, &KaDrawingStudio::openPaperSettingsDialog);
   legendRow->addWidget(legendBtn, 1);
@@ -1246,7 +1254,8 @@ void KaDrawingStudio::buildUi() {
       {"wind_roses/WindRose_01.svg", "바람장미", 3},
   };
   for (const auto& ns : norths) {
-    auto* b = makeRailTile(m_cardNorth, northPreviewIcon(ns.art), QString::fromUtf8(ns.tip), QSize(32, 32));
+    auto* b = makeRailTile(m_cardNorth, northPreviewIcon(ns.art), QString::fromUtf8(ns.tip),
+                           QSize(KaTheme::buttonMetrics().layoutIconSize, KaTheme::buttonMetrics().layoutIconSize));
     const QString rel = QString::fromUtf8(ns.rel);
     connect(b, &QToolButton::clicked, this, [this, rel]() { beginPlaceNorth(rel); });
     northRow->addWidget(b);
@@ -1288,8 +1297,10 @@ void KaDrawingStudio::buildUi() {
   m_scaleSpin->setGroupSeparatorShown(false);
   auto* applySc = new QPushButton(QStringLiteral("적용"), m_scaleBar);
   applySc->setObjectName(QStringLiteral("scaleApply"));
+  applySc->ensurePolished();
   applySc->setFixedHeight(buttonMetrics.scaleButtonHeight);
   m_scaleSpin->setObjectName(QStringLiteral("drawingScale"));
+  m_scaleSpin->ensurePolished();
   m_scaleSpin->setFixedHeight(buttonMetrics.scaleButtonHeight);
   connect(applySc, &QPushButton::clicked, this, &KaDrawingStudio::applyOnScreenScale);
   connect(m_scaleSpin, &QSpinBox::editingFinished, this, &KaDrawingStudio::applyOnScreenScale);
@@ -1311,6 +1322,7 @@ void KaDrawingStudio::buildUi() {
       chip->setToolButtonStyle(Qt::ToolButtonTextOnly);
       chip->setCheckable(true);
       chip->setCursor(Qt::PointingHandCursor);
+      chip->ensurePolished();
       chip->setMinimumWidth(buttonMetrics.scaleButtonMinWidth);
       chip->setFixedHeight(buttonMetrics.scaleButtonHeight);
       chip->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
@@ -1321,14 +1333,24 @@ void KaDrawingStudio::buildUi() {
       });
       row->addWidget(chip, 1);
     }
+    // Keep a partial last row aligned with the three preset columns above it.
+    for (int i = count; i < 3; ++i) {
+      auto* spacer = new QWidget(m_scaleBar);
+      spacer->setMinimumWidth(buttonMetrics.scaleButtonMinWidth);
+      spacer->setFixedHeight(buttonMetrics.scaleButtonHeight);
+      spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+      row->addWidget(spacer, 1);
+    }
     scaleLay->addLayout(row);
   };
   const int rowA[] = {100, 200, 250};
   const int rowB[] = {300, 400, 500};
   const int rowC[] = {1000, 2000, 5000};
+  const int rowD[] = {10000, 25000};
   addChipRow(rowA, 3);
   addChipRow(rowB, 3);
   addChipRow(rowC, 3);
+  addChipRow(rowD, 2);
   auto* barRow = new QHBoxLayout;
   barRow->setSpacing(buttonMetrics.buttonSpacing);
   struct BarSample { const char* style; const char* tip; };
@@ -1414,8 +1436,6 @@ void KaDrawingStudio::buildUi() {
   auto* bottomTools = new QWidget(desk);
   bottomTools->setObjectName(QStringLiteral("layoutBottomTools"));
   bottomTools->setAttribute(Qt::WA_StyledBackground, true);
-  bottomTools->setStyleSheet(QStringLiteral(
-      "QWidget#layoutBottomTools { background: rgba(246,241,232,210); border-radius: 10px; }"));
   auto* btLay = new QHBoxLayout(bottomTools);
   btLay->setContentsMargins(14, 6, 14, 6);
   btLay->setSpacing(22);
@@ -2900,8 +2920,8 @@ void KaDrawingStudio::flushHeavyScaleSync() {
 void KaDrawingStudio::syncScaleChips() {
   if (!m_scaleProps || !m_scaleSpin) return;
   const int v = m_scaleSpin->value();
-  const auto chips = m_scaleProps->findChildren<QPushButton*>(QStringLiteral("scaleChip"));
-  for (QPushButton* b : chips) {
+  const auto chips = m_scaleProps->findChildren<QToolButton*>(QStringLiteral("scaleChip"));
+  for (QToolButton* b : chips) {
     const bool on = b->property("denom").toInt() == v;
     const bool blocked = b->blockSignals(true);
     b->setChecked(on);
@@ -3104,6 +3124,10 @@ void KaDrawingStudio::deleteSelectedItems() {
 
 void KaDrawingStudio::removeSelectedLayers() {
   if (!m_layerTree) return;
+  if (auto* main = qobject_cast<MainWindow*>(window())) {
+    main->removeLayersFromTree(m_layerTree);
+    return;
+  }
   QSet<QString> ids;
   for (QgsMapLayer* l : m_layerTree->selectedLayers()) {
     if (l) ids.insert(l->id());
@@ -3176,7 +3200,8 @@ bool KaDrawingStudio::eventFilter(QObject* watched, QEvent* event) {
     auto* ke = static_cast<QKeyEvent*>(event);
     if (ke->matches(QKeySequence::Undo) ||
         ((ke->modifiers() & Qt::ControlModifier) && ke->key() == Qt::Key_Z)) {
-      undoLastChange();
+      if (auto* main = qobject_cast<MainWindow*>(window())) main->undoMapAction();
+      else undoLastChange();
       return true;
     }
     if (ke->key() == Qt::Key_Delete || ke->key() == Qt::Key_Backspace) {
@@ -3292,6 +3317,12 @@ void KaDrawingStudio::handleDeleteKey() {
 }
 
 void KaDrawingStudio::handleUndoKey() {
+  if (m_layerTree && (m_layerTree->hasFocus() || m_layerTree->viewport()->hasFocus())) {
+    if (auto* main = qobject_cast<MainWindow*>(window())) {
+      main->undoMapAction();
+      return;
+    }
+  }
   undoLastChange();
 }
 

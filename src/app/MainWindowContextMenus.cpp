@@ -220,7 +220,7 @@ void MainWindow::showLayerTreeContextMenu(QgsLayerTreeView* treeView, const QPoi
   };
   const auto zoom = [&]() {
     const QString reason = vector ? emptyReason : invalidReason;
-    add(&menu, "layer.zoom", kind == LayerMenuKind::Area ? QStringLiteral("이 구역으로 이동") : QStringLiteral("이 레이어로 이동"),
+    add(&menu, "layer.zoom", QStringLiteral("이 레이어로 이동"),
         reason, [this, layer]() {
           if (!LayerOps::zoomToLayerMax(m_canvas, layer)) {
             statusBar()->showMessage(QStringLiteral("표시할 범위가 없습니다. 도형이나 자료 범위를 확인하세요."), 6000);
@@ -241,7 +241,7 @@ void MainWindow::showLayerTreeContextMenu(QgsLayerTreeView* treeView, const QPoi
   const auto attributes = [&]() {
     const QString reason = busy ? busyReason : domain && !ownSurvey ? QStringLiteral("이 자료가 저장된 조사 파일을 먼저 열어 주세요.") : !emptyReason.isEmpty() ? emptyReason :
         editUnavailable(vector, Qgis::VectorProviderCapability::ChangeAttributeValues);
-    add(&menu, "layer.attributes", QStringLiteral("기록·속성 입력"), reason,
+    add(&menu, "layer.attributes", QStringLiteral("도형 속성"), vector ? reason : QStringLiteral("영상 지도에는 편집할 도형 속성이 없습니다."),
         [this, vector]() { if (vector) editCurrentLayerAttributes(vector); });
   };
   const auto refreshViews = [this]() {
@@ -250,12 +250,17 @@ void MainWindow::showLayerTreeContextMenu(QgsLayerTreeView* treeView, const QPoi
     if (m_drawingStudio) m_drawingStudio->refreshMapFromProject();
   };
   const auto appearance = [&]() {
-    QMenu* display = addSubmenu(&menu, "layer.appearance", QStringLiteral("이름·색·표시 설정"));
-    add(display, "layer.rename", QStringLiteral("목록 이름 바꾸기…"), {}, [this, layer]() { renameSelectedLayer(layer); });
-    add(display, "layer.style", QStringLiteral("도형 색·외곽선…"), invalidReason,
+    QMenu* display = &menu;
+    add(display, "layer.rename", QStringLiteral("이름 바꾸기 (두 번 클릭)"), {}, [this, layer]() { renameSelectedLayer(layer); });
+    add(display, "layer.style", QStringLiteral("면·외곽선 색"), vector ? invalidReason : QStringLiteral("영상 지도는 투명도로 표시를 조절하세요."),
         [this, layer]() { editCurrentLayerStyle(layer); });
-    if (!vector) return;
-    QMenu* labels = addSubmenu(display, "layer.labels", QStringLiteral("이름·번호 표시"));
+    attributes();
+    QMenu* labels = addSubmenu(display, "layer.labels", QStringLiteral("라벨·명칭 속성"));
+    if (!vector) {
+      labels->menuAction()->setEnabled(false);
+      labels->menuAction()->setToolTip(QStringLiteral("영상에 포함된 글자는 별도로 크기를 바꿀 수 없습니다."));
+      return;
+    }
     const bool labelable = valid && LayerOps::hasToggleableLabels(vector);
     const QString labelReason = labelable ? QString() : QStringLiteral("표시할 이름이나 번호 항목이 없습니다.");
     labels->menuAction()->setEnabled(labelable);
@@ -318,112 +323,63 @@ void MainWindow::showLayerTreeContextMenu(QgsLayerTreeView* treeView, const QPoi
         QStringLiteral("현재 조사 전체를 검수한 뒤 SHP·PDF·MANIFEST 제출 꾸러미를 만듭니다."));
   };
 
-  if (kind == LayerMenuKind::Reference || kind == LayerMenuKind::ExternalRaster) {
-    if (kind == LayerMenuKind::ExternalRaster) {
-      zoom();
-      if (GeorefService::isAlignableLayer(layer))
-        add(&menu, "layer.align", QStringLiteral("사진·도면 위치 맞추기…"), busy ? busyReason : invalidReason,
-            [this, layer]() { startAlignSession(layer); });
-      menu.addSeparator();
-    }
-    const bool visible = node->itemVisibilityChecked();
-    add(&menu, "layer.visible", visible ? QStringLiteral("지도 숨기기") : QStringLiteral("지도 보이기"), invalidReason,
-        [layer, visible, refreshViews]() {
-          if (auto* item = QgsProject::instance()->layerTreeRoot()->findLayer(layer->id())) item->setItemVisibilityChecked(!visible);
-          refreshViews();
+  add(&menu, "layer.import", QStringLiteral("레이어 불러오기 (SHP·DXF·GPKG)"), busyReason, [this]() { addUserLayer(); });
+  menu.addSeparator();
+  appearance();
+  QMenu* opacity = addSubmenu(&menu, "layer.opacity", QStringLiteral("투명도"));
+  opacity->menuAction()->setEnabled(valid);
+  opacity->menuAction()->setToolTip(invalidReason);
+  const double opacityNow = LayerOps::mapLayerOpacity(layer);
+  for (int transparency : {0, 20, 40, 50, 60, 80}) {
+    QAction* action = add(opacity, "layer.opacityValue", QStringLiteral("%1% 투명하게").arg(transparency), {},
+        [this, layer, transparency, refreshViews]() {
+          LayerOps::setMapLayerOpacity(layer, 1.0 - transparency / 100.0, m_canvas);
+          updateLayerOpacityControl(); refreshViews();
         });
-    QMenu* opacity = addSubmenu(&menu, "layer.opacity", QStringLiteral("투명도"));
-    opacity->menuAction()->setEnabled(valid); opacity->menuAction()->setToolTip(invalidReason);
-    const double opacityNow = LayerOps::mapLayerOpacity(layer);
-    for (int transparency : {0, 20, 40, 50, 60, 80}) {
-      QAction* action = add(opacity, "layer.opacityValue", transparency == 0 ? QStringLiteral("0% · 선명하게") : QStringLiteral("%1% 투명하게").arg(transparency), {},
-          [this, layer, transparency, refreshViews]() {
-            LayerOps::setMapLayerOpacity(layer, 1.0 - transparency / 100.0, m_canvas);
-            updateLayerOpacityControl(); refreshViews();
-          });
-      action->setCheckable(true); action->setChecked(qAbs(opacityNow * 100.0 - (100 - transparency)) < 1.0);
-    }
-    auto* group = qobject_cast<QgsLayerTreeGroup*>(node->parent());
-    const bool alreadyBottom = !group || group->children().last() == node;
-    add(&menu, "layer.bottom", QStringLiteral("같은 묶음의 맨 아래로"), alreadyBottom ? QStringLiteral("이 묶음에서 이미 맨 아래에 있습니다.") : QString(),
-        [layer, refreshViews]() {
-          auto* item = QgsProject::instance()->layerTreeRoot()->findLayer(layer->id());
-          auto* parent = item ? qobject_cast<QgsLayerTreeGroup*>(item->parent()) : nullptr;
-          if (!item || !parent) return;
-          QgsLayerTreeNode* copy = item->clone();
-          // Keep a tree node registered throughout the move: removing the last node
-          // first makes QgsLayerTreeRegistryBridge queue deletion of the map layer.
-          parent->addChildNode(copy); parent->removeChildNode(item); refreshViews();
-        });
-    add(&menu, "layer.refresh", QStringLiteral("이 지도 새로고침"), invalidReason, [this, layer]() {
-      layer->triggerRepaint(); if (m_canvas) m_canvas->refresh();
-    });
-    if (kind == LayerMenuKind::Reference) zoom();
-    if (layer->providerType() == QLatin1String("wms") && layer->source().contains(QLatin1String("type=xyz"))) {
-      menu.addSeparator();
-      add(&menu, "layer.offline", QStringLiteral("현재 범위 오프라인 저장…"), invalidReason,
-          [this]() { saveOfflineTilePack(); });
-    }
-  } else if (kind == LayerMenuKind::Area) {
-    zoom(); menu.addSeparator(); draw(); attributes(); appearance(); menu.addSeparator();
-    QMenu* trench = addSubmenu(&menu, "layer.trenchCreate", QStringLiteral("시굴격자 만들기"));
+    action->setCheckable(true);
+    action->setChecked(qAbs(opacityNow * 100.0 - (100 - transparency)) < 1.0);
+  }
+  menu.addSeparator();
+  zoom();
+  add(&menu, "layer.fullExtent", QStringLiteral("전체 보기"), {}, [this]() { zoomMapToFullMax(); });
+  auto* group = qobject_cast<QgsLayerTreeGroup*>(node->parent());
+  const bool alreadyBottom = !group || group->children().last() == node;
+  add(&menu, "layer.bottom", QStringLiteral("같은 묶음의 맨 아래로"), alreadyBottom ? QStringLiteral("이 묶음에서 이미 맨 아래에 있습니다.") : QString(),
+      [layer, refreshViews]() {
+        auto* item = QgsProject::instance()->layerTreeRoot()->findLayer(layer->id());
+        auto* parent = item ? qobject_cast<QgsLayerTreeGroup*>(item->parent()) : nullptr;
+        if (!item || !parent) return;
+        auto* copy = item->clone();
+        parent->addChildNode(copy);
+        parent->removeChildNode(item);
+        refreshViews();
+      });
+  add(&menu, "layer.merge", QStringLiteral("폴리곤 묶기"),
+      vector && vector->geometryType() == Qgis::GeometryType::Polygon ? vertexReason : QStringLiteral("조사에서 그린 면 도형을 선택하세요."),
+      [this]() { mergeFeaturePolygons(); });
+  if (kind == LayerMenuKind::Area) {
+    QMenu* trench = addSubmenu(&menu, "layer.trenchCreate", QStringLiteral("시굴격자"));
     const QString reason = !drawReason.isEmpty() ? drawReason : emptyReason;
-    trench->menuAction()->setEnabled(reason.isEmpty()); trench->menuAction()->setToolTip(reason);
+    trench->menuAction()->setEnabled(reason.isEmpty());
+    trench->menuAction()->setToolTip(reason);
     add(trench, "layer.trench10", QStringLiteral("시굴 · 조사구역의 10%"), reason, [this]() { applyTrenchByRatio(10.0); });
     add(trench, "layer.trench2", QStringLiteral("표본 · 조사구역의 2%"), reason, [this]() { applyTrenchByRatio(2.0); });
     add(trench, "layer.trenchCustom", QStringLiteral("규격 지정·격자 만들기…"), reason, [this]() { startTrenchGrid(); });
-    area(); exportSurvey();
-  } else if (kind == LayerMenuKind::Control) {
-    add(&menu, "layer.controlsAdd", QStringLiteral("기준점 추가…"), drawReason, [this]() { addControlPoint(); });
-    add(&menu, "layer.controlsImport", QStringLiteral("기준점 좌표 파일 불러오기…"), drawReason, [this]() { importControlCsv(); });
-    attributes(); menu.addSeparator();
-    add(&menu, "layer.check", QStringLiteral("기준점 기록 검수"), emptyReason, [this]() { runChecklist(); },
-        QStringLiteral("기준점 개수와 측지·정확도 기록을 포함해 조사 제출 항목을 검사합니다."));
-    zoom(); appearance(); exportSurvey();
-  } else if (kind == LayerMenuKind::Section) {
-    add(&menu, "layer.sectionStudio", QStringLiteral("단면도 작업 화면 열기…"), busyReason, [this]() { openSectionDesigner(); },
-        QStringLiteral("정합된 단면 사진을 배치하고 단면 도면을 만듭니다."));
-    menu.addSeparator(); draw(); vertices(); attributes(); menu.addSeparator(); zoom(); appearance(); exportSurvey();
-  } else if (kind == LayerMenuKind::Trench) {
-    auto* surveyArea = LayerOps::findByLayerKey(QgsProject::instance(), QStringLiteral("survey_area"));
-    QString reason = drawReason;
-    if (reason.isEmpty() && (!surveyArea || surveyArea->featureCount() <= 0)) reason = QStringLiteral("먼저 조사구역을 그려 주세요.");
-    add(&menu, "layer.trenchConfigure", QStringLiteral("격자 규격 지정·다시 만들기…"), reason, [this]() {
-      if (QMessageBox::question(this, QStringLiteral("시굴격자 다시 만들기"),
-          QStringLiteral("현재 시굴격자를 새 규격으로 교체합니다. 계속할까요?"),
-          QMessageBox::Yes | QMessageBox::No, QMessageBox::No) == QMessageBox::Yes) startTrenchGrid();
-    });
-    add(&menu, "layer.trenchMove", QStringLiteral("격자 전체 위치 조정"), vertexReason, [this]() { startTrenchGridMove(); });
-    add(&menu, "layer.trenchEdit", QStringLiteral("격자 하나씩 위치 조정"), vertexReason, [this]() { startTrenchGridEdit(); });
-    menu.addSeparator(); area(); zoom(); appearance(); exportSurvey();
-  } else if (kind == LayerMenuKind::Feature) {
-    draw(); vertices(); attributes(); menu.addSeparator(); zoom(); appearance(); exportSurvey();
-  } else {
-    // Imported files remain external data; the menu does not edit their original geometry.
-    zoom(); menu.addSeparator(); appearance();
-    if (GeorefService::isAlignableLayer(layer))
-      add(&menu, "layer.align", QStringLiteral("참고 도면 위치 맞추기…"), busy ? busyReason : invalidReason,
-          [this, layer]() { startAlignSession(layer); });
   }
-
+  if (layer->providerType() == QLatin1String("wms") && layer->source().contains(QLatin1String("type=xyz")))
+    add(&menu, "layer.offline", QStringLiteral("오프라인 저장 — 지금 화면 범위"), invalidReason, [this]() { saveOfflineTilePack(); });
   menu.addSeparator();
   if (domain) {
-    QString reason = busy ? busyReason : !ownSurvey ? QStringLiteral("이 자료가 저장된 조사 파일을 먼저 열어 주세요.") : emptyReason;
-    if (reason.isEmpty()) reason = editUnavailable(vector, Qgis::VectorProviderCapability::DeleteFeatures);
-    add(&menu, "layer.clear", kind == LayerMenuKind::Trench ? QStringLiteral("격자 모두 지우기…") : QStringLiteral("그린 도형 모두 지우기…"),
-        reason, [this]() { clearDrawnFeaturesOfCurrentLayer(); }, QStringLiteral("확인 후 조사 파일의 도형을 지웁니다. 되돌릴 수 없습니다."));
+    const QString reason = busy ? busyReason : !ownSurvey ? QStringLiteral("이 자료가 저장된 조사 파일을 먼저 열어 주세요.") : emptyReason;
+    add(&menu, "layer.clear", QStringLiteral("그린 도형 모두 지우기…"), reason,
+        [this]() { clearDrawnFeaturesOfCurrentLayer(); });
   }
-  const QString removeReason = busy ? busyReason : vector && vector->isModified() ?
-      QStringLiteral("저장하지 않은 편집이 있습니다. 조사 파일을 저장한 뒤 제거하세요.") : QString();
-  add(&menu, "layer.remove", QStringLiteral("목록에서 제거"), removeReason, [this, layer]() {
-    if (m_editLayer == layer) stopCaptureTool();
-    QgsProject::instance()->removeMapLayer(layer->id());
-    QgsProject::instance()->setDirty(true);
-    if (m_canvas) m_canvas->refresh();
-    if (m_drawingStudio) m_drawingStudio->refreshMapFromProject();
-    refreshLayerEmptyState(); updateNextActionStatus();
-    statusBar()->showMessage(QStringLiteral("목록에서 제거했습니다. 원본 파일과 그린 도형은 남아 있습니다."), 6000);
-  }, QStringLiteral("지도 목록에서만 뺍니다. 원본 파일과 도형은 지우지 않습니다."));
+  add(&menu, "layer.remove", QStringLiteral("레이어 삭제"), busyReason, [this, layer, treeView]() {
+    // The clicked layer is the target even if another row was selected before.
+    treeView->clearSelection();
+    treeView->setCurrentLayer(layer);
+    removeLayersFromTree(treeView);
+  }, QStringLiteral("목록에서 제거합니다. 원본 파일은 보존하며 Ctrl+Z로 복원할 수 있습니다."));
   menu.exec(treeView->viewport()->mapToGlobal(pos));
 }
 

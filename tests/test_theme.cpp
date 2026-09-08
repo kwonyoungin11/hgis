@@ -1,36 +1,603 @@
 #include <QtTest>
+#include <cmath>
+#include <limits>
+#include <QAction>
+#include <QApplication>
 #include <QColor>
 #include <QDir>
 #include <QFile>
+#include <QFontDatabase>
+#include <QFontMetrics>
+#include <QFrame>
+#include <QGridLayout>
+#include <QImage>
+#include <QLabel>
+#include <QLayout>
+#include <QMenu>
+#include <QMainWindow>
+#include <QPushButton>
 #include <QRegularExpression>
+#include <QStatusBar>
+#include <QTabWidget>
+#include <QToolBar>
+#include <QToolButton>
+#include <QVBoxLayout>
+#include "app/KaBeginnerRibbon.h"
+#include "app/KaIcons.h"
 #include "app/KaTheme.h"
 
 class TestTheme : public QObject {
   Q_OBJECT
 private slots:
+  void initTestCase();
+  void ribbonButtons_renderAtIntendedSize();
+  void domainIcons_useDistinctColors();
+  void iconStates_preserveMeaningAndDisableColor();
+  void explicitIconTint_remainsMonochrome();
+  void chromeSurfaces_renderGlossAndReadableText();
+  void softenedPalette_matchesPreviousIntensity();
+  void regionChip_remainsCompactAndTextOnly();
   void tokensMatchSpec();
   void embeddedNotEmpty();
   void diskMatchesEmbedded();
   void noUrl();
   void gisExcludePresent();
   void requiredSelectorsPresent();
-  void toolbarCheckedIsUnderline();
-  void primaryToolbarIconsUseInk();
+  void toolbarCheckedHasDistinctTreatment();
+  void primaryToolbarIconsRemainReadable();
   void noCheapSpinArrowBlock();
   void noCatchAllWidgetRules();
   void chromeFontIsFieldKorean();
   void beginnerChrome_questionLabels();
 };
 
+void TestTheme::initTestCase() {
+#ifdef Q_OS_WIN
+  if (QGuiApplication::platformName() == QLatin1String("offscreen")) {
+    // The offscreen platform does not discover Windows system fonts. Use the
+    // same installed Korean face as the field app for label and pixel checks.
+    const QDir windows(qEnvironmentVariable("WINDIR"));
+    for (const QString& file : {QStringLiteral("malgun.ttf"), QStringLiteral("malgunbd.ttf")}) {
+      const QString path = windows.filePath(QStringLiteral("Fonts/") + file);
+      QVERIFY2(QFontDatabase::addApplicationFont(path) >= 0, qPrintable(path));
+    }
+  }
+#endif
+  KaTheme::apply(qApp);
+  const QRegularExpression token(QStringLiteral("@[A-Za-z][A-Za-z0-9_]*@"));
+  QVERIFY2(!token.match(qApp->styleSheet()).hasMatch(), "applied QSS must resolve metric tokens");
+  QVERIFY2(!token.match(KaTheme::resolvedStyleSheet(KaTheme::embeddedStyleSheet())).hasMatch(),
+           "embedded fallback must resolve the same metric tokens");
+}
+
+namespace {
+QRect changedPixels(const QImage& first, const QImage& second) {
+  if (first.size() != second.size())
+    return {};
+  QRect bounds;
+  for (int y = 0; y < first.height(); ++y) {
+    for (int x = 0; x < first.width(); ++x) {
+      const QColor a = first.pixelColor(x, y);
+      const QColor b = second.pixelColor(x, y);
+      if (qAbs(a.red() - b.red()) > 16 || qAbs(a.green() - b.green()) > 16 ||
+          qAbs(a.blue() - b.blue()) > 16)
+        bounds = bounds.united(QRect(x, y, 1, 1));
+    }
+  }
+  return bounds;
+}
+
+template <typename Predicate>
+int opaquePixelsMatching(const QImage& image, Predicate matches) {
+  int count = 0;
+  for (int y = 0; y < image.height(); ++y) {
+    for (int x = 0; x < image.width(); ++x) {
+      const QColor color = image.pixelColor(x, y);
+      if (color.alpha() >= 200 && matches(color))
+        ++count;
+    }
+  }
+  return count;
+}
+
+bool closeColor(const QColor& a, const QColor& b) {
+  return qAbs(a.red() - b.red()) <= 8 && qAbs(a.green() - b.green()) <= 8 &&
+         qAbs(a.blue() - b.blue()) <= 8;
+}
+
+double relativeLuminance(const QColor& color) {
+  const auto linear = [](double value) {
+    return value <= 0.04045 ? value / 12.92 : std::pow((value + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * linear(color.redF()) + 0.7152 * linear(color.greenF()) +
+         0.0722 * linear(color.blueF());
+}
+
+double contrastRatio(const QColor& first, const QColor& second) {
+  const double a = relativeLuminance(first);
+  const double b = relativeLuminance(second);
+  return (qMax(a, b) + 0.05) / (qMin(a, b) + 0.05);
+}
+
+QColor logicalPixel(const QImage& image, int x, int y) {
+  return image.pixelColor(qRound(x * image.devicePixelRatio()), qRound(y * image.devicePixelRatio()));
+}
+
+double worstVerticalContrast(const QImage& image, int x, int fromY, int toY, const QColor& ink) {
+  double worst = std::numeric_limits<double>::max();
+  for (int y = fromY; y <= toY; ++y)
+    worst = qMin(worst, contrastRatio(ink, logicalPixel(image, x, y)));
+  return worst;
+}
+
+const char* const themedIconIds[] = {
+    "new", "open", "save", "save_as", "select", "measure", "draw_poly", "trench_grid",
+    "contour", "dem", "soil", "paleo", "geology", "river", "georef", "buffer",
+    "check", "pdf", "export", "more",
+};
+}
+
+void TestTheme::ribbonButtons_renderAtIntendedSize() {
+  // Reproduce the real nesting: toolbar -> ribbon -> group frame -> button.
+  // This is deliberately not QToolBar::addAction, which propagates iconSize.
+  QToolBar toolbar;
+  toolbar.setAttribute(Qt::WA_DontShowOnScreen);
+  toolbar.setObjectName(QStringLiteral("mainToolbar"));
+  toolbar.setIconSize(QSize(25, 25));
+  auto* ribbon = new KaBeginnerRibbon(&toolbar);
+  ribbon->addGroup(QStringLiteral("survey"), QStringLiteral("조사파일"));
+  ribbon->addGroup(QStringLiteral("record"), QStringLiteral("기록"));
+  ribbon->addGroup(QStringLiteral("basemap"), QStringLiteral("배경 지도"));
+  ribbon->addGroup(QStringLiteral("align"), QStringLiteral("좌표 정합"));
+  ribbon->addGroup(QStringLiteral("out"), QStringLiteral("내보내기"));
+  ribbon->addGroup(QStringLiteral("find"), QStringLiteral("찾기"));
+  struct ButtonSpec { const char* group; const char* icon; const char* text; bool custom; };
+  const ButtonSpec specs[] = {
+      {"survey", "new", "새 조사", false}, {"survey", "open", "조사 열기", false},
+      {"survey", "save", "저장", false}, {"survey", "save_as", "다른 이름", false},
+      {"record", "select", "선택", false},
+      {"record", "measure", "거리 측정", false}, {"record", "draw_poly", "그리기", true},
+      {"record", "trench_grid", "시굴격자", false},
+      {"basemap", "contour", "지형맵", true}, {"basemap", "dem", "DEM", true},
+      {"basemap", "soil", "토양도", true}, {"basemap", "paleo", "고지형", true},
+      {"basemap", "geology", "지질도", false}, {"basemap", "river", "수계도", false},
+      {"align", "georef", "사진·CAD\n정합", false}, {"align", "buffer", "주변 범위", true},
+      {"out", "check", "검수", false}, {"out", "pdf", "도면 만들기", false},
+      {"out", "export", "내보내기", false},
+      {"find", "more", "더보기", true},
+  };
+  QList<QToolButton*> buttons;
+  for (const auto& spec : specs) {
+    QToolButton* button = nullptr;
+    const QIcon icon = KaIcons::icon(QString::fromLatin1(spec.icon));
+    if (spec.custom) {
+      button = new QToolButton(ribbon);
+      button->setText(QString::fromUtf8(spec.text));
+      button->setIcon(icon);
+      if (QString::fromLatin1(spec.icon) == QLatin1String("more")) {
+        auto* menu = new QMenu(button);
+        menu->addAction(QStringLiteral("작업 목록"));
+        button->setMenu(menu);
+        button->setPopupMode(QToolButton::InstantPopup);
+      }
+      ribbon->addWidget(QString::fromLatin1(spec.group), button);
+    } else {
+      auto* action = new QAction(icon, QString::fromUtf8(spec.text), ribbon);
+      button = ribbon->addAction(QString::fromLatin1(spec.group), action);
+    }
+    QVERIFY(button);
+    button->setObjectName(QString::fromLatin1(spec.icon));
+    buttons.append(button);
+  }
+  toolbar.addWidget(ribbon);
+  toolbar.resize(qMax(1800, toolbar.sizeHint().width()), toolbar.sizeHint().height());
+  toolbar.show();
+  QCoreApplication::processEvents();
+
+  const int commonHeight = buttons.front()->height();
+  bool testedTwoLines = false;
+  for (QToolButton* button : buttons) {
+    QVERIFY(qobject_cast<QFrame*>(button->parentWidget()));
+    QCOMPARE(button->iconSize(), QSize(40, 40));
+    QCOMPARE(button->font().pixelSize(), 13);
+    QCOMPARE(button->height(), commonHeight);
+    QCOMPARE(button->toolButtonStyle(), Qt::ToolButtonTextUnderIcon);
+    QVERIFY2(toolbar.rect().contains(QRect(button->mapTo(&toolbar, QPoint()), button->size())),
+             "all fixture buttons must fit without toolbar overflow");
+    const QFontMetrics fm(button->font());
+    const QSize label = fm.size(Qt::TextShowMnemonic, button->text());
+    QVERIFY2(button->height() >= 40 + 4 + label.height() + 6,
+             qPrintable(button->text() + QStringLiteral(": icon and label must fit")));
+    QVERIFY(button->width() >= label.width() + 6);
+    testedTwoLines |= button->text().contains(QLatin1Char('\n'));
+
+    // Compare actual widget pixels against the same widget with a transparent
+    // icon. A non-null transparent icon keeps the layout and label unchanged.
+    const QImage rendered = button->grab().toImage();
+    const QIcon original = button->icon();
+    QPixmap transparent(64, 64);
+    transparent.fill(Qt::transparent);
+    button->setIcon(QIcon(transparent));
+    const QImage withoutIcon = button->grab().toImage();
+    button->setIcon(original);
+    QCOMPARE(rendered.size(), withoutIcon.size());
+    const QRect ink = changedPixels(rendered, withoutIcon);
+    const qreal dpr = rendered.devicePixelRatio();
+    QVERIFY2(qMax(ink.width(), ink.height()) / dpr >= 18.0,
+             qPrintable(button->text() + QStringLiteral(": actual icon ink must exceed the old 16px box")));
+    QVERIFY2(ink.width() / dpr <= 42.0 && ink.height() / dpr <= 42.0,
+             "pixel difference must be confined to the icon, not label/layout movement");
+    qInfo().noquote() << button->text().replace(QLatin1Char('\n'), QLatin1Char('/'))
+                     << "button" << button->size() << "icon ink (physical px)" << ink.size()
+                     << "DPR" << dpr;
+  }
+  QVERIFY2(testedTwoLines, "fixture must exercise the two-line label path");
+  // A toolbar size change must not shrink nested ribbon icons again.
+  toolbar.setIconSize(QSize(24, 24));
+  QCoreApplication::processEvents();
+  for (QToolButton* button : buttons) {
+    QCOMPARE(button->iconSize(), QSize(40, 40));
+    QCOMPARE(button->height(), commonHeight);
+  }
+  const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+  if (!output.isEmpty() && QDir(output).exists()) {
+    const QString path = QDir(output).filePath(QStringLiteral("theme-ribbon-widget-render.png"));
+    QVERIFY2(toolbar.grab().save(path), qPrintable(path));
+    qInfo().noquote() << "Automatic Qt widget render; not a portable field screenshot:" << path;
+  }
+}
+
+void TestTheme::domainIcons_useDistinctColors() {
+  const auto& palette = KaTheme::iconPalette();
+  const struct { const char* id; QColor color; } groups[] = {
+      {"new", palette.file}, {"draw_poly", palette.record}, {"dem", palette.map},
+      {"measure", palette.record}, {"tape", palette.record},
+      {"georef", palette.align}, {"pdf", palette.output}, {"section", palette.output},
+  };
+  for (const auto& group : groups) {
+    const QImage image = KaIcons::icon(QString::fromLatin1(group.id)).pixmap(64, 64).toImage();
+    QVERIFY2(opaquePixelsMatching(image, [&](const QColor& c) {
+      const int distance = qAbs(c.hsvHue() - group.color.hsvHue());
+      return c.hsvSaturation() >= 30 && qMin(distance, 360 - distance) <= 15;
+    }) >= 20,
+             group.id);
+  }
+  const QImage water = KaIcons::icon(QStringLiteral("river")).pixmap(64, 64).toImage();
+  QVERIFY2(opaquePixelsMatching(water, [](const QColor& c) {
+    return c.blue() > c.red() + 25 && c.blue() > c.green() + 10;
+  }) >= 20, "river must visibly contain blue water, not only neutral outlines");
+  const QImage soil = KaIcons::icon(QStringLiteral("soil")).pixmap(64, 64).toImage();
+  QVERIFY2(opaquePixelsMatching(soil, [](const QColor& c) {
+    return c.red() > c.green() + 15 && c.green() > c.blue() + 10;
+  }) >= 20, "soil must visibly contain earth brown");
+  QVERIFY2(opaquePixelsMatching(soil, [](const QColor& c) {
+    return qMax(c.red(), qMax(c.green(), c.blue())) < 100;
+  }) >= 20, "soil needs a dark outline as well as the earth fill");
+}
+
+void TestTheme::iconStates_preserveMeaningAndDisableColor() {
+  QWidget grid;
+  grid.setAttribute(Qt::WA_DontShowOnScreen);
+  auto* layout = new QGridLayout(&grid);
+  const struct { const char* label; QIcon::Mode mode; QIcon::State state; } states[] = {
+      {"Normal", QIcon::Normal, QIcon::Off}, {"Checked", QIcon::Normal, QIcon::On},
+      {"Active", QIcon::Active, QIcon::Off}, {"Selected", QIcon::Selected, QIcon::Off},
+      {"Disabled", QIcon::Disabled, QIcon::Off},
+  };
+  for (int column = 0; column < 5; ++column)
+    layout->addWidget(new QLabel(QString::fromLatin1(states[column].label), &grid), 0, column + 1);
+  int row = 1;
+  for (const char* id : themedIconIds) {
+    const QIcon icon = KaIcons::icon(QString::fromLatin1(id));
+    const QImage normal = icon.pixmap(64, 64, QIcon::Normal, QIcon::Off).toImage();
+    const QImage checked = icon.pixmap(64, 64, QIcon::Normal, QIcon::On).toImage();
+    const QImage disabled = icon.pixmap(64, 64, QIcon::Disabled, QIcon::Off).toImage();
+    QVERIFY2(!normal.isNull() && !checked.isNull() && !disabled.isNull(), id);
+    QVERIFY2(!changedPixels(normal, checked).isEmpty(), id);
+    int sharedColoredPixels = 0;
+    int huePreservedPixels = 0;
+    int brightnessChanges = 0;
+    for (int y = 0; y < qMin(normal.height(), checked.height()); ++y) {
+      for (int x = 0; x < qMin(normal.width(), checked.width()); ++x) {
+        const QColor a = normal.pixelColor(x, y);
+        const QColor b = checked.pixelColor(x, y);
+        if (a.alpha() < 200 || b.alpha() < 200 || a.hsvSaturation() < 60 || b.hsvSaturation() < 60)
+          continue;
+        ++sharedColoredPixels;
+        const int hueDistance = qAbs(a.hsvHue() - b.hsvHue());
+        if (qMin(hueDistance, 360 - hueDistance) <= 15)
+          ++huePreservedPixels;
+        if (qAbs(a.value() - b.value()) >= 3)
+          ++brightnessChanges;
+      }
+    }
+    // Neutral utility icons may have no saturated group fill. Their checked
+    // marker is covered by the pixel difference check above.
+    const int normalColored = opaquePixelsMatching(normal, [](const QColor& c) {
+      return c.hsvSaturation() >= 60;
+    });
+    if (normalColored >= 20) {
+      QVERIFY2(sharedColoredPixels * 2 >= normalColored, id);
+      QVERIFY2(huePreservedPixels * 100 >= sharedColoredPixels * 70, id);
+      QVERIFY2(brightnessChanges >= 8, id);
+    }
+    int visibleDisabled = 0;
+    for (int y = 0; y < disabled.height(); ++y) {
+      for (int x = 0; x < disabled.width(); ++x) {
+        const QColor c = disabled.pixelColor(x, y);
+        if (c.alpha() < 32)
+          continue;
+        ++visibleDisabled;
+        QVERIFY2(qAbs(c.red() - c.green()) <= 2 && qAbs(c.green() - c.blue()) <= 2, id);
+      }
+    }
+    QVERIFY2(visibleDisabled >= 20, id);
+    layout->addWidget(new QLabel(QString::fromLatin1(id), &grid), row, 0);
+    for (int column = 0; column < 5; ++column) {
+      auto* preview = new QLabel(&grid);
+      preview->setFixedSize(72, 72);
+      preview->setAlignment(Qt::AlignCenter);
+      preview->setPixmap(icon.pixmap(64, 64, states[column].mode, states[column].state));
+      layout->addWidget(preview, row, column + 1);
+    }
+    ++row;
+  }
+  grid.resize(grid.sizeHint());
+  const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+  if (!output.isEmpty() && QDir(output).exists()) {
+    const QString path = QDir(output).filePath(QStringLiteral("theme-icon-state-widget-render.png"));
+    QVERIFY2(grid.grab().save(path), qPrintable(path));
+    qInfo().noquote() << "Automatic Qt widget render; not a portable field screenshot:" << path;
+  }
+}
+
+void TestTheme::explicitIconTint_remainsMonochrome() {
+  for (const QColor& ink : {QColor(157, 38, 181), KaTheme::iconPalette().ink}) {
+    for (const char* id : {"river", "soil", "georef", "pdf"}) {
+      const QIcon icon = KaIcons::icon(QString::fromLatin1(id), ink);
+      for (QIcon::Mode mode : {QIcon::Normal, QIcon::Active, QIcon::Selected, QIcon::Disabled}) {
+        for (QIcon::State state : {QIcon::Off, QIcon::On}) {
+          const QImage image = icon.pixmap(64, 64, mode, state).toImage();
+          int visible = 0;
+          int maxAlpha = 0;
+          for (int y = 0; y < image.height(); ++y) {
+            for (int x = 0; x < image.width(); ++x) {
+              const QColor c = image.pixelColor(x, y);
+              maxAlpha = qMax(maxAlpha, c.alpha());
+              if (c.alpha() < 64)
+                continue;
+              ++visible;
+              QVERIFY2(closeColor(c, ink), id);
+            }
+          }
+          QVERIFY2(visible >= 20, qPrintable(QStringLiteral("%1 mode=%2 state=%3 visible=%4 maxAlpha=%5")
+                                                .arg(QString::fromLatin1(id)).arg(int(mode)).arg(int(state))
+                                                .arg(visible).arg(maxAlpha)));
+        }
+      }
+    }
+  }
+}
+
+void TestTheme::chromeSurfaces_renderGlossAndReadableText() {
+  const auto& tokens = KaTheme::tokens();
+  const QColor backgrounds[] = {
+      tokens.surface, tokens.glossMiddle, tokens.glossBottom, tokens.hoverTop, tokens.hoverBottom,
+      tokens.pressedTop, tokens.pressedBottom, tokens.selectedTop, tokens.selectedBottom, tokens.desk,
+      tokens.glossReflection, tokens.glossShoulder,
+  };
+  for (const QColor& background : backgrounds) {
+    QVERIFY2(contrastRatio(tokens.ink, background) >= 4.5, "body text against every gradient stop");
+    QVERIFY2(contrastRatio(tokens.inkMuted, background) >= 4.5, "secondary text against every gradient stop");
+  }
+  QVERIFY(contrastRatio(tokens.inkDisabled, tokens.disabledSurface) >= 4.5);
+  for (const QColor& background : {tokens.accentReflection, tokens.sky1, tokens.sky2})
+    QVERIFY(contrastRatio(tokens.surface, background) >= 4.5);
+
+  QMainWindow window;
+  window.setAttribute(Qt::WA_DontShowOnScreen);
+  auto* toolbar = new QToolBar(&window);
+  toolbar->setObjectName(QStringLiteral("mainToolbar"));
+  auto* ribbon = new KaBeginnerRibbon(toolbar);
+  ribbon->addGroup(QStringLiteral("survey"), QStringLiteral("조사파일"));
+  ribbon->addGroup(QStringLiteral("record"), QStringLiteral("기록"));
+  ribbon->addAction(QStringLiteral("survey"), new QAction(KaIcons::icon(QStringLiteral("new")),
+                                                           QStringLiteral("새 조사"), ribbon));
+  ribbon->addAction(QStringLiteral("survey"), new QAction(KaIcons::icon(QStringLiteral("open")),
+                                                           QStringLiteral("조사 열기"), ribbon));
+  ribbon->addAction(QStringLiteral("record"), new QAction(KaIcons::icon(QStringLiteral("draw_poly")),
+                                                           QStringLiteral("그리기"), ribbon));
+  toolbar->addWidget(ribbon);
+  window.addToolBar(toolbar);
+  auto* central = new QWidget(&window);
+  auto* columns = new QHBoxLayout(central);
+  auto* panel = new QFrame(central);
+  panel->setObjectName(QStringLiteral("layersCard"));
+  panel->setFixedWidth(210);
+  auto* panelRows = new QVBoxLayout(panel);
+  panelRows->setContentsMargins(16, 16, 16, 16);
+  auto* caption = new QLabel(QStringLiteral("조사 데이터"), panel);
+  caption->setObjectName(QStringLiteral("cardCaption"));
+  auto* body = new QLabel(QStringLiteral("조사구역\n유구 기록\n기준점"), panel);
+  panelRows->addWidget(caption);
+  panelRows->addWidget(body);
+  panelRows->addStretch();
+  columns->addWidget(panel);
+  auto* tabs = new QTabWidget(central);
+  tabs->setObjectName(QStringLiteral("viewTabs"));
+  auto* page = new QWidget(tabs);
+  auto* pageRows = new QVBoxLayout(page);
+  auto* map = new QFrame(page);
+  map->setObjectName(QStringLiteral("mapCard"));
+  auto* mapRows = new QVBoxLayout(map);
+  mapRows->addWidget(new QLabel(QStringLiteral("지도 작업 영역 · EPSG:5187"), map));
+  mapRows->addStretch();
+  pageRows->addWidget(map, 1);
+  auto* stateRows = new QGridLayout;
+  const QStringList names = {QStringLiteral("기본"), QStringLiteral("선택"),
+                             QStringLiteral("누름"), QStringLiteral("비활성")};
+  QList<QPushButton*> states;
+  for (int column = 0; column < names.size(); ++column) {
+    // Empty text makes the sampled center column pure background in every state.
+    auto* button = new QPushButton(page);
+    button->setFixedSize(124, 60);
+    if (column == 1) {
+      button->setCheckable(true);
+      button->setChecked(true);
+    } else if (column == 2) {
+      button->setDown(true);
+    } else if (column == 3) {
+      button->setEnabled(false);
+    }
+    states.append(button);
+    stateRows->addWidget(button, 0, column);
+    auto* label = new QLabel(names[column], page);
+    label->setAlignment(Qt::AlignCenter);
+    stateRows->addWidget(label, 1, column);
+  }
+  pageRows->addLayout(stateRows);
+  tabs->addTab(page, QStringLiteral("지도"));
+  tabs->addTab(new QWidget(tabs), QStringLiteral("검수"));
+  columns->addWidget(tabs, 1);
+  window.setCentralWidget(central);
+  auto* status = new QStatusBar(&window);
+  status->setObjectName(QStringLiteral("kaStatusBar"));
+  auto* statusText = new QLabel(QStringLiteral("저장 완료 · 다음: 도면 만들기"), status);
+  status->addWidget(statusText);
+  window.setStatusBar(status);
+  window.resize(1000, 540);
+  window.show();
+  QCoreApplication::processEvents();
+
+  const QColor high[] = {tokens.glossReflection, tokens.glossReflection, tokens.pressedTop, tokens.disabledSurface};
+  const QColor low[] = {tokens.glossBottom, tokens.selectedBottom, tokens.pressedBottom, tokens.disabledSurface};
+  for (int index = 0; index < states.size(); ++index) {
+    QPushButton* button = states[index];
+    const QImage rendered = button->grab().toImage();
+    const QColor top = logicalPixel(rendered, button->width() / 2, 8);
+    const QColor bottom = logicalPixel(rendered, button->width() / 2, button->height() - 9);
+    if (index < 3)
+      QVERIFY2(top != bottom, qPrintable(names[index] + QStringLiteral(": actual gradient pixels")));
+    else
+      QCOMPARE(top, bottom);
+    for (const QColor& sample : {top, bottom}) {
+      QVERIFY(sample.red() >= qMin(high[index].red(), low[index].red()) - 2);
+      QVERIFY(sample.red() <= qMax(high[index].red(), low[index].red()) + 2);
+      QVERIFY(sample.green() >= qMin(high[index].green(), low[index].green()) - 2);
+      QVERIFY(sample.green() <= qMax(high[index].green(), low[index].green()) + 2);
+      QVERIFY(sample.blue() >= qMin(high[index].blue(), low[index].blue()) - 2);
+      QVERIFY(sample.blue() <= qMax(high[index].blue(), low[index].blue()) + 2);
+    }
+    const QPalette::ColorGroup group = button->isEnabled() ? QPalette::Active : QPalette::Disabled;
+    const QColor foreground = button->palette().color(group, QPalette::ButtonText);
+    const double ratio = worstVerticalContrast(rendered, button->width() / 2, 8,
+                                               button->height() - 9, foreground);
+    QVERIFY2(ratio >= 4.5, qPrintable(names[index] + QStringLiteral(": contrast %1").arg(ratio)));
+    qInfo().noquote() << "button-state" << index << "top" << top.name() << "bottom" << bottom.name()
+                     << "worst rendered contrast" << ratio;
+  }
+  const QImage gloss = states.front()->grab().toImage();
+  const int centerX = states.front()->width() / 2;
+  const QColor reflection = logicalPixel(gloss, centerX, 6);
+  const QColor shoulder = logicalPixel(gloss, centerX, 18);
+  const QColor middle = logicalPixel(gloss, centerX, 29);
+  const QColor shadow = logicalPixel(gloss, centerX, 50);
+  QVERIFY(closeColor(reflection, tokens.glossReflection));
+  QVERIFY(relativeLuminance(reflection) > relativeLuminance(shoulder));
+  QVERIFY(relativeLuminance(shoulder) > relativeLuminance(middle));
+  QVERIFY(relativeLuminance(middle) > relativeLuminance(shadow));
+  qInfo().noquote() << "rendered gloss reflection/shoulder/middle/shadow"
+                   << reflection.name() << shoulder.name() << middle.name() << shadow.name();
+  const QImage panelImage = panel->grab().toImage();
+  for (QLabel* text : {caption, body}) {
+    const QColor foreground = text->palette().color(text->foregroundRole());
+    QVERIFY(worstVerticalContrast(panelImage, panel->width() - 10, 16,
+                                  panel->height() - 17, foreground) >= 4.5);
+  }
+  const QImage statusImage = status->grab().toImage();
+  QVERIFY(worstVerticalContrast(statusImage, status->width() - 60, 6, status->height() - 7,
+                                statusText->palette().color(statusText->foregroundRole())) >= 4.5);
+  const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+  if (!output.isEmpty() && QDir(output).exists()) {
+    const QString path = QDir(output).filePath(QStringLiteral("theme-chrome-states-widget-render.png"));
+    QVERIFY2(window.grab().save(path), qPrintable(path));
+    qInfo().noquote() << "Automatic Qt widget render; not a portable field screenshot:" << path;
+  }
+}
+
+void TestTheme::softenedPalette_matchesPreviousIntensity() {
+  // Snapshot before the explicit 20% softening request (2026-09-08).
+  // Keep the previous colors here so the test does not reproduce current values.
+  const auto& tokens = KaTheme::tokens();
+  const auto& icons = KaTheme::iconPalette();
+  const struct { QColor before; QColor after; } surfaces[] = {
+      {QColor(0xEE, 0xF1, 0xF4), tokens.desk},
+      {QColor(0xF4, 0xF6, 0xF8), tokens.glossMiddle},
+      {QColor(0xE5, 0xEA, 0xF0), tokens.glossBottom},
+      {QColor(0xE0, 0xE9, 0xF0), tokens.hoverBottom},
+      {QColor(0xD6, 0xE0, 0xE9), tokens.pressedTop},
+      {QColor(0xE5, 0xEC, 0xF2), tokens.pressedBottom},
+      {QColor(0xF3, 0xF7, 0xFA), tokens.selectedTop},
+      {QColor(0xDD, 0xE8, 0xEF), tokens.selectedBottom},
+      {QColor(0xF0, 0xF2, 0xF4), tokens.disabledSurface},
+  };
+  for (const auto& surface : surfaces) {
+    QCOMPARE(surface.after.red(), qRound(surface.before.red() * 0.8 + 255 * 0.2));
+    QCOMPARE(surface.after.green(), qRound(surface.before.green() * 0.8 + 255 * 0.2));
+    QCOMPARE(surface.after.blue(), qRound(surface.before.blue() * 0.8 + 255 * 0.2));
+  }
+  const struct { QColor before; QColor after; } fills[] = {
+      {QColor(0x2C, 0x6F, 0x91), tokens.sky1}, {QColor(0xA3, 0x3A, 0x2E), tokens.danger},
+      {QColor(0x32, 0x6B, 0x4A), tokens.ok}, {QColor(0x32, 0x6B, 0x9B), icons.file},
+      {QColor(0x95, 0x60, 0x29), icons.record}, {QColor(0x39, 0x73, 0x68), icons.map},
+      {QColor(0x6B, 0x59, 0x96), icons.align}, {QColor(0x24, 0x78, 0x6C), icons.output},
+      {QColor(0x1D, 0x6E, 0xB8), icons.water}, {QColor(0x93, 0x60, 0x39), icons.earth},
+  };
+  for (const auto& fill : fills) {
+    QVERIFY(qAbs(fill.after.hslSaturationF() / fill.before.hslSaturationF() - 0.8) < 0.02);
+    QVERIFY(qAbs(fill.after.hslHueF() - fill.before.hslHueF()) < 0.01);
+    QVERIFY(qAbs(fill.after.lightnessF() - fill.before.lightnessF()) < 0.005);
+    QCOMPARE(fill.after.alpha(), fill.before.alpha());
+  }
+  QCOMPARE(tokens.ink, QColor(0x20, 0x28, 0x31));
+  QCOMPARE(tokens.inkMuted, QColor(0x52, 0x60, 0x6D));
+  QCOMPARE(tokens.inkDisabled, QColor(0x59, 0x68, 0x74));
+  QCOMPARE(tokens.border, QColor(0xCB, 0xD3, 0xDB));
+  QCOMPARE(icons.ink, QColor(0x23, 0x29, 0x30));
+}
+
+void TestTheme::regionChip_remainsCompactAndTextOnly() {
+  QWidget locator;
+  locator.setAttribute(Qt::WA_DontShowOnScreen);
+  locator.setObjectName(QStringLiteral("regionLocator"));
+  auto* chip = new QToolButton(&locator);
+  chip->setObjectName(QStringLiteral("regionChip"));
+  chip->setText(QStringLiteral("경북"));
+  chip->setToolButtonStyle(Qt::ToolButtonTextOnly);
+  auto* menu = new QMenu(chip);
+  QAction* action = menu->addAction(QStringLiteral("안동시"));
+  chip->setMenu(menu);
+  chip->setPopupMode(QToolButton::InstantPopup);
+  chip->ensurePolished();
+  chip->resize(chip->sizeHint());
+  QCOMPARE(chip->font().pixelSize(), 11);
+  QCOMPARE(chip->toolButtonStyle(), Qt::ToolButtonTextOnly);
+  QVERIFY(chip->icon().isNull());
+  QVERIFY(action->icon().isNull());
+  QVERIFY(chip->height() <= 30);
+  QVERIFY(chip->width() <= 48);
+  QVERIFY(!chip->grab().isNull());
+}
+
 void TestTheme::tokensMatchSpec() {
-  // Ivory paper + terracotta accent (Anthropic-inspired palette).
-  QCOMPARE(KaTheme::tokens().sky1, QColor(30, 103, 198));
-  QCOMPARE(KaTheme::tokens().ink, QColor(31, 35, 40));
-  QCOMPARE(KaTheme::tokens().sky5, QColor(30, 103, 198));
-  QCOMPARE(KaTheme::tokens().border, QColor(213, 217, 222));
-  QCOMPARE(KaTheme::tokens().canvasNeutral, QColor(255, 255, 255));
-  // 창 바탕은 따뜻한 베이지. 지도·카드의 흰색(canvasNeutral)은 그대로다.
-  QCOMPARE(KaTheme::tokens().desk, QColor(247, 232, 211));
+  const auto& tokens = KaTheme::tokens();
+  QCOMPARE(tokens.canvasNeutral, QColor(Qt::white));
+  QVERIFY(tokens.ink.red() < 60 && tokens.ink.green() < 60 && tokens.ink.blue() < 60);
+  QVERIFY(tokens.sky1.green() > tokens.sky1.red() + 20 && tokens.sky1.blue() > tokens.sky1.red() + 20);
+  QCOMPARE(tokens.sky1, tokens.sky5);
+  QVERIFY(tokens.desk.blue() >= tokens.desk.red());
+  QVERIFY(tokens.desk.blue() - tokens.desk.red() <= 16);
+  QVERIFY(tokens.surface != tokens.glossBottom);
 }
 
 static QString normalize(QString s) { return s.replace(QLatin1String("\r\n"), QLatin1String("\n")); }
@@ -72,10 +639,8 @@ void TestTheme::requiredSelectorsPresent() {
       "QAbstractSpinBox::up-button",
       "QCheckBox",
       "QToolTip",
-      "QPushButton:checked",
       "QPushButton#btnAdjustDone",
       "QToolButton.sampleTile",
-      "QToolButton.sampleTile:checked",
       "QLabel#emptyState",
       "QToolBar#mainToolbar::separator",
       "QTableWidget",
@@ -92,32 +657,47 @@ void TestTheme::requiredSelectorsPresent() {
   for (const char* sel : need) {
     QVERIFY2(qss.contains(QLatin1String(sel)), sel);
   }
+  for (const QString& type : {QStringLiteral("QPushButton"), QStringLiteral("QToolButton.sampleTile")}) {
+    const QRegularExpression checked(QRegularExpression::escape(type) +
+                                    QStringLiteral(R"((?::enabled)?:checked(?::enabled)?(?=\s*[,\{]))"));
+    QVERIFY2(checked.match(qss).hasMatch(), qPrintable(type + QStringLiteral(":checked rule")));
+  }
 }
 
-void TestTheme::toolbarCheckedIsUnderline() {
-  const QString qss = KaTheme::embeddedStyleSheet();
-  const QRegularExpression solidMain(
-      QStringLiteral(R"(QToolBar#mainToolbar QToolButton:checked\s*\{[^}]*background:\s*#1E67C6)"));
-  QVERIFY2(!solidMain.match(qss).hasMatch(),
-           "main toolbar :checked must not stay solid blue");
-  const QRegularExpression washMain(
-      QStringLiteral(R"(QToolBar#mainToolbar QToolButton:checked\s*\{[^}]*background:\s*#E8F0FA)"));
-  QVERIFY2(!washMain.match(qss).hasMatch(),
-           "B Underline: no pale-blue fill on main toolbar checked");
-  QVERIFY2(qss.contains(QLatin1String("border-bottom: 2px solid #1E67C6")),
-           "checked tools use a 2px underline, not a filled chip");
-  const QRegularExpression solidPrimary(
-      QStringLiteral(R"(QToolButton#btnPrimary\s*\{[^}]*background:\s*#1E67C6)"));
-  QVERIFY2(!solidPrimary.match(qss).hasMatch(),
-           "조사파일 단추는 항상 파란 면이면 안 됨");
+void TestTheme::toolbarCheckedHasDistinctTreatment() {
+  QToolBar toolbar;
+  toolbar.setAttribute(Qt::WA_DontShowOnScreen);
+  toolbar.setObjectName(QStringLiteral("mainToolbar"));
+  auto* ribbon = new KaBeginnerRibbon(&toolbar);
+  ribbon->addGroup(QStringLiteral("record"), QStringLiteral("기록"));
+  auto* normalAction = new QAction(KaIcons::icon(QStringLiteral("draw_poly")), QStringLiteral("그리기"), ribbon);
+  auto* checkedAction = new QAction(normalAction->icon(), normalAction->text(), ribbon);
+  checkedAction->setCheckable(true);
+  checkedAction->setChecked(true);
+  QToolButton* normal = ribbon->addAction(QStringLiteral("record"), normalAction);
+  QToolButton* checked = ribbon->addAction(QStringLiteral("record"), checkedAction);
+  toolbar.addWidget(ribbon);
+  toolbar.resize(400, toolbar.sizeHint().height());
+  toolbar.show();
+  QCoreApplication::processEvents();
+  const QImage off = normal->grab().toImage();
+  const QImage on = checked->grab().toImage();
+  // Compare empty face pixels, not the separately tested icon/check marker.
+  const QColor normalFace = logicalPixel(off, 8, normal->height() / 2);
+  const QColor checkedFace = logicalPixel(on, 8, checked->height() / 2);
+  QVERIFY2(normalFace != checkedFace, "checked ribbon needs a visible face treatment");
+  const QColor foreground = checked->palette().color(QPalette::ButtonText);
+  QVERIFY(contrastRatio(foreground, checkedFace) >= 4.5);
 }
 
-void TestTheme::primaryToolbarIconsUseInk() {
+void TestTheme::primaryToolbarIconsRemainReadable() {
   QFile f(QStringLiteral("src/app/MainWindow.cpp"));
   QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
   const QString src = QString::fromUtf8(f.readAll());
   QVERIFY2(!src.contains(QLatin1String("KaIcons::icon(iconId, QColor(255, 255, 255))")),
            "outlined 새조사/열기/저장 chips must not use white icons");
+  QVERIFY2(!src.contains(QLatin1String("b->setIcon(KaIcons::icon(iconId, QColor(")),
+           "primary ribbon buttons must not flatten group-colored icons to a hardcoded tint");
 }
 
 void TestTheme::noCheapSpinArrowBlock() {
@@ -217,5 +797,5 @@ void TestTheme::beginnerChrome_questionLabels() {
            "위 리본 PDF는 범례창과 중복이라 뺌");
 }
 
-QTEST_GUILESS_MAIN(TestTheme)
+QTEST_MAIN(TestTheme)
 #include "test_theme.moc"

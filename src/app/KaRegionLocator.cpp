@@ -7,6 +7,8 @@
 #include <QKeyEvent>
 #include <QComboBox>
 #include <QFont>
+#include <QGuiApplication>
+#include <QScreen>
 #include <QSignalBlocker>
 #include <QFrame>
 #include <QGridLayout>
@@ -16,6 +18,7 @@
 #include <QPushButton>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <algorithm>
 
 KaRegionLocator::KaRegionLocator(QWidget* parent) : QWidget(parent) {
   setObjectName(QStringLiteral("regionLocator"));
@@ -63,6 +66,7 @@ KaRegionLocator::KaRegionLocator(QWidget* parent) : QWidget(parent) {
       b->setChecked(true);
       m_activeChip = b;
       openAddressPopup(sido);
+      emit regionSelected(sido);
     });
   }
 }
@@ -105,7 +109,8 @@ void KaRegionLocator::openAddressPopup(const QString& sido) {
     col->setSpacing(8);
     m_sidoLabel = new QLabel(m_popup);
     m_sidoLabel->setObjectName(QStringLiteral("regionSidoTitle"));
-    auto* row = new QHBoxLayout();
+    auto* row = new QGridLayout();
+    m_addressLayout = row;
     row->setSpacing(6);
     const QFont hangul(QStringLiteral("Malgun Gothic"), 10);
     m_city = new QComboBox(m_popup);
@@ -134,20 +139,16 @@ void KaRegionLocator::openAddressPopup(const QString& sido) {
     m_lot->setInputMethodHints(Qt::ImhNone);
     auto* go = new QPushButton(QStringLiteral("찾기"), m_popup);
     go->setDefault(true);
-    auto* fieldMap = new QPushButton(QStringLiteral("현장 지도"), m_popup);
-    fieldMap->setObjectName(QStringLiteral("regionFieldMap"));
-    fieldMap->setToolTip(QStringLiteral("고른 읍면동 위성만 남기고 유적 SHP를 올립니다"));
-    fieldMap->setAutoDefault(false);
     // 잘못 눌렀을 때 빠져나갈 길. Esc·바깥 클릭·같은 칩 다시 누르기와 같은 동작.
     auto* cancel = new QPushButton(QStringLiteral("취소"), m_popup);
     cancel->setObjectName(QStringLiteral("regionCancel"));
     cancel->setAutoDefault(false);
-    row->addWidget(m_city, 0);
-    row->addWidget(m_dong, 1);
-    row->addWidget(m_lot, 0);
-    row->addWidget(go, 0);
-    row->addWidget(fieldMap, 0);
-    row->addWidget(cancel, 0);
+    m_addressControls = {m_city, m_dong, m_lot, go, cancel};
+    row->addWidget(m_city, 0, 0);
+    row->addWidget(m_dong, 0, 1);
+    row->addWidget(m_lot, 0, 2);
+    row->addWidget(go, 0, 3);
+    row->addWidget(cancel, 0, 4);
     auto* titleRow = new QHBoxLayout();
     titleRow->setSpacing(6);
     titleRow->addWidget(m_sidoLabel, 1);
@@ -164,7 +165,6 @@ void KaRegionLocator::openAddressPopup(const QString& sido) {
     connect(closeX, &QToolButton::clicked, this, &KaRegionLocator::closePanel);
     connect(cancel, &QPushButton::clicked, this, &KaRegionLocator::closePanel);
     connect(go, &QPushButton::clicked, this, &KaRegionLocator::emitSearch);
-    connect(fieldMap, &QPushButton::clicked, this, &KaRegionLocator::emitFieldMap);
     connect(m_lot, &QLineEdit::returnPressed, this, &KaRegionLocator::emitSearch);
     connect(m_dong->lineEdit(), &QLineEdit::returnPressed, this, &KaRegionLocator::emitSearch);
     connect(m_city, &QComboBox::currentIndexChanged, this, &KaRegionLocator::fillDongs);
@@ -179,12 +179,41 @@ void KaRegionLocator::openAddressPopup(const QString& sido) {
   for (const QString& c : KoreaRegionCatalog::citiesOf(sido)) m_city->addItem(c);
   fillDongs();
   m_lot->clear();
-  m_popup->adjustSize();
-  m_popup->move(mapToGlobal(QPoint(0, height())));
+  const QRect anchor(mapToGlobal(QPoint(0, 0)), size());
+  const QPoint screenPoint = m_activeChip
+      ? m_activeChip->mapToGlobal(m_activeChip->rect().center()) : anchor.center();
+  QScreen* popupScreen = QGuiApplication::screenAt(screenPoint);
+  if (!popupScreen) popupScreen = screen();
+  if (popupScreen) placeAddressPopup(anchor, popupScreen->availableGeometry());
   m_popup->show();
   m_popup->raise();
   m_popup->activateWindow();
   m_dong->setFocus();
+}
+
+void KaRegionLocator::placeAddressPopup(const QRect& anchor, const QRect& available) {
+  if (!m_popup || !m_addressLayout || available.isEmpty()) return;
+  // Qt widget/global/screen geometries all use logical pixels. Do not multiply
+  // by DPR: that pushes tools off-screen on mixed-DPI and negative-origin screens.
+  const QRect bounds = available.adjusted(4, 4, -4, -4);
+  for (int columns : {6, 3, 2, 1}) {
+    for (QWidget* control : m_addressControls) m_addressLayout->removeWidget(control);
+    for (int i = 0; i < m_addressControls.size(); ++i)
+      m_addressLayout->addWidget(m_addressControls.at(i), i / columns, i % columns);
+    m_addressLayout->invalidate();
+    m_popup->layout()->activate();
+    if (m_popup->minimumSizeHint().width() <= bounds.width()) break;
+  }
+  m_popup->resize(m_popup->sizeHint().boundedTo(bounds.size()));
+  const QSize popupSize = m_popup->size();
+  int y = anchor.bottom() + 1;
+  if (y + popupSize.height() > bounds.bottom() + 1)
+    y = anchor.top() - popupSize.height();
+  const int x = std::clamp(anchor.left(), bounds.left(),
+                           std::max(bounds.left(), bounds.right() + 1 - popupSize.width()));
+  y = std::clamp(y, bounds.top(),
+                 std::max(bounds.top(), bounds.bottom() + 1 - popupSize.height()));
+  m_popup->move(x, y);
 }
 
 void KaRegionLocator::fillDongs() {
@@ -208,16 +237,4 @@ void KaRegionLocator::emitSearch() {
   if (q.isEmpty()) return;
   closePanel();
   emit searchRequested(q);
-}
-
-void KaRegionLocator::emitFieldMap() {
-  const QString city = (m_city && m_city->currentIndex() > 0) ? m_city->currentText() : QString();
-  QString dong;
-  if (m_dong) {
-    dong = m_dong->currentText().trimmed();
-    if (dong == QStringLiteral("동·읍·면")) dong.clear();
-  }
-  if (city.isEmpty() || dong.isEmpty()) return;
-  closePanel();
-  emit regionFieldMapRequested(m_sido, city, dong);
 }

@@ -1,0 +1,213 @@
+#include <QtTest>
+#include <QPointer>
+#include <QTemporaryDir>
+#include <qgsapplication.h>
+#include <qgsproject.h>
+#include <qgslayertree.h>
+#include <qgslayertreeregistrybridge.h>
+#include <qgsmapcanvas.h>
+#include <qgsmaprenderersequentialjob.h>
+#include <qgsvectorlayer.h>
+#include <qgsvectordataprovider.h>
+#include <qgsvectorfilewriter.h>
+#include <qgssinglesymbolrenderer.h>
+#include <qgsfillsymbol.h>
+#include <qgscoordinatetransform.h>
+#include "core/LayerOps.h"
+
+class LayerStateTest : public QObject {
+  Q_OBJECT
+private slots:
+  void zoomKeepsTheWholeLayer_data() {
+    QTest::addColumn<QString>("crs");
+    QTest::addColumn<QgsRectangle>("bounds");
+    for (const QString& crs : {QStringLiteral("EPSG:5186"), QStringLiteral("EPSG:5187")}) {
+      QTest::newRow(qPrintable(crs + "-wide")) << crs << QgsRectangle(190000, 450000, 194000, 450020);
+      QTest::newRow(qPrintable(crs + "-tall")) << crs << QgsRectangle(190000, 450000, 190020, 454000);
+      QTest::newRow(qPrintable(crs + "-point")) << crs << QgsRectangle(190000, 450000, 190000, 450000);
+    }
+  }
+  void zoomKeepsTheWholeLayer() {
+    QFETCH(QString, crs);
+    QFETCH(QgsRectangle, bounds);
+    QgsProject project;
+    project.setCrs(QgsCoordinateReferenceSystem(crs));
+    const bool point = bounds.width() == 0;
+    auto* layer = new QgsVectorLayer((point ? QStringLiteral("Point?crs=") : QStringLiteral("Polygon?crs=")) + crs,
+                                     QStringLiteral("target"), QStringLiteral("memory"));
+    QgsFeature feature(layer->fields());
+    feature.setGeometry(point ? QgsGeometry::fromPointXY(bounds.center()) : QgsGeometry::fromRect(bounds));
+    QgsFeatureList features{feature};
+    QVERIFY(layer->dataProvider()->addFeatures(features));
+    project.addMapLayer(layer);
+    QgsMapCanvas canvas;
+    canvas.resize(800, 600);
+    canvas.setDestinationCrs(project.crs());
+    canvas.setLayers({layer});
+    canvas.setRenderFlag(false);
+    QVERIFY(LayerOps::zoomToLayerMax(&canvas, layer));
+    const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+    if (!output.isEmpty()) {
+      QgsMapRendererSequentialJob render(canvas.mapSettings());
+      render.start(); render.waitForFinished();
+      QVERIFY(render.renderedImage().save(QDir(output).filePath(QString::fromLatin1(QTest::currentDataTag()).replace(':', '_') + "-zoom.png")));
+    }
+    const QgsRectangle visible = canvas.extent();
+    QVERIFY2(visible.contains(bounds), qPrintable(QStringLiteral("visible %1; layer %2").arg(visible.toString(), bounds.toString())));
+    QVERIFY(visible.width() >= 80.);
+    QVERIFY(visible.height() >= 80.);
+    QVERIFY(visible.width() < 15000.);
+    QVERIFY(visible.height() < 15000.);
+  }
+
+  void reorderPreservesLayers_data() {
+    QTest::addColumn<bool>("inGroup");
+    QTest::newRow("root") << false;
+    QTest::newRow("reference-group") << true;
+  }
+  void reorderPreservesLayers() {
+    QFETCH(bool, inGroup);
+    QgsProject project;
+    auto* root = project.layerTreeRoot();
+    auto* surveyGroup = root->addGroup(QStringLiteral("조사 데이터"));
+    auto* group = inGroup ? root->addGroup(QStringLiteral("참조 지도")) : root;
+    QList<QPointer<QgsVectorLayer>> layers;
+    for (const QString& title : {QStringLiteral("위성"), QStringLiteral("지적"), QStringLiteral("지형맵")}) {
+      auto* layer = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5187"), title, QStringLiteral("memory"));
+      QVERIFY(layer->isValid());
+      LayerOps::markReferenceLayer(layer);
+      project.addMapLayer(layer, false);
+      auto* node = group->addLayer(layer); // App XYZ path appends after the satellite.
+      node->setExpanded(false);
+      node->setCustomProperty(QStringLiteral("qa-row"), title);
+      if (title == QStringLiteral("지적")) node->setItemVisibilityChecked(false);
+      layers.append(layer);
+    }
+    const auto ids = project.mapLayers().keys();
+    QSignalSpy removed(&project, &QgsProject::layersRemoved);
+    // Exercise synchronous callbacks during clone/insert/remove, not just an
+    // already-sorted tree. The registry bridge must never lose its layer.
+    connect(root, &QgsLayerTreeNode::addedChildren, &project,
+            [&project]() { LayerOps::ensureSatelliteAtBottom(&project); });
+    connect(root, &QgsLayerTreeNode::removedChildren, &project,
+            [&project]() { LayerOps::ensureSatelliteAtBottom(&project); });
+    LayerOps::ensureSatelliteAtBottom(&project);
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QCOMPARE(project.mapLayers().keys(), ids);
+    QCOMPARE(removed.count(), 0);
+    QCOMPARE(root->children().first(), surveyGroup);
+    QCOMPARE(group->children().last(), group->findLayer(layers.first()->id()));
+    QCOMPARE(root->findLayers().size(), 3);
+    for (const auto& layer : layers) {
+      QVERIFY(layer);
+      auto* node = root->findLayer(layer->id());
+      QVERIFY(node);
+      QCOMPARE(node->customProperty(QStringLiteral("qa-row")).toString(), layer->name());
+      QVERIFY(!node->isExpanded());
+      QCOMPARE(node->itemVisibilityChecked(), layer->name() != QStringLiteral("지적"));
+    }
+    QSignalSpy inserted(root, &QgsLayerTreeNode::addedChildren);
+    QSignalSpy erased(root, &QgsLayerTreeNode::removedChildren);
+    for (int i = 0; i < 20; ++i) LayerOps::ensureSatelliteAtBottom(&project);
+    QCOMPARE(inserted.count(), 0);
+    QCOMPARE(erased.count(), 0);
+  }
+
+  void moveAcrossGroupPreservesSelectedLayer() {
+    QgsProject project;
+    auto* root = project.layerTreeRoot();
+    auto* a = new QgsVectorLayer(QStringLiteral("Point?crs=EPSG:5186"), QStringLiteral("A"), QStringLiteral("memory"));
+    auto* b = new QgsVectorLayer(QStringLiteral("Point?crs=EPSG:5186"), QStringLiteral("B"), QStringLiteral("memory"));
+    project.addMapLayer(a, false); project.addMapLayer(b, false);
+    root->addLayer(a);
+    auto* group = root->addGroup(QStringLiteral("참조 지도"));
+    root->addLayer(b);
+    for (int i = 0; i < 20; ++i) {
+      QVERIFY(LayerOps::moveLegendLayer(root->findLayer(b), 1));
+      QCOMPARE(root->children().at(1), root->findLayer(b));
+      QCOMPARE(root->children().last(), group);
+      QVERIFY(LayerOps::moveLegendLayer(root->findLayer(b), 2));
+    }
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QCOMPARE(project.mapLayers().size(), 2);
+    QCOMPARE(root->findLayers().size(), 2);
+  }
+
+  void thematicRemainsPaintedWhenZoomedOut_data() {
+    QTest::addColumn<QString>("crs");
+    QTest::addColumn<double>("scale");
+    for (const auto& crs : {QStringLiteral("EPSG:5186"), QStringLiteral("EPSG:5187")})
+      for (const double scale : {100000., 127158., 250000., 1000000.})
+        QTest::newRow(qPrintable(crs + QString::number(scale))) << crs << scale;
+  }
+  void thematicRemainsPaintedWhenZoomedOut() {
+    QFETCH(QString, crs); QFETCH(double, scale);
+    QgsVectorLayer layer(QStringLiteral("Polygon?crs=") + crs, QStringLiteral("지질도"), QStringLiteral("memory"));
+    QVERIFY(layer.isValid());
+    QgsFeature feature(layer.fields());
+    feature.setGeometry(QgsGeometry::fromRect(QgsRectangle(170000, 420000, 210000, 460000)));
+    QgsFeatureList features{feature};
+    QVERIFY(layer.dataProvider()->addFeatures(features));
+    layer.updateExtents();
+    layer.setRenderer(new QgsSingleSymbolRenderer(QgsFillSymbol::createSimple(
+        {{QStringLiteral("color"), QStringLiteral("20,90,160,255")},
+         {QStringLiteral("outline_style"), QStringLiteral("no")}}).release()));
+    LayerOps::applyThematicOverlayScaleRange(&layer);
+    QgsMapSettings settings;
+    settings.setDestinationCrs(layer.crs());
+    settings.setOutputSize(QSize(320, 240));
+    settings.setOutputDpi(96);
+    const double halfWidth = scale * 320. * 0.0254 / 96. / 2.;
+    settings.setExtent(QgsRectangle(190000 - halfWidth, 440000 - halfWidth * .75,
+                                    190000 + halfWidth, 440000 + halfWidth * .75));
+    settings.setLayers({&layer});
+    settings.setBackgroundColor(Qt::white);
+    QgsMapRendererSequentialJob job(settings);
+    job.start(); job.waitForFinished();
+    QVERIFY(job.errors().isEmpty());
+    const QImage image = job.renderedImage();
+    QVERIFY(!image.isNull());
+    const QColor center = image.pixelColor(image.width() / 2, image.height() / 2);
+    QVERIFY2(center.blue() > center.red() + 80, "The actual map must remain painted beyond 1:100000");
+    const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+    if (!output.isEmpty()) QVERIFY(image.save(QDir(output).filePath(crs.mid(5) + QLatin1Char('-') + QString::number(scale) + QStringLiteral("-map.png"))));
+  }
+
+  void savedThematicLimitIsUpgradedWithoutChangingImportedScale() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QgsProject project;
+    QgsVectorLayer memory(QStringLiteral("Polygon?crs=EPSG:5187"), QStringLiteral("source"), QStringLiteral("memory"));
+    QgsVectorFileWriter::SaveVectorOptions options;
+    options.driverName = QStringLiteral("GPKG"); options.layerName = QStringLiteral("geology_map");
+    const QString path = dir.filePath(QStringLiteral("reference.gpkg"));
+    QCOMPARE(QgsVectorFileWriter::writeAsVectorFormatV3(&memory, path, project.transformContext(), options), QgsVectorFileWriter::NoError);
+    auto* layer = new QgsVectorLayer(path + QStringLiteral("|layername=geology_map"), QStringLiteral("사용자가 바꾼 제목"), QStringLiteral("ogr"));
+    QVERIFY(layer->isValid());
+    LayerOps::markReferenceLayer(layer);
+    layer->setScaleBasedVisibility(true); layer->setMinimumScale(100001.);
+    project.addMapLayer(layer);
+    auto* external = new QgsVectorLayer(QStringLiteral("Polygon?crs=EPSG:5187"), QStringLiteral("지질도"), QStringLiteral("memory"));
+    external->setScaleBasedVisibility(true); external->setMinimumScale(100001.);
+    project.addMapLayer(external);
+    const QString qgz = dir.filePath(QStringLiteral("survey.qgz"));
+    QVERIFY(project.write(qgz));
+    project.clear();
+    QVERIFY(project.read(qgz));
+    LayerOps::restoreThematicOverlayVisibility(&project);
+    auto* restored = project.mapLayersByName(QStringLiteral("사용자가 바꾼 제목")).first();
+    QVERIFY(restored->isInScaleRange(250000.));
+    QVERIFY(!project.mapLayersByName(QStringLiteral("지질도")).first()->isInScaleRange(250000.));
+  }
+};
+
+int main(int argc, char** argv) {
+  QgsApplication app(argc, argv, false);
+  QgsApplication::setPrefixPath(qEnvironmentVariable("QGIS_PREFIX_PATH"), true);
+  QgsApplication::initQgis();
+  LayerStateTest test;
+  const int rc = QTest::qExec(&test, argc, argv);
+  QgsApplication::exitQgis();
+  return rc;
+}
+#include "test_layer_state.moc"

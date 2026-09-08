@@ -10,8 +10,10 @@ class KaReferenceDownloadJob final : public QgsTask {
 public:
   using Prepare = std::function<PreparedReferenceMap(QgsFeedback*)>;
   using Complete = std::function<void(const PreparedReferenceMap&)>;
+  using CancellablePrepare = std::function<PreparedReferenceMap(QgsFeedback*, const std::function<bool()>&)>;
 
   KaReferenceDownloadJob(const QString& title, Prepare prepare, Complete complete);
+  KaReferenceDownloadJob(const QString& title, CancellablePrepare prepare, Complete complete);
 
 protected:
   bool run() override;
@@ -19,7 +21,7 @@ protected:
 
 private:
   QEventLoopLocker m_quitLock;
-  Prepare m_prepare;
+  CancellablePrepare m_prepare;
   Complete m_complete;
   PreparedReferenceMap m_result;
 };

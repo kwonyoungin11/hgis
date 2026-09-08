@@ -191,6 +191,8 @@ private slots:
   void clampCanvasToKorea_zoomOutDoesNotExceedKorea();
   void zoomToKorea_5186StaysInsideMercatorSatelliteQuad();
   void clampCanvasToKorea_secondCallIsNoOp();
+  void clampCanvasToKorea_panPreservesCenterAtOverview_data();
+  void clampCanvasToKorea_panPreservesCenterAtOverview();
   void syncMapCanvas_disablesParallelRenderingForXyzOtf();
   void isolateAndZoom_hidesOtherSurveyKeepsReference();
   void addVworldSatellite_allowsEmptyKeyViaPublicTiles();
@@ -1422,8 +1424,8 @@ void TestWorkflow::demColorRelief_is3857XyzNotTerrainMap() {
   QVERIFY2(toggleFn >= 0, "DEM 버튼은 toggleDemMap");
   const int toggleNext = app.indexOf(QLatin1String("void MainWindow::"), toggleFn + 10);
   const QString toggle = app.mid(toggleFn, toggleNext - toggleFn);
-  QVERIFY2(toggle.contains(QLatin1String("addDemColorReliefMap")),
-           "DEM click adds color relief, not OpenTopoMap");
+  QVERIFY2(toggle.contains(QLatin1String("startDemDownload")),
+           "DEM click prepares elevation data in the cancellable download task");
   QVERIFY2(!toggle.contains(QLatin1String("getOpenFileName")),
            "DEM click is not a file picker");
   QVERIFY2(!toggle.contains(QLatin1String("syncMapCanvas")) ||
@@ -1864,10 +1866,10 @@ void TestWorkflow::thematicMapsScaleRangeTo1in100000() {
                     QStringLiteral("memory"));
   QVERIFY(vl.isValid());
   LayerOps::applyThematicOverlayScaleRange(&vl);
-  QVERIFY(vl.hasScaleBasedVisibility());
+  QVERIFY(!vl.hasScaleBasedVisibility());
   QVERIFY2(vl.isInScaleRange(10000.0), "visible at 1:10000");
   QVERIFY2(vl.isInScaleRange(100000.0), "visible at 1:100000");
-  QVERIFY2(!vl.isInScaleRange(250000.0), "hidden when more zoomed out than 1:100000");
+  QVERIFY2(vl.isInScaleRange(250000.0), "downloaded thematic data remains visible when zooming out");
 }
 
 void TestWorkflow::sectionLineKeepsMagentaWithHalo() {
@@ -3148,6 +3150,58 @@ void TestWorkflow::clampCanvasToKorea_secondCallIsNoOp() {
   QCOMPARE(canvas.extent().yMinimum(), afterFirst.yMinimum());
 }
 
+void TestWorkflow::clampCanvasToKorea_panPreservesCenterAtOverview_data() {
+  QTest::addColumn<QString>("crsAuth");
+  QTest::addColumn<double>("denominator");
+  for (const char* crs : {"EPSG:5186", "EPSG:5187"}) {
+    for (const double scale : {500000.0, 1000000.0, 1500000.0}) {
+      const QByteArray row = QByteArray(crs) + '-' + QByteArray::number(scale, 'f', 0);
+      QTest::newRow(row.constData()) << QString::fromLatin1(crs) << scale;
+    }
+  }
+}
+
+void TestWorkflow::clampCanvasToKorea_panPreservesCenterAtOverview() {
+  QFETCH(QString, crsAuth);
+  QFETCH(double, denominator);
+  QgsMapCanvas canvas;
+  canvas.resize(2400, 1250);
+  canvas.setRenderFlag(false);
+  LayerOps::applyCanvasScreenDpi(&canvas);
+  canvas.setDestinationCrs(QgsCoordinateReferenceSystem(crsAuth));
+  LayerOps::zoomToKorea(&canvas, crsAuth, false);
+  canvas.setRenderFlag(false);
+  canvas.zoomScale(denominator, true);
+  LayerOps::clampCanvasToKorea(&canvas);
+  const QgsRectangle before = canvas.extent();
+  const double scaleBeforePan = canvas.scale();
+  const QgsRectangle korea = LayerOps::satelliteFillExtentForCrs(crsAuth);
+  // A pan changes the center without zooming. At the maximum overview the old
+  // whole-viewport containment forced this horizontal move straight back.
+  const double east = korea.width() * 0.1;
+  const double north = korea.height() * 0.1;
+  const QgsPointXY requested(before.center().x() + east, before.center().y() + north);
+  canvas.setCenter(requested);
+  LayerOps::clampCanvasToKorea(&canvas);
+  const QgsPointXY actual = canvas.center();
+  qInfo().noquote() << crsAuth << "requested scale" << denominator
+                   << "actual scale" << scaleBeforePan << "pan requested metres" << east << north
+                   << "pan actual metres" << actual.x() - before.center().x()
+                   << actual.y() - before.center().y();
+  QVERIFY2(qAbs(actual.x() - requested.x()) < 0.01, "overview must preserve east/west pan");
+  QVERIFY2(qAbs(actual.y() - requested.y()) < 0.01, "overview must preserve north/south pan");
+  QVERIFY(qAbs(canvas.scale() - scaleBeforePan) < 0.01);
+  QVERIFY(!LayerOps::clampCanvasToKorea(&canvas));
+
+  // Prevent navigation completely away from the coverage area, without
+  // forcing an in-country center back to the middle of the country.
+  canvas.setCenter(QgsPointXY(korea.xMaximum() + korea.width(), korea.yMinimum() - korea.height()));
+  QVERIFY(LayerOps::clampCanvasToKorea(&canvas));
+  QVERIFY(korea.contains(canvas.center()));
+  QVERIFY(qAbs(canvas.scale() - scaleBeforePan) < 0.01);
+  QVERIFY(!LayerOps::clampCanvasToKorea(&canvas));
+}
+
 void TestWorkflow::syncMapCanvas_disablesParallelRenderingForXyzOtf() {
   QgsProject proj;
   QgsMapCanvas canvas;
@@ -3363,9 +3417,13 @@ void TestWorkflow::subToolbar_marksTheActiveToolForTheBlueUnderline() {
   QFile qss(QStringLiteral("data/theme/ka-hgis.qss"));
   QVERIFY2(qss.open(QIODevice::ReadOnly | QIODevice::Text), "ka-hgis.qss");
   const QString style = QString::fromUtf8(qss.readAll());
-  const int rule = style.indexOf(QLatin1String("QToolBar#subToolbar QToolButton:checked"));
+  const QRegularExpression checkedRule(QStringLiteral(
+      R"(QToolBar#subToolbar QToolButton(?::enabled)?:checked(?::enabled)?(?=\s*\{))"));
+  const int rule = checkedRule.match(style).capturedStart();
   QVERIFY2(rule >= 0, "켜진 버튼을 표시하는 규칙이 있어야 한다");
-  QVERIFY2(style.mid(rule, 220).contains(QLatin1String("border-bottom")),
+  const int ruleEnd = style.indexOf(QLatin1Char('}'), rule);
+  QVERIFY2(ruleEnd > rule, "선택 버튼 규칙이 닫혀 있어야 한다");
+  QVERIFY2(style.mid(rule, ruleEnd - rule).contains(QLatin1String("border-bottom")),
            "표시는 파란 밑줄이어야 한다");
 
   QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
@@ -4156,11 +4214,14 @@ void TestWorkflow::uiComboActions_doNotBustTileCacheWhileDrawing() {
   QVERIFY2(!app.mid(fn, next - fn).contains(QLatin1String("refreshAllLayers")),
            "주소 검색 이동이 refreshAllLayers면 위성·지적이 다시 로딩됨");
 
-  fn = app.indexOf(QLatin1String("void MainWindow::undoLastAction"));
+  QFile undoFile(QStringLiteral("src/app/MainWindowUndo.cpp"));
+  QVERIFY(undoFile.open(QIODevice::ReadOnly | QIODevice::Text));
+  const QString undo = QString::fromUtf8(undoFile.readAll());
+  fn = undo.indexOf(QLatin1String("void MainWindow::undoLastAction"));
   QVERIFY2(fn >= 0, "undoLastAction");
-  next = app.indexOf(QLatin1String("void MainWindow::"), fn + 10);
+  next = undo.indexOf(QLatin1String("void MainWindow::"), fn + 10);
   QVERIFY2(next > fn, "undoLastAction body");
-  QVERIFY2(!app.mid(fn, next - fn).contains(QLatin1String("refreshAllLayers")),
+  QVERIFY2(!undo.mid(fn, next - fn).contains(QLatin1String("refreshAllLayers")),
            "Ctrl+Z clearCache+refreshAllLayers is the provider_wms AV");
 
   fn = app.indexOf(QLatin1String("void MainWindow::applyMapScaleFromUi"));
@@ -4247,24 +4308,22 @@ void TestWorkflow::addVworldSatellite_fourKCanvasKeeps256pxTiles() {
 
 void TestWorkflow::applyCanvasScreenDpi_outputSizeFollowsWideWidget() {
   QgsMapCanvas canvas;
-  canvas.resize(3440, 1440);
-  canvas.mapSettings().setOutputSize(QSize(800, 600));
-  LayerOps::applyCanvasScreenDpi(&canvas);
-  const qreal dpr = canvas.devicePixelRatioF();
-  const qreal pixelDpr = dpr > 0.05 ? dpr : 1.0;
-  const QSize want(qMax(1, qRound(3440.0 * pixelDpr)), qMax(1, qRound(1440.0 * pixelDpr)));
-  QCOMPARE(canvas.mapSettings().outputSize(), want);
-  QVERIFY(canvas.mapSettings().outputDpi() > 10.0);
-
-  canvas.resize(1920, 1080);
-  LayerOps::applyCanvasScreenDpi(&canvas);
-  const QSize fhd(qMax(1, qRound(1920.0 * pixelDpr)), qMax(1, qRound(1080.0 * pixelDpr)));
-  QCOMPARE(canvas.mapSettings().outputSize(), fhd);
-
-  canvas.resize(3840, 2160);
-  LayerOps::applyCanvasScreenDpi(&canvas);
-  const QSize uhd(qMax(1, qRound(3840.0 * pixelDpr)), qMax(1, qRound(2160.0 * pixelDpr)));
-  QCOMPARE(canvas.mapSettings().outputSize(), uhd);
+  canvas.setFrameShape(QFrame::NoFrame);
+  canvas.setRenderFlag(false);
+  canvas.show();
+  for (const QSize& size : {QSize(3440, 1440), QSize(1920, 1080), QSize(3840, 2160)}) {
+    canvas.resize(size);
+    QCoreApplication::processEvents();
+    canvas.setExtent(QgsRectangle(200000, 450000, 208000, 456000));
+    // Simulate stale settings before a monitor/size refresh. Output size is
+    // logical pixels, while QGIS owns the physical render-image allocation.
+    canvas.mapSettings().setOutputSize(QSize(800, 600));
+    LayerOps::applyCanvasScreenDpi(&canvas);
+    QCOMPARE(canvas.mapSettings().outputSize(), size);
+    QVERIFY(canvas.mapSettings().outputDpi() > 10.0);
+    const QgsPointXY center = canvas.mapSettings().mapToPixel().toMapCoordinates(size.width() / 2., size.height() / 2.);
+    QVERIFY(center.distance(QgsPointXY(204000, 453000)) < 0.01);
+  }
 }
 
 void TestWorkflow::convertSelectedTo5179_sourceDoesNotAddToMap() {

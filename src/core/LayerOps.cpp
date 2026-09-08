@@ -24,6 +24,7 @@
 #include <QSet>
 #include <QTemporaryFile>
 #include <QPointer>
+#include <QScopedValueRollback>
 #include <QTimer>
 #include <functional>
 
@@ -1664,10 +1665,30 @@ void LayerOps::markReferenceLayer(QgsMapLayer* layer) {
 
 void LayerOps::applyThematicOverlayScaleRange(QgsMapLayer* layer) {
   if (!layer) return;
-  layer->setScaleBasedVisibility(true);
-  // QGIS minimum scale is exclusive; +1 keeps 1:100000 visible.
-  layer->setMinimumScale(kThematicMinScaleDenom + 1.0);
+  layer->setCustomProperty(QStringLiteral("ka_hgis/thematic_overlay"), true);
+  layer->setScaleBasedVisibility(false);
+  layer->setMinimumScale(0.0);
   layer->setMaximumScale(0.0);
+}
+
+void LayerOps::restoreThematicOverlayVisibility(QgsProject* project) {
+  if (!project) return;
+  for (QgsMapLayer* layer : project->mapLayers()) {
+    if (!layer) continue;
+    const bool tagged = layer->customProperty(QStringLiteral("ka_hgis/thematic_overlay")).toBool();
+    // Upgrade only the exact scale limit formerly assigned by this app. Preserve
+    // user scale rules on imported layers, including similarly named datasets.
+    const bool legacyLimit = layer->hasScaleBasedVisibility() &&
+        layer->minimumScale() == kThematicMinScaleDenom + 1.0 && layer->maximumScale() == 0.0;
+    const QString source = layer->source();
+    static const QRegularExpression thematicTable(
+        QStringLiteral("\\|layername=(soil_map|geology_map|river_map|paleo_landform)(?:\\||$)"));
+    const bool knownSource = source.contains(thematicTable) ||
+        source.contains(QLatin1String("data.kigam.re.kr/geoserver")) ||
+        source.contains(QLatin1String("soil.rda.go.kr"));
+    if (legacyLimit && (tagged || (knownSource && isReferenceOrBasemapLayer(layer))))
+      applyThematicOverlayScaleRange(layer);
+  }
 }
 
 bool LayerOps::clampCanvasToThematicScale(QgsMapCanvas* canvas) {
@@ -2502,83 +2523,57 @@ void LayerOps::pruneDuplicateSatelliteLayers(QgsProject* project) {
   }
 }
 
-void LayerOps::ensureSatelliteAtBottom(QgsProject* project) {
-  if (!project) return;
-  pruneDuplicateSatelliteLayers(project);
-  static bool inReorder = false;
-  if (inReorder) return;
-  struct Guard {
-    bool& flag;
-    explicit Guard(bool& f) : flag(f) { flag = true; }
-    ~Guard() { flag = false; }
-  } guard(inReorder);
+namespace {
+bool legendOrderChanging = false; // Layer tree mutations run on the GUI thread.
+}
 
+bool LayerOps::moveLegendLayer(QgsLayerTreeLayer* node, int destinationIndex) {
+  if (!node || !node->layer()) return false;
+  QPointer<QgsLayerTreeGroup> group = qobject_cast<QgsLayerTreeGroup*>(node->parent());
+  if (!group) return false;
+  const int oldIndex = group->children().indexOf(node);
+  if (oldIndex < 0 || destinationIndex < 0 || destinationIndex >= group->children().size())
+    return false;
+  if (oldIndex == destinationIndex) return true;
+
+  QScopedValueRollback<bool> moving(legendOrderChanging, true);
+  QPointer<QgsLayerTreeLayer> oldNode(node);
+  QPointer<QgsLayerTreeLayer> replacement(node->clone());
+  // Keep a tree reference throughout the move. Removing first queues deletion
+  // of the datasource in QgsLayerTreeRegistryBridge, even if reinserted later.
+  group->insertChildNode(destinationIndex > oldIndex ? destinationIndex + 1 : destinationIndex,
+                         replacement);
+  if (!group || !replacement || !oldNode) return false;
+  group->removeChildNode(oldNode);
+  return group && replacement && replacement->layer();
+}
+
+void LayerOps::ensureSatelliteAtBottom(QgsProject* project) {
+  if (!project || legendOrderChanging) return;
+  QScopedValueRollback<bool> sorting(legendOrderChanging, true);
+  // The guard includes pruning: project signals must not reenter while a row
+  // temporarily has both its old node and its replacement.
+  pruneDuplicateSatelliteLayers(project);
   QgsLayerTree* root = project->layerTreeRoot();
   if (!root) return;
-
-  // 1. 루트 직속 레이어 중 "위성" 레이어를 맨 뒤로 안전하게 정렬 (reorderGroupLayers 사용)
-  QList<QgsMapLayer*> nonSat;
-  QList<QgsMapLayer*> sat;
-
+  auto moveSatellites = [](QgsLayerTreeGroup* group) {
+    QStringList ids;
+    for (QgsLayerTreeNode* child : group->children()) {
+      auto* node = qobject_cast<QgsLayerTreeLayer*>(child);
+      if (node && node->layer() && node->name().contains(QStringLiteral("위성")))
+        ids.append(node->layerId());
+    }
+    for (const QString& id : ids) {
+      // Resolve afresh after every move; moved nodes have been deleted.
+      auto* node = group->findLayer(id);
+      if (node && node->parent() == group)
+        LayerOps::moveLegendLayer(node, group->children().size() - 1);
+    }
+  };
+  moveSatellites(root);
   for (QgsLayerTreeNode* child : root->children()) {
-    if (auto* lnode = qobject_cast<QgsLayerTreeLayer*>(child)) {
-      if (QgsMapLayer* l = lnode->layer()) {
-        const QString name = lnode->name().isEmpty() ? l->name() : lnode->name();
-        if (name.contains(QStringLiteral("위성"))) {
-          sat.append(l);
-        } else {
-          nonSat.append(l);
-        }
-      }
-    }
-  }
-
-  if (!sat.isEmpty()) {
-    bool needReorder = false;
-    bool seenSat = false;
-    for (QgsLayerTreeNode* child : root->children()) {
-      if (auto* lnode = qobject_cast<QgsLayerTreeLayer*>(child)) {
-        if (QgsMapLayer* l = lnode->layer()) {
-          const QString name = lnode->name().isEmpty() ? l->name() : lnode->name();
-          if (name.contains(QStringLiteral("위성"))) {
-            seenSat = true;
-          } else if (seenSat) {
-            needReorder = true;
-            break;
-          }
-        }
-      }
-    }
-
-    if (needReorder) {
-      const QList<QgsMapLayer*> newOrder = nonSat + sat;
-      root->reorderGroupLayers(newOrder);
-    }
-  }
-
-  // 2. "참조 지도" 그룹 내부에서도 위성 레이어가 최하단에 오도록 안전하게 reorderGroupLayers 호출
-  for (QgsLayerTreeNode* child : root->children()) {
-    if (auto* grp = qobject_cast<QgsLayerTreeGroup*>(child)) {
-      if (grp->name() == QStringLiteral("참조 지도") || grp->name().contains(QStringLiteral("참조"))) {
-        QList<QgsMapLayer*> grpNonSat;
-        QList<QgsMapLayer*> grpSat;
-        for (QgsLayerTreeNode* gc : grp->children()) {
-          if (auto* lnode = qobject_cast<QgsLayerTreeLayer*>(gc)) {
-            if (QgsMapLayer* l = lnode->layer()) {
-              const QString name = lnode->name().isEmpty() ? l->name() : lnode->name();
-              if (name.contains(QStringLiteral("위성"))) {
-                grpSat.append(l);
-              } else {
-                grpNonSat.append(l);
-              }
-            }
-          }
-        }
-        if (!grpSat.isEmpty() && !grpNonSat.isEmpty()) {
-          grp->reorderGroupLayers(grpNonSat + grpSat);
-        }
-      }
-    }
+    auto* group = qobject_cast<QgsLayerTreeGroup*>(child);
+    if (group && group->name().contains(QStringLiteral("참조"))) moveSatellites(group);
   }
 }
 
@@ -2731,24 +2726,24 @@ int LayerOps::refreshVworldApiKeyInLayers(QgsProject* project, const QString& cu
 
 void LayerOps::applyCanvasScreenDpi(QgsMapCanvas* canvas) {
   if (!canvas) return;
-  // FHD 100% → 와이드 → 4K 150–200% (DPR 1.0–2.0). 배율은 PassThrough 그대로.
-  // 타일 격자는 위젯×DPR 이어야 화면을 채운다. outputSize 가 논리 크기(또는 옛 값)로
-  // 남으면 줌할 때 위성만 한 덩어리 잘린 것처럼 보인다. 값이 달라질 때만 쓴다.
+  // QgsMapCanvas uses logical viewport pixels for outputSize and mapToPixel.
+  // QGIS applies DPR when allocating the render image. Multiplying size here
+  // applies scaling twice and separates rendered features from canvas overlays
+  // and mouse coordinates (e.g. an 80% offset copy at Windows 125%).
   const qreal dpr = canvas->devicePixelRatioF();
   const qreal pixelDpr = dpr > 0.05 ? dpr : 1.0;
   if (!qFuzzyCompare(canvas->mapSettings().devicePixelRatio(), static_cast<float>(pixelDpr)))
     canvas->mapSettings().setDevicePixelRatio(static_cast<float>(pixelDpr));
-  if (canvas->width() >= 2 && canvas->height() >= 2) {
-    const QSize want(qMax(1, qRound(double(canvas->width()) * pixelDpr)),
-                     qMax(1, qRound(double(canvas->height()) * pixelDpr)));
+  const QSize want = canvas->viewport()->size();
+  if (want.width() >= 2 && want.height() >= 2) {
     if (canvas->mapSettings().outputSize() != want)
       canvas->mapSettings().setOutputSize(want);
   }
   QWindow* wh = canvas->windowHandle();
   if (!wh && canvas->window())
     wh = canvas->window()->windowHandle();
-  // 96×DPR 과 윈도우 논리 DPI(보통 같음)로 축척 분모를 모니터마다 같게 둔다.
-  double dpi = 96.0 * double(pixelDpr);
+  // Match QGIS logical DPI; devicePixelRatio already controls physical pixels.
+  double dpi = canvas->logicalDpiX();
   if (wh && wh->screen()) {
     const double logical = wh->screen()->logicalDotsPerInch();
     if (logical > 10.0)
@@ -2903,8 +2898,11 @@ bool LayerOps::zoomToLayerMax(QgsMapCanvas* canvas, QgsMapLayer* layer) {
   const double minW = mapCrs.isGeographic() ? 0.004 : 80.0;
   if (ext.width() < minW || ext.height() < minW) {
     const QgsPointXY c = ext.center();
-    const double pad = minW * 0.5;
-    ext = QgsRectangle(c.x() - pad, c.y() - pad, c.x() + pad, c.y() + pad);
+    // A narrow site/section can still be kilometers long. Pad only the short
+    // dimension; replacing both with a minimum square crops the actual layer.
+    const double halfW = std::max(ext.width(), minW) * 0.5;
+    const double halfH = std::max(ext.height(), minW) * 0.5;
+    ext = QgsRectangle(c.x() - halfW, c.y() - halfH, c.x() + halfW, c.y() + halfH);
   }
   ext.scale(1.15);
   canvas->setExtent(ext);
@@ -4225,6 +4223,19 @@ QgsRasterLayer* LayerOps::ensureDemRelief(QgsProject* project, QgsRasterLayer* d
   for (QgsMapLayer* ml : project->mapLayers()) {
     if (ml && ml->name() == reliefTitle && ml->isValid()) {
       shade = qobject_cast<QgsRasterLayer*>(ml);
+      if (shade && shade->providerType() == QLatin1String("gdal") &&
+          shade->source() != demLayer->source()) {
+        // A downloaded DEM now covers a new area. The derived hillshade must
+        // follow that same file, not keep shading the previous site's raster.
+        shade->setDataSource(demLayer->source(), reliefTitle, QStringLiteral("gdal"));
+        if (shade->isValid()) {
+          shade->setCrs(demLayer->crs());
+          auto* renderer = new QgsHillshadeRenderer(shade->dataProvider(), 1, 315.0, 45.0);
+          renderer->setZFactor(shade->crs().isGeographic() ? 111120.0 : 3.0);
+          renderer->setMultiDirectional(true);
+          shade->setRenderer(renderer);
+        }
+      }
       if (shade) break;
     }
   }
@@ -4715,15 +4726,15 @@ static QgsRectangle extentFittedInside(const QgsRectangle& kr, double viewAspect
 
 static double canvasViewAspect(const QgsMapCanvas* canvas) {
   if (!canvas) return 1.0;
-  // 위젯 논리 크기 비율. outputSize 는 DPR 이 곱해져 있어도 비율은 같지만,
-  // 아직 0이거나 줌 직전 옛 값이면 와이드 모니터에서 한국 상자가 잘린다.
-  const int w = canvas->width();
-  const int h = canvas->height();
-  if (w >= 2 && h >= 2)
-    return double(w) / double(h);
+  // Fit to the same viewport aspect QGIS uses when expanding setExtent().
+  // The outer widget includes the frame and can differ during resize or while
+  // hidden; fitting to that aspect can expand the result past the target area.
   const QSize out = canvas->mapSettings().outputSize();
   if (out.width() >= 2 && out.height() >= 2)
     return double(out.width()) / double(out.height());
+  const QSize view = canvas->viewport()->size();
+  if (view.width() >= 2 && view.height() >= 2)
+    return double(view.width()) / double(view.height());
   return 1.0;
 }
 
@@ -4752,47 +4763,20 @@ bool LayerOps::clampCanvasToKorea(QgsMapCanvas* canvas) {
     return true;
   }
 
-  const double tol = qMax(kr.width(), kr.height()) * 0.03;
-  const bool alreadySnapped =
-      qAbs(cur.center().x() - fitted.center().x()) < tol &&
-      qAbs(cur.center().y() - fitted.center().y()) < tol &&
-      cur.width() <= fitted.width() * 1.05 + 1.0 &&
-      cur.height() <= fitted.height() * 1.05 + 1.0;
-
-  // VWorld 위성은 한반도만. 한국보다 넓게 줌아웃하면 타일이 잘린 사각형으로 보인다.
-  if (cur.width() > kr.width() || cur.height() > kr.height()) {
-    if (alreadySnapped)
-      return false;
-    canvas->setExtent(fitted);
-    return true;
-  }
-
-  double minX = cur.xMinimum();
-  double maxX = cur.xMaximum();
-  double minY = cur.yMinimum();
-  double maxY = cur.yMaximum();
-  const double w = cur.width();
-  const double h = cur.height();
-
-  if (minX < kr.xMinimum()) {
-    minX = kr.xMinimum();
-    maxX = minX + w;
-  }
-  if (maxX > kr.xMaximum()) {
-    maxX = kr.xMaximum();
-    minX = maxX - w;
-  }
-  if (minY < kr.yMinimum()) {
-    minY = kr.yMinimum();
-    maxY = minY + h;
-  }
-  if (maxY > kr.yMaximum()) {
-    maxY = kr.yMaximum();
-    minY = maxY - h;
-  }
-
-  const QgsRectangle clamped(minX, minY, maxX, maxY);
   const double eps = qMax(kr.width(), kr.height()) * 1e-9;
+  // Bound zoom-out separately from navigation. Confining all four screen edges
+  // left no horizontal pan range when a wide viewport reached Korea's width.
+  // Keep the requested in-country center even at the largest allowed overview.
+  const bool tooWide = cur.width() > kr.width() + eps || cur.height() > kr.height() + eps;
+  // Preserve the aspect ratio QGIS is actually rendering (a hidden/resizing
+  // widget can still have a different logical size). This makes a second clamp
+  // a no-op instead of repeatedly asking QGIS to expand the same rectangle.
+  const double factor = tooWide ? std::min(kr.width() / cur.width(), kr.height() / cur.height()) : 1.0;
+  const double w = cur.width() * factor;
+  const double h = cur.height() * factor;
+  const double cx = std::clamp(cur.center().x(), kr.xMinimum(), kr.xMaximum());
+  const double cy = std::clamp(cur.center().y(), kr.yMinimum(), kr.yMaximum());
+  const QgsRectangle clamped(cx - w * 0.5, cy - h * 0.5, cx + w * 0.5, cy + h * 0.5);
   if (qAbs(clamped.xMinimum() - cur.xMinimum()) > eps ||
       qAbs(clamped.yMinimum() - cur.yMinimum()) > eps ||
       qAbs(clamped.xMaximum() - cur.xMaximum()) > eps ||

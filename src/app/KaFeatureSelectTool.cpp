@@ -32,10 +32,18 @@ KaFeatureSelectTool::KaFeatureSelectTool(QgsMapCanvas* canvas)
   m_vertex->setParent(this);
   connect(m_vertex, &KaVertexEditTool::statusMessage, this,
           [this](const QString& t) { emit statusMessage(t); });
+  connect(m_vertex, &KaVertexEditTool::featureGeometryEdited, this,
+          &KaFeatureSelectTool::featureGeometryEdited);
 }
 
 void KaFeatureSelectTool::setSnapEnabled(bool on) {
   if (m_vertex) m_vertex->setSnapEnabled(on);
+}
+
+void KaFeatureSelectTool::refreshSelectedGeometry() {
+  m_vertexDragging = false;
+  m_vertexIndex = -1;
+  syncVertexTarget();
 }
 
 void KaFeatureSelectTool::syncVertexTarget() {
@@ -134,7 +142,9 @@ void KaFeatureSelectTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
       m_vertex->showVertexMarkers();
       if (mCanvas) mCanvas->refresh();
       emit statusMessage(ok ? QStringLiteral("수정점을 옮겼습니다.")
-                            : QStringLiteral("수정점을 옮기지 못했습니다."));
+                            : (m_vertex->lastEditError().isEmpty()
+                                   ? QStringLiteral("수정점을 옮기지 못했습니다.")
+                                   : m_vertex->lastEditError()));
     }
     return;
   }

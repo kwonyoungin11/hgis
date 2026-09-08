@@ -5,6 +5,12 @@
 
 KaReferenceDownloadJob::KaReferenceDownloadJob(const QString& title, Prepare prepare,
                                                Complete complete)
+    : KaReferenceDownloadJob(title, [prepare = std::move(prepare)](QgsFeedback* feedback, const std::function<bool()>&) {
+        return prepare(feedback);
+      }, std::move(complete)) {}
+
+KaReferenceDownloadJob::KaReferenceDownloadJob(const QString& title, CancellablePrepare prepare,
+                                               Complete complete)
     : QgsTask(title, QgsTask::CanCancel | QgsTask::CancelWithoutPrompt),
       m_prepare(std::move(prepare)), m_complete(std::move(complete)) {}
 
@@ -13,6 +19,7 @@ bool KaReferenceDownloadJob::run() {
   // QgsFeedback's cancellation flag is not atomic. Keep every read/write on
   // this worker; QgsTask::isCanceled() provides the synchronized GUI boundary.
   QgsFeedback feedback;
+  connect(&feedback, &QgsFeedback::progressChanged, &feedback, [this](double progress) { setProgress(progress); });
   QTimer cancellationPoll;
   connect(&cancellationPoll, &QTimer::timeout, &feedback, [this, &feedback]() {
     if (isCanceled()) feedback.cancel();
@@ -22,7 +29,7 @@ bool KaReferenceDownloadJob::run() {
   cancellationPoll.start(50);
   if (isCanceled()) feedback.cancel();
   try {
-    m_result = m_prepare(&feedback);
+    m_result = m_prepare(&feedback, [this]() { return isCanceled(); });
   } catch (...) {
     // QgsException does not derive from std::exception. No SDK exception may
     // escape this worker boundary and terminate the process.
@@ -30,11 +37,12 @@ bool KaReferenceDownloadJob::run() {
                                    "기존 지도는 유지됩니다. 저장 공간을 확인한 뒤 다시 시도하세요.");
     m_result.status = PreparedReferenceMap::Status::Failed;
   }
-  return !isCanceled() && m_result.isReady();
+  return m_result.isReady() && (!isCanceled() || m_result.outputCommitted);
 }
 
 void KaReferenceDownloadJob::finished(bool success) {
-  if (isCanceled()) m_result.status = PreparedReferenceMap::Status::Cancelled;
+  if (m_result.isReady() && m_result.outputCommitted) { /* completed file wins a late cancel */ }
+  else if (isCanceled()) m_result.status = PreparedReferenceMap::Status::Cancelled;
   else if (!success) m_result.status = PreparedReferenceMap::Status::Failed;
   m_complete(m_result);
   m_prepare = {};

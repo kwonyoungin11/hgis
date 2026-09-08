@@ -8,6 +8,7 @@
 #include <QSet>
 #include <QPointer>
 #include <vector>
+#include <memory>
 #include "core/LocationSearch.h"
 #include "core/AdminBoundaryService.h"
 #include "core/TrenchGridGenerator.h"
@@ -26,6 +27,10 @@ class QEvent;
 class KaAboveLabelsOverlay;
 class KaLayerOpacityRail;
 class KaReferenceDownloadJob;
+class QgsFeedback;
+struct PreparedReferenceMap;
+class QProgressDialog;
+struct KaRemovedLayers;
 class QgsRectangle;
 class QShowEvent;
 class QCloseEvent;
@@ -99,9 +104,17 @@ public:
   static double scaleDenominatorFromUi(const QString& raw);
   void editCurrentLayerStyle(QgsMapLayer* layer = nullptr);
   void editCurrentLayerAttributes(QgsMapLayer* layer = nullptr);
+  void removeLayersFromTree(QgsLayerTreeView* tree);
+  void undoMapAction();
 
 private:
   enum class ReferenceMapKind { Soil, PaleoSoil, Geology, River };
+  QProgressDialog* createDownloadProgress(const QString& title);
+  void startFileDownload(const QString& title,
+      std::function<PreparedReferenceMap(QgsFeedback*, const std::function<bool()>&)> prepare,
+      std::function<void(const PreparedReferenceMap&)> apply);
+  void startDemDownload();
+  void watchUndoFeatureIds(QgsVectorLayer* layer);
   void populateMapContextMenu(QMenu* menu, const QPoint& pos);
   void showLayerAreaSummary(QgsVectorLayer* layer, bool showRatio);
 
@@ -459,14 +472,18 @@ private:
   QWidget* m_mapPage = nullptr;
   KaBeginnerRibbon* m_ribbon = nullptr;
   struct KaUndoAction {
-    enum Type { FeatureAdded, FeatureDeleted, LayerAdded };
+    enum Type { FeatureAdded, FeatureDeleted, FeatureChanged, AttributesChanged, LayerAdded, LayersRemoved };
     Type type = FeatureAdded;
     QString layerId;
     qint64 featureId = -1;
     QgsFeature featureData;
+    QVector<QPair<QString, QgsFeature>> deletedFeatures;
+    std::shared_ptr<KaRemovedLayers> removedLayers;
     QString description;
   };
   QVector<KaUndoAction> m_undoActions;
-  QVector<QPair<QString, qint64>> m_committedUndo;
+  QSet<QString> m_undoObservedLayers;
+  QPointer<QProgressDialog> m_boundaryProgress;
+  QPointer<QProgressDialog> m_searchProgress;
 #endif
 };

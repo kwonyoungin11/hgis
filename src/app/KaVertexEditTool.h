@@ -1,6 +1,7 @@
 #pragma once
 
 #include <qgsfeatureid.h>
+#include <qgsfeature.h>
 #include <qgsmapmouseevent.h>
 #include <qgsmaptool.h>
 #include <qgspointxy.h>
@@ -57,6 +58,7 @@ public:
   bool moveVertexTo(int index, const QgsPointXY& to);
   bool deleteVertexAt(int index);
   bool insertVertexAt(int index, const QgsPointXY& at);
+  QString lastEditError() const { return m_lastEditError; }
   QgsGeometry selectedGeometry() const;
   // 도형은 레이어 CRS, 마우스는 지도 CRS. 섞으면 도형이 안 잡힌다.
   QgsPointXY toLayer(const QgsPointXY& mapPt) const;
@@ -64,6 +66,9 @@ public:
 
 signals:
   void statusMessage(const QString& text);
+  // Emitted for an applied buffer change too when its commit fails: it must
+  // remain recoverable through Undo while the user retries saving.
+  void featureGeometryEdited(QgsVectorLayer* layer, const QgsFeature& before);
 
 private:
   void selectAt(const QgsPointXY& mapPt);
@@ -73,6 +78,7 @@ private:
   double layerTolerance(int px) const;
   QgsPointXY toMap(const QgsPointXY& layerPt) const;
   void refreshRubber(const QgsGeometry& geom);
+  bool applyGeometryChange(QgsGeometry geom, const QString& commandText);
 
   QPointer<QgsVectorLayer> m_layer;
   QgsFeatureId m_fid = -1;
@@ -81,5 +87,6 @@ private:
   int m_dragIndex = -1;
   bool m_dragging = false;
   bool m_snapEnabled = true;
+  QString m_lastEditError;
   Qt::ContextMenuPolicy m_savedMenuPolicy = Qt::DefaultContextMenu;
 };

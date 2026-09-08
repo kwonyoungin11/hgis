@@ -14,6 +14,7 @@ class QgsRectangle;
 class QgsPointXY;
 class QgsFeature;
 class QgsLayerTreeGroup;
+class QgsLayerTreeLayer;
 class QgsGeometry;
 class QgsCoordinateReferenceSystem;
 
@@ -27,9 +28,12 @@ public:
   static constexpr const char* kRoleSurvey = "survey";
   static constexpr const char* kRoleReference = "reference";
   static constexpr const char* kPropAlignPending = "ka_hgis/align_pending";
-  /// 토층·수계·지질: 가장 축소된 축척(분모). 더 축소하면 숨김.
+  /// 신규 주제도 내려받기 범위를 정하는 축척. 내려받은 레이어의 표시 제한이 아니다.
   static constexpr double kThematicMinScaleDenom = 100000.0;
   static void applyThematicOverlayScaleRange(QgsMapLayer* layer);
+  static void restoreThematicOverlayVisibility(QgsProject* project);
+  /// Move a legend row without removing the datasource from the project.
+  static bool moveLegendLayer(QgsLayerTreeLayer* node, int destinationIndex);
   static bool clampCanvasToThematicScale(QgsMapCanvas* canvas);
   /// Grow a 5186 envelope around its center until the longer side equals
   /// maxSpanMeters. Too-large envelopes are returned unchanged (caller rejects).

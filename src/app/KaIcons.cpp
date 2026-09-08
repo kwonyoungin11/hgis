@@ -1,14 +1,56 @@
 #include "KaIcons.h"
+#include "KaTheme.h"
 #include <QFont>
 #include <QHash>
+#include <QImage>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPixmap>
+#include <QScopedValueRollback>
 
 namespace {
 
-const QColor kInk(0x2A, 0x31, 0x38);
-thread_local QColor tInk = kInk;
+thread_local QColor tInk;
+thread_local QColor tAccent;
+thread_local QIcon::Mode tMode = QIcon::Normal;
+thread_local QIcon::State tState = QIcon::Off;
+
+QColor stateColor(const QColor& color) {
+  if (tMode == QIcon::Disabled) {
+    const int gray = qGray(KaTheme::iconPalette().disabled.rgb());
+    return QColor(gray, gray, gray);
+  }
+  QColor result = tState == QIcon::On ? color.darker(115) : color;
+  if (tMode == QIcon::Active) result = result.lighter(120);
+  return result;
+}
+
+QColor groupColor(const QString& id) {
+  const auto& palette = KaTheme::iconPalette();
+  if (id == QLatin1String("new") || id == QLatin1String("open") ||
+      id == QLatin1String("import") || id == QLatin1String("save") ||
+      id == QLatin1String("save_as")) return palette.file;
+  if (id.startsWith(QLatin1String("layout_")) || id == QLatin1String("pdf") ||
+      id == QLatin1String("export") || id == QLatin1String("upload") ||
+      id == QLatin1String("check") || id == QLatin1String("section") ||
+      id == QLatin1String("section_layout")) return palette.output;
+  if (id == QLatin1String("georef") || id == QLatin1String("transform") ||
+      id == QLatin1String("crs") || id == QLatin1String("buffer")) return palette.align;
+  if (id == QLatin1String("river") || id == QLatin1String("hydro")) return palette.water;
+  if (id == QLatin1String("soil")) return palette.earth;
+  if (id == QLatin1String("geology")) return palette.rock;
+  if (id == QLatin1String("polygon") || id == QLatin1String("survey_area") ||
+      id.startsWith(QLatin1String("feature_")) || id.startsWith(QLatin1String("draw_")) ||
+      id == QLatin1String("line") || id == QLatin1String("gps") ||
+      id == QLatin1String("measure") || id == QLatin1String("tape") ||
+      id == QLatin1String("artifact") ||
+      id == QLatin1String("trench") || id == QLatin1String("trench_grid") ||
+      id == QLatin1String("easy_draw") || id == QLatin1String("saveedit") ||
+      id == QLatin1String("snap") || id == QLatin1String("select") ||
+      id == QLatin1String("arrow") || id == QLatin1String("stop") ||
+      id == QLatin1String("trash")) return palette.record;
+  return palette.map;
+}
 
 QPixmap base(int s = 64) {
   QPixmap pm(s, s);
@@ -18,25 +60,43 @@ QPixmap base(int s = 64) {
 
 void prep(QPainter& p, qreal width = 3.0) {
   p.setRenderHint(QPainter::Antialiasing, true);
-  p.setPen(QPen(tInk, width, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-  p.setBrush(Qt::NoBrush);
+  p.setPen(QPen(tInk, qMax(3.0, width), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+  p.setBrush(tAccent.lighter(150));
 }
 
-void fillInk(QPainter& p) { p.setBrush(tInk); }
+void fillInk(QPainter& p) { p.setBrush(tAccent); }
 
-QIcon bake(void (*fn)(QPainter&)) {
-  auto pmAt = [&](const QColor& c) {
-    tInk = c;
+QIcon bakeIcon(void (*fn)(QPainter&), const QColor& accent) {
+  auto pmAt = [&](QIcon::Mode mode, QIcon::State state) {
+    QScopedValueRollback<QIcon::Mode> modeGuard(tMode, mode);
+    QScopedValueRollback<QIcon::State> stateGuard(tState, state);
+    QScopedValueRollback<QColor> inkGuard(tInk, stateColor(KaTheme::iconPalette().ink));
+    QScopedValueRollback<QColor> accentGuard(tAccent, stateColor(accent));
     auto pm = base();
     QPainter p(&pm);
+    if (mode == QIcon::Selected) {
+      p.setRenderHint(QPainter::Antialiasing, true);
+      p.setPen(QPen(KaTheme::iconPalette().selected, 2.5));
+      p.setBrush(Qt::NoBrush);
+      p.drawRoundedRect(QRectF(3, 3, 58, 58), 9, 9);
+    }
     fn(p);
+    if (state == QIcon::On) {
+      p.setPen(QPen(tInk, 2.0));
+      p.setBrush(tAccent);
+      p.drawEllipse(QPointF(51, 51), 9, 9);
+      p.setPen(QPen(mode == QIcon::Disabled ? tAccent.lighter(175) : QColor(Qt::white),
+                    2.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+      p.setBrush(Qt::NoBrush);
+      p.drawLine(QPointF(46, 51), QPointF(50, 55));
+      p.drawLine(QPointF(50, 55), QPointF(56, 47));
+    }
     return pm;
   };
   QIcon ic;
-  ic.addPixmap(pmAt(kInk), QIcon::Normal, QIcon::Off);
-  ic.addPixmap(pmAt(Qt::white), QIcon::Normal, QIcon::On);
-  ic.addPixmap(pmAt(Qt::white), QIcon::Selected);
-  ic.addPixmap(pmAt(kInk), QIcon::Active);
+  for (const auto mode : {QIcon::Normal, QIcon::Active, QIcon::Selected, QIcon::Disabled})
+    for (const auto state : {QIcon::Off, QIcon::On})
+      ic.addPixmap(pmAt(mode, state), mode, state);
   return ic;
 }
 
@@ -130,9 +190,15 @@ void dGps(QPainter& p) {
 }
 
 void dCheck(QPainter& p) {
-  prep(p, 4.0);
-  p.drawLine(16, 34, 28, 46);
-  p.drawLine(28, 46, 50, 18);
+  prep(p, 7.0);
+  p.setBrush(Qt::NoBrush);
+  QPainterPath check;
+  check.moveTo(16, 34);
+  check.lineTo(28, 46);
+  check.lineTo(50, 18);
+  p.drawPath(check);
+  p.setPen(QPen(tAccent, 4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+  p.drawPath(check);
 }
 
 void dExport(QPainter& p) {
@@ -140,7 +206,7 @@ void dExport(QPainter& p) {
   p.drawLine(32, 14, 32, 38);
   p.drawLine(22, 28, 32, 40);
   p.drawLine(42, 28, 32, 40);
-  p.drawLine(16, 48, 48, 48);
+  p.drawRoundedRect(QRectF(13, 44, 38, 10), 2, 2);
 }
 
 void dPdf(QPainter& p) {
@@ -178,7 +244,7 @@ void dSection(QPainter& p) {
   p.drawLine(QPointF(20, 28), QPointF(28, 34));
   p.drawLine(QPointF(28, 34), QPointF(36, 22));
   p.drawLine(QPointF(36, 22), QPointF(48, 30));
-  p.setPen(QPen(QColor(0xD7, 0x19, 0x1C), 2.0, Qt::DashLine, Qt::RoundCap));
+  p.setPen(QPen(tAccent.darker(130), 3.0, Qt::DashLine, Qt::RoundCap));
   p.drawLine(QPointF(16, 42), QPointF(48, 42));
 }
 
@@ -205,7 +271,7 @@ void dUpload(QPainter& p) {
   p.drawLine(32, 44, 32, 16);
   p.drawLine(20, 28, 32, 14);
   p.drawLine(44, 28, 32, 14);
-  p.drawLine(16, 48, 48, 48);
+  p.drawRoundedRect(QRectF(13, 47, 38, 7), 2, 2);
 }
 
 void dTrash(QPainter& p) {
@@ -218,11 +284,21 @@ void dTrash(QPainter& p) {
 }
 
 void dGeoref(QPainter& p) {
-  prep(p, 2.6);
-  p.drawLine(16, 28, 16, 16);
-  p.drawLine(16, 16, 28, 16);
-  p.drawLine(48, 36, 48, 48);
-  p.drawLine(48, 48, 36, 48);
+  // Two overlapping sheets share a surveyed control point.
+  prep(p, 3.2);
+  p.drawRoundedRect(QRectF(8, 10, 32, 34), 3, 3);
+  p.setBrush(tAccent.lighter(185));
+  p.drawRoundedRect(QRectF(23, 23, 32, 32), 3, 3);
+  p.setPen(QPen(tAccent, 3.2, Qt::SolidLine, Qt::RoundCap));
+  p.drawLine(12, 20, 24, 20);
+  p.drawLine(12, 27, 19, 27);
+  p.setPen(QPen(tInk, 3.2, Qt::SolidLine, Qt::RoundCap));
+  p.setBrush(tAccent);
+  p.drawEllipse(QPointF(36, 36), 6, 6);
+  p.drawLine(36, 25, 36, 30);
+  p.drawLine(36, 42, 36, 48);
+  p.drawLine(25, 36, 30, 36);
+  p.drawLine(42, 36, 48, 36);
 }
 
 void dPalette(QPainter& p) {
@@ -389,11 +465,25 @@ void dNorth(QPainter& p) {
 }
 
 void dDem(QPainter& p) {
-  prep(p, 2.4);
-  p.drawLine(QPointF(12, 46), QPointF(22, 28));
-  p.drawLine(QPointF(22, 28), QPointF(34, 38));
-  p.drawLine(QPointF(34, 38), QPointF(52, 14));
-  p.drawLine(QPointF(12, 50), QPointF(52, 50));
+  // Shaded elevation faces and contour lines distinguish DEM from a basemap.
+  prep(p, 3.2);
+  const auto& colors = KaTheme::iconPalette();
+  QPolygonF low;
+  low << QPointF(7, 47) << QPointF(22, 25) << QPointF(33, 37) << QPointF(47, 49)
+      << QPointF(31, 57);
+  p.setBrush(stateColor(colors.map));
+  p.drawPolygon(low);
+  QPolygonF high;
+  high << QPointF(23, 43) << QPointF(40, 9) << QPointF(57, 43) << QPointF(43, 52);
+  p.setBrush(stateColor(colors.earthLight));
+  p.drawPolygon(high);
+  QPolygonF shadow;
+  shadow << QPointF(40, 9) << QPointF(57, 43) << QPointF(43, 52) << QPointF(40, 33);
+  p.setBrush(stateColor(colors.rock));
+  p.drawPolygon(shadow);
+  p.setBrush(Qt::NoBrush);
+  p.drawLine(QPointF(31, 29), QPointF(40, 33));
+  p.drawLine(QPointF(27, 37), QPointF(42, 43));
 }
 
 void dMapGrid(QPainter& p) {
@@ -411,56 +501,99 @@ void dTrenchGrid(QPainter& p) {
   p.drawRect(QRectF(36, 16, 14, 32));
 }
 
-// 토양 단면: 지표 풀 + 층위 2단 + 아래층 자갈.
 void dPaleo(QPainter& p) {
-  // 옛 하도(아래 물결) + 자연제방 둔덕.
-  prep(p, 2.4);
-  p.drawArc(QRectF(12, 36, 18, 14), 20 * 16, 140 * 16);
-  p.drawArc(QRectF(28, 36, 22, 14), 20 * 16, 140 * 16);
-  p.drawLine(QPointF(14, 34), QPointF(24, 18));
-  p.drawLine(QPointF(24, 18), QPointF(34, 34));
-  p.drawLine(QPointF(18, 28), QPointF(30, 28));
+  // Relict meander in a floodplain, with a dashed former river course.
+  prep(p, 3.2);
+  const auto& colors = KaTheme::iconPalette();
+  p.setBrush(stateColor(colors.earthLight));
+  p.drawRoundedRect(QRectF(7, 11, 50, 44), 5, 5);
+  QPainterPath ridge;
+  ridge.moveTo(9, 28);
+  ridge.quadTo(19, 13, 30, 23);
+  ridge.quadTo(44, 11, 55, 21);
+  p.setBrush(Qt::NoBrush);
+  p.setPen(QPen(stateColor(colors.vegetation), 4, Qt::SolidLine, Qt::RoundCap));
+  p.drawPath(ridge);
+  QPainterPath river;
+  river.moveTo(9, 43);
+  river.cubicTo(22, 30, 27, 53, 39, 40);
+  river.cubicTo(46, 33, 49, 37, 55, 31);
+  p.setPen(QPen(tInk, 7, Qt::SolidLine, Qt::RoundCap));
+  p.drawPath(river);
+  p.setPen(QPen(stateColor(colors.water), 4, Qt::SolidLine, Qt::RoundCap));
+  p.drawPath(river);
+  QPainterPath former;
+  former.moveTo(15, 38);
+  former.cubicTo(11, 23, 31, 23, 29, 38);
+  p.setPen(QPen(stateColor(colors.earth).darker(145), 3.2, Qt::DashLine, Qt::RoundCap));
+  p.drawPath(former);
 }
 
 void dSoil(QPainter& p) {
-  prep(p, 2.4);
-  p.drawRoundedRect(QRectF(14, 16, 36, 34), 3, 3);
-  p.drawLine(QPointF(23, 16), QPointF(23, 9));
-  p.drawLine(QPointF(32, 16), QPointF(32, 8));
-  p.drawLine(QPointF(41, 16), QPointF(41, 9));
-  p.drawLine(QPointF(14, 28), QPointF(50, 28));
-  p.drawLine(QPointF(14, 39), QPointF(50, 39));
-  p.drawEllipse(QPointF(23, 44.5), 1.6, 1.6);
-  p.drawEllipse(QPointF(32, 44.5), 1.6, 1.6);
-  p.drawEllipse(QPointF(41, 44.5), 1.6, 1.6);
+  prep(p, 3.2);
+  const auto& colors = KaTheme::iconPalette();
+  p.setBrush(stateColor(colors.earthLight));
+  p.drawRect(QRectF(9, 19, 46, 12));
+  p.setBrush(stateColor(colors.earth));
+  p.drawRect(QRectF(9, 31, 46, 11));
+  p.setBrush(stateColor(colors.earth).darker(145));
+  p.drawRect(QRectF(9, 42, 46, 12));
+  p.setPen(QPen(stateColor(colors.vegetation), 3.5, Qt::SolidLine, Qt::RoundCap));
+  for (int x : {19, 32, 45}) {
+    p.drawLine(x, 17, x, 9);
+    p.drawLine(x, 13, x - 4, 10);
+  }
+  p.setPen(QPen(tInk, 2.4));
+  p.setBrush(stateColor(colors.earthLight));
+  p.drawEllipse(QPointF(20, 48), 2.6, 2.0);
+  p.drawEllipse(QPointF(33, 48), 2.6, 2.0);
+  p.drawEllipse(QPointF(45, 48), 2.6, 2.0);
 }
 
 void dGeology(QPainter& p) {
-  // 기울어진 지층 단면 + 단층선: 지질도.
-  prep(p, 2.4);
-  p.drawRoundedRect(QRectF(12, 14, 40, 36), 3, 3);
-  p.drawLine(QPointF(12, 26), QPointF(34, 22));
-  p.drawLine(QPointF(34, 22), QPointF(52, 26));
-  p.drawLine(QPointF(12, 36), QPointF(34, 31));
-  p.drawLine(QPointF(34, 31), QPointF(52, 36));
-  p.drawLine(QPointF(12, 45), QPointF(34, 41));
-  p.drawLine(QPointF(34, 41), QPointF(52, 45));
-  p.drawLine(QPointF(36, 14), QPointF(30, 50));
+  // Dipping rock beds are offset across a single bold fault.
+  prep(p, 3.2);
+  const auto& colors = KaTheme::iconPalette();
+  p.setBrush(stateColor(colors.rock).lighter(160));
+  p.drawRect(QRectF(8, 12, 48, 42));
+  p.save();
+  p.setClipRect(QRectF(8, 12, 48, 42));
+  QPolygonF leftBed;
+  leftBed << QPointF(8, 34) << QPointF(34, 19) << QPointF(31, 33) << QPointF(8, 47);
+  p.setBrush(stateColor(colors.earth));
+  p.drawPolygon(leftBed);
+  QPolygonF rightBed;
+  rightBed << QPointF(34, 31) << QPointF(56, 18) << QPointF(56, 31) << QPointF(31, 46);
+  p.drawPolygon(rightBed);
+  p.restore();
+  p.setBrush(Qt::NoBrush);
+  p.drawRect(QRectF(8, 12, 48, 42));
+  p.setPen(QPen(tInk, 4.2, Qt::SolidLine, Qt::RoundCap));
+  p.drawLine(QPointF(37, 9), QPointF(28, 57));
 }
 
 void dRiver(QPainter& p) {
-  // 굽이치는 본류 + 합류하는 지류: 수계도.
-  prep(p, 2.6);
+  // Main stream is wider than its tributaries, with a dark bank outline.
+  prep(p, 3.2);
+  p.setBrush(Qt::NoBrush);
   QPainterPath main;
-  main.moveTo(20, 8);
-  main.cubicTo(30, 18, 12, 28, 24, 38);
-  main.cubicTo(34, 46, 30, 52, 34, 56);
-  p.drawPath(main);
+  main.moveTo(26, 7);
+  main.cubicTo(40, 18, 15, 27, 27, 38);
+  main.cubicTo(39, 47, 28, 51, 33, 57);
   QPainterPath trib;
-  trib.moveTo(50, 14);
-  trib.cubicTo(44, 24, 48, 30, 38, 36);
-  trib.cubicTo(30, 41, 28, 44, 30, 48);
+  trib.moveTo(54, 14);
+  trib.cubicTo(43, 18, 47, 33, 27, 38);
+  trib.moveTo(9, 19);
+  trib.cubicTo(10, 25, 18, 28, 23, 31);
+  p.setPen(QPen(tInk, 6.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
   p.drawPath(trib);
+  p.setPen(QPen(tInk, 9, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+  p.drawPath(main);
+  const QColor water = stateColor(KaTheme::iconPalette().water);
+  p.setPen(QPen(water, 3.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+  p.drawPath(trib);
+  p.setPen(QPen(water, 6.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+  p.drawPath(main);
 }
 
 void dMeasureTape(QPainter& p) {
@@ -591,6 +724,8 @@ QIcon icon(const QString& id) {
   static QHash<QString, QIcon> cache;
   if (cache.contains(id)) return cache.value(id);
 
+  const QColor accent = groupColor(id);
+  const auto bake = [&accent](void (*draw)(QPainter&)) { return bakeIcon(draw, accent); };
   QIcon ic;
   if (id == QLatin1String("new")) ic = bake(dDocPlus);
   else if (id == QLatin1String("open") || id == QLatin1String("import")) ic = bake(dFolder);
@@ -657,17 +792,31 @@ QIcon icon(const QString& id) {
 }
 
 QIcon icon(const QString& id, const QColor& ink) {
-  const QIcon base = icon(id);
-  if (!ink.isValid() || ink == kInk) return base;
-  const QPixmap src = base.pixmap(64, 64);
-  QPixmap out(src.size());
-  out.fill(Qt::transparent);
-  QPainter p(&out);
-  p.drawPixmap(0, 0, src);
-  p.setCompositionMode(QPainter::CompositionMode_SourceIn);
-  p.fillRect(out.rect(), ink);
+  const QIcon source = icon(id);
+  if (!ink.isValid()) return source;
   QIcon tinted;
-  tinted.addPixmap(out);
+  for (const auto mode : {QIcon::Normal, QIcon::Active, QIcon::Selected, QIcon::Disabled}) {
+    for (const auto state : {QIcon::Off, QIcon::On}) {
+      // Apply disabled opacity once, after deriving the mask from the normal artwork.
+      const auto maskMode = mode == QIcon::Disabled ? QIcon::Normal : mode;
+      const QImage src = source.pixmap(QSize(64, 64), maskMode, state).toImage();
+      QImage out(src.size(), QImage::Format_ARGB32);
+      out.fill(Qt::transparent);
+      // Preserve internal outlines instead of flattening a filled icon into a silhouette.
+      const qreal inkRange = qMax(1, 255 - qGray(KaTheme::iconPalette().ink.rgb()));
+      for (int y = 0; y < src.height(); ++y) {
+        for (int x = 0; x < src.width(); ++x) {
+          const QColor pixel = src.pixelColor(x, y);
+          const qreal shade = qMin(1.0, (255 - qGray(pixel.rgb())) / inkRange);
+          QColor tint = ink;
+          const qreal disabledOpacity = mode == QIcon::Disabled ? 0.45 : 1.0;
+          tint.setAlpha(qRound(ink.alphaF() * pixel.alpha() * shade * disabledOpacity));
+          out.setPixelColor(x, y, tint);
+        }
+      }
+      tinted.addPixmap(QPixmap::fromImage(out), mode, state);
+    }
+  }
   return tinted;
 }
 

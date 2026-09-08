@@ -17,6 +17,8 @@ class QgsCoordinateTransformContext;
 struct PreparedReferenceMap {
   enum class Status { Ready, Cancelled, Failed };
   Status status = Status::Failed;
+  // A completed atomic file replacement cannot be undone by a late Cancel click.
+  bool outputCommitted = false;
   QString gpkgPath;
   QString tableName;
   QString rasterUri;

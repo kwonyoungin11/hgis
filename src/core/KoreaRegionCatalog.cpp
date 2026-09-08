@@ -140,6 +140,38 @@ QString KoreaRegionCatalog::canonicalSido(const QString& name) {
   return t;
 }
 
+std::optional<KoreaRegionBounds> KoreaRegionCatalog::overviewBounds(const QString& sido) {
+  // Approximate mainland/Jeju framing: SGIS 2020 largest polygon extents,
+  // transformed EPSG:5179 -> 4326 and rounded outward to 0.01 degrees.
+  // Public SGIS snapshot: github.com/swcho/korea-maps, commit
+  // 8d53dca28fed87f98a75886ea86ed75774f052eb, json/전국_시도_경계.json.
+  // These navigation presets deliberately omit remote islands; never use them
+  // as administrative boundaries or for clipping/exporting survey data.
+  static const QHash<QString, KoreaRegionBounds> bounds = {
+      {QStringLiteral("서울특별시"), {126.76, 37.42, 127.19, 37.71}},
+      {QStringLiteral("부산광역시"), {128.79, 35.03, 129.31, 35.39}},
+      // Include Gunwi: official extrema at gunwi.go.kr/ko/page.do?mnu_uid=186.
+      {QStringLiteral("대구광역시"), {128.35, 35.60, 128.90, 36.33}},
+      {QStringLiteral("인천광역시"), {126.57, 37.33, 126.80, 37.64}},
+      {QStringLiteral("광주광역시"), {126.64, 35.05, 127.03, 35.26}},
+      {QStringLiteral("대전광역시"), {127.24, 36.18, 127.56, 36.51}},
+      {QStringLiteral("울산광역시"), {128.97, 35.32, 129.47, 35.73}},
+      {QStringLiteral("세종특별자치시"), {127.12, 36.40, 127.42, 36.74}},
+      {QStringLiteral("경기도"), {126.51, 36.89, 127.85, 38.29}},
+      {QStringLiteral("강원특별자치도"), {127.09, 37.02, 129.37, 38.62}},
+      {QStringLiteral("충청북도"), {127.27, 36.01, 128.66, 37.26}},
+      {QStringLiteral("충청남도"), {126.11, 35.97, 127.64, 37.07}},
+      {QStringLiteral("전북특별자치도"), {126.42, 35.29, 127.92, 36.16}},
+      {QStringLiteral("전라남도"), {126.15, 34.29, 127.79, 35.49}},
+      {QStringLiteral("경상북도"), {127.79, 35.56, 129.59, 37.15}},
+      {QStringLiteral("경상남도"), {127.57, 34.76, 129.22, 35.91}},
+      {QStringLiteral("제주특별자치도"), {126.16, 33.19, 126.95, 33.57}},
+  };
+  const auto it = bounds.constFind(canonicalSido(sido));
+  if (it == bounds.cend()) return std::nullopt;
+  return it.value();
+}
+
 const QHash<QString, QStringList>& dongTable() {
   static QHash<QString, QStringList> map;
   static bool loaded = false;

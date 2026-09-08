@@ -2,6 +2,9 @@
 
 #include <QString>
 #include <QtGlobal>
+#include <functional>
+
+class QgsFeedback;
 
 // 조사구역 범위의 배경지도 타일을 MBTiles(SQLite) 한 파일로 미리 받아 둔다.
 //
@@ -38,8 +41,12 @@ double resolutionAtZoom(int z);
 // 내려받기 전에 "몇 장 · 얼마나 걸림"을 사용자에게 알려 주려고 쓴다.
 qint64 tileCount(double minX, double minY, double maxX, double maxY, int minZoom, int maxZoom);
 
-// 실제로 받아 MBTiles로 쓴다. 네트워크가 필요하다.
+// 실제로 받아 MBTiles로 쓴다. 네트워크가 필요하다. 완성 파일을 검증한 뒤
+// 원자적으로 교체하므로 취소·오류 시 기존 파일을 유지한다.
+// feedback은 호출 스레드에서만 사용한다. 작업 취소 플래그는 thread-safe
+// cancellationRequested를 통해 확인한다(GDAL은 Qt 이벤트 루프를 돌리지 않음).
 bool build(const Options& opt, double minX, double minY, double maxX, double maxY,
-           const QString& outPath, QString* errorOut);
+           const QString& outPath, QString* errorOut, QgsFeedback* feedback = nullptr,
+           const std::function<bool()>& cancellationRequested = {});
 
 }  // namespace TilePackService

@@ -252,6 +252,7 @@ void KaVertexEditTool::selectAt(const QgsPointXY& mapPt_) {
 }
 
 bool KaVertexEditTool::moveVertexTo(int index, const QgsPointXY& to) {
+  m_lastEditError.clear();
   if (!m_layer || m_fid < 0 || index < 0) return false;
   QgsGeometry geom = selectedGeometry();
   if (geom.isNull()) return false;
@@ -262,19 +263,11 @@ bool KaVertexEditTool::moveVertexTo(int index, const QgsPointXY& to) {
     if (index == 0 && !geom.moveVertex(to.x(), to.y(), count - 1)) return false;
     if (index == count - 1 && !geom.moveVertex(to.x(), to.y(), 0)) return false;
   }
-  if (!m_layer->isEditable()) m_layer->startEditing();
-  if (!m_layer->changeGeometry(m_fid, geom)) {
-    m_layer->rollBack();
-    return false;
-  }
-  if (!m_layer->commitChanges()) {
-    m_layer->rollBack();
-    return false;
-  }
-  return true;
+  return applyGeometryChange(geom, QStringLiteral("꼭짓점 이동"));
 }
 
 bool KaVertexEditTool::deleteVertexAt(int index) {
+  m_lastEditError.clear();
   if (!m_layer || m_fid < 0 || index < 0) return false;
   QgsGeometry geom = selectedGeometry();
   if (geom.isNull() || !geom.constGet()) return false;
@@ -288,24 +281,61 @@ bool KaVertexEditTool::deleteVertexAt(int index) {
     return false;
   }
   if (!geom.deleteVertex(index)) return false;
-  if (!m_layer->isEditable()) m_layer->startEditing();
-  if (!m_layer->changeGeometry(m_fid, geom) || !m_layer->commitChanges()) {
-    m_layer->rollBack();
-    return false;
-  }
-  return true;
+  return applyGeometryChange(geom, QStringLiteral("꼭짓점 삭제"));
 }
 
 bool KaVertexEditTool::insertVertexAt(int index, const QgsPointXY& at) {
+  m_lastEditError.clear();
   if (!m_layer || m_fid < 0 || index < 0) return false;
   QgsGeometry geom = selectedGeometry();
   if (geom.isNull()) return false;
   if (!geom.insertVertex(at.x(), at.y(), index)) return false;
-  if (!m_layer->isEditable()) m_layer->startEditing();
-  if (!m_layer->changeGeometry(m_fid, geom) || !m_layer->commitChanges()) {
-    m_layer->rollBack();
+  return applyGeometryChange(geom, QStringLiteral("꼭짓점 추가"));
+}
+
+bool KaVertexEditTool::applyGeometryChange(QgsGeometry geom, const QString& commandText) {
+  const QPointer<QgsVectorLayer> layer = m_layer;
+  if (!layer) return false;
+  const auto fail = [this](const QString& message) {
+    m_lastEditError = message;
+    emit statusMessage(message);
+    return false;
+  };
+  // A command already owned by another operation must not be ended or discarded.
+  if (layer->isEditCommandActive())
+    return fail(QStringLiteral("다른 도형 편집이 진행 중입니다. 편집을 마친 뒤 다시 시도하세요."));
+
+  QgsFeature before;
+  if (!layer->getFeatures(QgsFeatureRequest(m_fid)).nextFeature(before))
+    return fail(QStringLiteral("수정할 도형을 찾지 못했습니다. 도형을 다시 선택하세요."));
+  if (before.geometry().equals(geom)) return true;
+  const bool wasEditable = layer->isEditable();
+  const bool hadPendingChanges = layer->isModified();
+  if (!wasEditable && !layer->startEditing())
+    return fail(QStringLiteral("레이어를 편집할 수 없습니다. 파일의 쓰기 권한을 확인하세요."));
+  if (!layer) return false;
+
+  layer->beginEditCommand(commandText);
+  if (!layer) return false;
+  if (!layer->changeGeometry(before.id(), geom)) {
+    if (layer) layer->destroyEditCommand();
+    return fail(QStringLiteral("도형을 수정하지 못했습니다. 도형을 다시 선택한 뒤 시도하세요."));
+  }
+  if (!layer) return false;
+  layer->endEditCommand();
+  if (!layer) return false;
+
+  // Never commit someone else's pending edits as a side effect of moving a point.
+  // QGIS keeps the buffer after a failed commit, so keep its Undo snapshot too.
+  if (!hadPendingChanges && !layer->commitChanges(!wasEditable)) {
+    m_lastEditError = QStringLiteral(
+        "도형은 화면에 남아 있지만 파일에 저장하지 못했습니다. 조사 저장을 다시 시도하거나 Ctrl+Z로 되돌리세요.");
+    emit statusMessage(m_lastEditError);
+    if (layer) emit featureGeometryEdited(layer.data(), before);
     return false;
   }
+  if (!layer) return false;
+  emit featureGeometryEdited(layer.data(), before);
   return true;
 }
 
@@ -377,10 +407,11 @@ void KaVertexEditTool::canvasReleaseEvent(QgsMapMouseEvent* e) {
   if (idx < 0) return;
   if (moveVertexTo(idx, toLayer(snapMapPoint(e)))) {
     showVertexMarkers();
-    emit statusMessage(QStringLiteral("꼭짓점을 옮겼습니다. 편집저장 없이 바로 저장됩니다."));
+    emit statusMessage(QStringLiteral("꼭짓점을 옮겼습니다. Ctrl+Z로 되돌릴 수 있습니다."));
   } else {
     showVertexMarkers();
-    emit statusMessage(QStringLiteral("꼭짓점을 옮기지 못했습니다."));
+    emit statusMessage(m_lastEditError.isEmpty() ? QStringLiteral("꼭짓점을 옮기지 못했습니다.")
+                                               : m_lastEditError);
   }
 }
 

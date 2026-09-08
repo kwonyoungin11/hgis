@@ -3,10 +3,12 @@
 
 #include <QtTest>
 #include <QCoreApplication>
+#include <QDir>
 #include <QFile>
 #include <QTemporaryDir>
 
 #include "core/DemAnalyzer.h"
+#include "core/DemDownloadService.h"
 #include "core/TilePackService.h"
 #include "core/TrenchGridGenerator.h"
 #include "core/CanvasGridMath.h"
@@ -14,6 +16,8 @@
 #include <gdal_priv.h>
 #include <ogr_geometry.h>
 #include <ogrsf_frmts.h>
+#include <qgsfeedback.h>
+#include <qgsrectangle.h>
 
 class TestDemTrench : public QObject {
   Q_OBJECT
@@ -34,6 +38,10 @@ private slots:
   void buildInArea_trimsEdgeTrenchesInsteadOfDropping();
   void tilePack_xmlUsesXyzTopOrigin();
   void tilePack_tileCountMatchesWebMercator();
+  void tilePack_earlyCancellationPreservesExistingFile();
+  void demDownload_rejectsInvalidRangeWithoutChangingFiles_data();
+  void demDownload_rejectsInvalidRangeWithoutChangingFiles();
+  void demDownload_earlyCancellationPreservesExistingFile();
   void layerTreeMenu_hasLabelToggleAndTrenchRatio();
   void applySnapConfig_vertexAndSegmentNotWmsPromise();
   void trenchWholeMove_commitsOnMouseRelease();
@@ -381,6 +389,74 @@ void TestDemTrench::tilePack_tileCountMatchesWebMercator() {
   // 조사구역 크기(한 변 1 km)를 12~18로 덮으면 현실적인 장수여야 한다.
   const qint64 n = TilePackService::tileCount(14100000.0, 4500000.0, 14101000.0, 4501000.0, 12, 18);
   QVERIFY2(n > 0 && n < 400, qPrintable(QStringLiteral("1km 구역 12~18 → %1장").arg(n)));
+}
+
+void TestDemTrench::tilePack_earlyCancellationPreservesExistingFile() {
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  const QString path = directory.filePath(QStringLiteral("existing.mbtiles"));
+  QFile original(path);
+  QVERIFY(original.open(QIODevice::WriteOnly));
+  QCOMPARE(original.write("existing-map"), qint64(12));
+  original.close();
+  TilePackService::Options options;
+  options.urlTemplate = QStringLiteral("http://127.0.0.1:1/{z}/{x}/{y}.png");
+  QgsFeedback feedback;
+  QString error;
+  QVERIFY(!TilePackService::build(options, 0, 0, 100, 100, path, &error, &feedback,
+                                  [] { return true; }));
+  QVERIFY(feedback.isCanceled());
+  QVERIFY(error.contains(QStringLiteral("취소")));
+  QVERIFY(original.open(QIODevice::ReadOnly));
+  QCOMPARE(original.readAll(), QByteArray("existing-map"));
+  QCOMPARE(QDir(directory.path()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot).size(), 1);
+}
+
+void TestDemTrench::demDownload_rejectsInvalidRangeWithoutChangingFiles_data() {
+  QTest::addColumn<QgsRectangle>("extent");
+  QTest::newRow("empty") << QgsRectangle();
+  QTest::newRow("outside-longitude") << QgsRectangle(181, 33, 182, 34);
+  QTest::newRow("outside-latitude") << QgsRectangle(126, 91, 127, 92);
+  QTest::newRow("more-than-24-tiles") << QgsRectangle(124, 32, 130, 38);
+}
+
+void TestDemTrench::demDownload_rejectsInvalidRangeWithoutChangingFiles() {
+  QFETCH(QgsRectangle, extent);
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  const QString path = directory.filePath(QStringLiteral("existing.tif"));
+  QFile original(path);
+  QVERIFY(original.open(QIODevice::WriteOnly));
+  QCOMPARE(original.write("existing-dem"), qint64(12));
+  original.close();
+  const auto result = DemDownloadService::prepare(extent, path, nullptr);
+  QCOMPARE(result.status, PreparedReferenceMap::Status::Failed);
+  QVERIFY(!result.error.isEmpty());
+  QVERIFY(result.rasterUri.isEmpty());
+  QVERIFY(!result.storage);
+  QVERIFY(original.open(QIODevice::ReadOnly));
+  QCOMPARE(original.readAll(), QByteArray("existing-dem"));
+  QCOMPARE(QDir(directory.path()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot).size(), 1);
+}
+
+void TestDemTrench::demDownload_earlyCancellationPreservesExistingFile() {
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  const QString path = directory.filePath(QStringLiteral("existing.tif"));
+  QFile original(path);
+  QVERIFY(original.open(QIODevice::WriteOnly));
+  QCOMPARE(original.write("existing-dem"), qint64(12));
+  original.close();
+  const QgsRectangle extent(126.5, 33.4, 126.51, 33.41);
+  QgsFeedback feedback;
+  const auto result = DemDownloadService::prepare(extent, path, &feedback, [] { return true; });
+  QCOMPARE(result.status, PreparedReferenceMap::Status::Cancelled);
+  QVERIFY(result.error.contains(QStringLiteral("취소")));
+  QVERIFY(result.rasterUri.isEmpty());
+  QVERIFY(!result.storage);
+  QVERIFY(original.open(QIODevice::ReadOnly));
+  QCOMPARE(original.readAll(), QByteArray("existing-dem"));
+  QCOMPARE(QDir(directory.path()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot).size(), 1);
 }
 
 void TestDemTrench::layerTreeMenu_hasLabelToggleAndTrenchRatio() {

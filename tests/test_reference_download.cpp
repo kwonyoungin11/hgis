@@ -1,6 +1,9 @@
 #include <QtTest>
 #include <QElapsedTimer>
+#include <QBuffer>
+#include <QDir>
 #include <QFile>
+#include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -11,6 +14,10 @@
 #include <QTcpSocket>
 #include <QThread>
 #include <QTimer>
+#include <QSemaphore>
+#include <atomic>
+#include <memory>
+#include <gdal.h>
 #include "app/KaReferenceDownloadJob.h"
 #include <qgsrasterlayer.h>
 #include <qgsrasterdataprovider.h>
@@ -20,6 +27,7 @@
 #include "core/LayerOps.h"
 #include "core/RiverMapService.h"
 #include "core/SoilMapService.h"
+#include "core/TilePackService.h"
 #include <qgsapplication.h>
 #include <qgscoordinatetransformcontext.h>
 #include <qgsfeedback.h>
@@ -43,6 +51,8 @@ private slots:
   void trickleResponseHasAbsoluteDeadline();
   void localCapabilitiesPreserveWmsEndpoint();
   void qgisExceptionBecomesFailure();
+  void tilePackWorkerHonoursDownloadOutcome_data();
+  void tilePackWorkerHonoursDownloadOutcome();
 };
 
 namespace {
@@ -307,6 +317,148 @@ void TestReferenceDownload::geologyServerErrorIsNotNoDataFallback() {
   QgsRasterLayer check(empty.rasterUri, QStringLiteral("prepared local capabilities"), QStringLiteral("wms"));
   QVERIFY(check.isValid());
   QVERIFY(check.htmlMetadata().contains(QStringLiteral("https://data.kigam.re.kr/geoserver/ows")));
+}
+
+void TestReferenceDownload::tilePackWorkerHonoursDownloadOutcome_data() {
+  QTest::addColumn<int>("mode");
+  QTest::newRow("complete-offline-pixels") << 0;
+  QTest::newRow("http-403-preserves-original") << 1;
+  QTest::newRow("http-503-preserves-original") << 2;
+  QTest::newRow("cancel-during-gdal-without-event-loop") << 3;
+  QTest::newRow("late-cancel-after-atomic-save-stays-ready") << 4;
+}
+
+void TestReferenceDownload::tilePackWorkerHonoursDownloadOutcome() {
+  QFETCH(int, mode);
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  const QString outputPath = directory.filePath(QStringLiteral("saved.mbtiles"));
+  const QByteArray originalBytes("previous-offline-file");
+  {
+    QFile original(outputPath);
+    QVERIFY(original.open(QIODevice::WriteOnly));
+    QCOMPARE(original.write(originalBytes), qint64(originalBytes.size()));
+  }
+
+  QImage tile(256, 256, QImage::Format_RGB32);
+  tile.fill(QColor(41, 113, 173));
+  QByteArray png;
+  QBuffer buffer(&png);
+  QVERIFY(buffer.open(QIODevice::WriteOnly));
+  QVERIFY(tile.save(&buffer, "PNG"));
+  QTcpServer server;
+  QVERIFY(server.listen(QHostAddress::LocalHost));
+  TilePackService::Options options;
+  options.urlTemplate = QStringLiteral("http://127.0.0.1:%1/{z}/{x}/{y}.png").arg(server.serverPort());
+  options.minZoom = 0;
+  options.maxZoom = 1;
+  options.jpeg = false;
+  struct State {
+    PreparedReferenceMap result;
+    bool complete = false; // GUI-only; worker state below is synchronized.
+    std::atomic_bool workerAffinity{false};
+    std::atomic_bool callbackCancellationObserved{false};
+    QSemaphore fileCommitted;
+    QSemaphore finishAllowed;
+  };
+  const auto state = std::make_shared<State>();
+  auto* task = new KaReferenceDownloadJob(QStringLiteral("오프라인 지도 시험"),
+      [state, options, outputPath, mode](QgsFeedback* feedback, const std::function<bool()>& cancelRequested) {
+        state->workerAffinity.store(feedback->thread() == QThread::currentThread() &&
+                                    QThread::currentThread() != QCoreApplication::instance()->thread());
+        PreparedReferenceMap result;
+        const double half = TilePackService::webMercatorHalfWorld();
+        const auto checkCancel = [&] {
+          const bool cancelled = cancelRequested();
+          if (cancelled) state->callbackCancellationObserved.store(true);
+          return cancelled;
+        };
+        // GDAL runs synchronously here. No worker Qt event processing services
+        // the job's cancellation timer; only the explicit callback can cancel.
+        const bool ok = TilePackService::build(options, -half, -half, half, half,
+            outputPath, &result.error, feedback, checkCancel);
+        if (ok) {
+          result.rasterUri = outputPath;
+          result.status = PreparedReferenceMap::Status::Ready;
+          result.outputCommitted = true;
+          if (mode == 4) {
+            state->fileCommitted.release();
+            state->finishAllowed.tryAcquire(1, 5000);
+          }
+        } else if (cancelRequested()) {
+          result.status = PreparedReferenceMap::Status::Cancelled;
+        }
+        return result;
+      }, [state](const PreparedReferenceMap& result) {
+        state->result = result;
+        state->complete = true;
+      });
+  const QPointer<KaReferenceDownloadJob> guard(task);
+  int receivedRequests = 0;
+  QObject::connect(&server, &QTcpServer::newConnection, &server, [&server, guard, png, mode, &receivedRequests] {
+    while (auto* socket = server.nextPendingConnection()) {
+      auto request = std::make_shared<QByteArray>();
+      QObject::connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+      QObject::connect(socket, &QTcpSocket::readyRead, socket, [socket, request, guard, png, mode, &receivedRequests] {
+        if (socket->property("responseSent").toBool()) return;
+        request->append(socket->readAll());
+        if (!request->contains("\r\n\r\n")) return;
+        socket->setProperty("responseSent", true);
+        ++receivedRequests;
+        if (mode == 3 && guard) guard->cancel();
+        const bool failure = mode == 1 || mode == 2;
+        const QByteArray status = mode == 1 ? QByteArray("403 Forbidden") :
+                                  mode == 2 ? QByteArray("503 Service Unavailable") : QByteArray("200 OK");
+        const QByteArray payload = failure ? QByteArray("test server failure") : png;
+        socket->write("HTTP/1.1 " + status + "\r\nContent-Type: image/png\r\nContent-Length: " +
+                      QByteArray::number(payload.size()) + "\r\nConnection: close\r\n\r\n" + payload);
+        socket->disconnectFromHost();
+      });
+    }
+  });
+  QgsApplication::taskManager()->addTask(task);
+  if (mode == 4) {
+    QTRY_VERIFY_WITH_TIMEOUT(state->fileCommitted.available() > 0 || state->complete, 10000);
+    const bool savedBeforeCancel = state->fileCommitted.tryAcquire();
+    if (guard) guard->cancel();
+    state->finishAllowed.release();
+    QTRY_VERIFY_WITH_TIMEOUT(state->complete, 5000);
+    QVERIFY2(savedBeforeCancel, qPrintable(state->result.error));
+  } else {
+    QTRY_VERIFY_WITH_TIMEOUT(state->complete, 10000);
+  }
+  QTRY_VERIFY_WITH_TIMEOUT(guard.isNull(), 2000);
+  QVERIFY(state->workerAffinity.load());
+  QVERIFY(receivedRequests > 0);
+  if (mode == 0 || mode == 4) {
+    QVERIFY2(state->result.isReady(), qPrintable(state->result.error));
+    QVERIFY(state->result.outputCommitted);
+    QVERIFY(readFile(outputPath) != originalBytes);
+    // Verify actual saved pixels and the zoomed-out overview, with the server
+    // closed: the output must be usable entirely offline.
+    server.close();
+    struct Close { void operator()(void* ds) const { if (ds) GDALClose(ds); } };
+    std::unique_ptr<void, Close> dataset(GDALOpen(outputPath.toUtf8().constData(), GA_ReadOnly));
+    QVERIFY(dataset);
+    QVERIFY(GDALGetRasterCount(dataset.get()) >= 3);
+    const int x = GDALGetRasterXSize(dataset.get()) / 2;
+    const int y = GDALGetRasterYSize(dataset.get()) / 2;
+    const unsigned char expected[] = {41, 113, 173};
+    for (int band = 1; band <= 3; ++band) {
+      const auto rasterBand = GDALGetRasterBand(dataset.get(), band);
+      unsigned char value = 0;
+      QCOMPARE(GDALRasterIO(rasterBand, GF_Read, x, y, 1, 1, &value, 1, 1, GDT_Byte, 0, 0), CE_None);
+      QCOMPARE(value, expected[band - 1]);
+      QVERIFY(GDALGetOverviewCount(rasterBand) >= 1);
+    }
+  } else {
+    QCOMPARE(state->result.status, mode == 3 ? PreparedReferenceMap::Status::Cancelled : PreparedReferenceMap::Status::Failed);
+    QVERIFY(!state->result.error.isEmpty());
+    QVERIFY(!state->result.outputCommitted);
+    QCOMPARE(readFile(outputPath), originalBytes);
+    if (mode == 3) QVERIFY(state->callbackCancellationObserved.load());
+  }
+  QCOMPARE(QDir(directory.path()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot).size(), 1);
 }
 
 void TestReferenceDownload::qgisExceptionBecomesFailure() {

@@ -13,30 +13,89 @@
 #include <QProxyStyle>
 #include <QStyleOption>
 #include <QWidget>
+#include <QtMath>
 
 namespace KaTheme {
 namespace {
 
-// Anthropic-inspired palette: warm ivory paper, warm ink, terracotta accent.
-const Tokens kTokens = {
-    QColor(0xE8, 0xF0, 0xFA),  // sky0 pale blue wash
-    QColor(0x1E, 0x67, 0xC6),  // sky1 primary deep blue
-    QColor(0x17, 0x5A, 0xB0),  // sky2 hover
-    QColor(0x12, 0x4B, 0x94),  // sky3 deep
-    QColor(0xF2, 0xF3, 0xF5),  // sky4 cool light gray
-    QColor(0x1E, 0x67, 0xC6),  // sky5 highlight
-    QColor(0x1F, 0x23, 0x28),  // sky6 ink
-    QColor(0x1F, 0x23, 0x28),  // ink
-    QColor(0x6E, 0x75, 0x7D),  // inkMuted
-    QColor(0xA5, 0xAB, 0xB3),  // inkDisabled
-    QColor(0xD5, 0xD9, 0xDE),  // border
+QColor softenFillSaturation(const QColor& color) {
+  // Keep the semantic hue and lightness; reduce only HSL saturation by 20%.
+  return QColor::fromHslF(color.hslHueF(), color.hslSaturationF() * 0.8f,
+                          color.lightnessF(), color.alphaF()).toRgb();
+}
+
+QColor blendSurface(const QColor& color, const QColor& surface, double fraction) {
+  // Channel-wise sRGB interpolation, with explicit integer rounding.
+  return QColor(qRound(color.red() * (1.0 - fraction) + surface.red() * fraction),
+                qRound(color.green() * (1.0 - fraction) + surface.green() * fraction),
+                qRound(color.blue() * (1.0 - fraction) + surface.blue() * fraction),
+                color.alpha());
+}
+
+// Shared chrome colors. Map symbols, page contents and IconPalette are separate.
+const Tokens kTokens = [] {
+  Tokens colors = {
+    QColor(0xDD, 0xE8, 0xEF),  // sky0 selection wash
+    QColor(0x2C, 0x6F, 0x91),  // sky1 accent
+    QColor(0x24, 0x5D, 0x7A),  // sky2 accent hover
+    QColor(0x1D, 0x4B, 0x63),  // sky3 deep accent
+    QColor(0xEE, 0xF1, 0xF4),  // sky4 window
+    QColor(0x2C, 0x6F, 0x91),  // sky5 selection highlight
+    QColor(0x20, 0x28, 0x31),  // sky6 ink
+    QColor(0x20, 0x28, 0x31),  // ink
+    QColor(0x52, 0x60, 0x6D),  // inkMuted
+    QColor(0x59, 0x68, 0x74),  // inkDisabled, readable on disabledSurface
+    QColor(0xCB, 0xD3, 0xDB),  // border
     QColor(0xFF, 0xFF, 0xFF),  // bevelLight
-    QColor(0xC3, 0xC8, 0xCF),  // bevelDark
+    QColor(0xAA, 0xB5, 0xC0),  // bevelDark
     QColor(0xFF, 0xFF, 0xFF),  // canvasNeutral
-    QColor(0xF7, 0xE8, 0xD3),  // desk — warm orange-beige paper
-    QColor(0xC0, 0x3A, 0x2B),  // danger
-    QColor(0x2E, 0x7D, 0x4F),  // ok
-};
+    QColor(0xEE, 0xF1, 0xF4),  // desk
+    QColor(0xA3, 0x3A, 0x2E),  // danger
+    QColor(0x32, 0x6B, 0x4A),  // ok
+    QColor(0xFF, 0xFF, 0xFF),  // surface
+    QColor(0xF4, 0xF6, 0xF8),  // glossMiddle
+    QColor(0xE5, 0xEA, 0xF0),  // glossBottom
+    QColor(0xFF, 0xFF, 0xFF),  // hoverTop
+    QColor(0xE0, 0xE9, 0xF0),  // hoverBottom
+    QColor(0xD6, 0xE0, 0xE9),  // pressedTop
+    QColor(0xE5, 0xEC, 0xF2),  // pressedBottom
+    QColor(0xF3, 0xF7, 0xFA),  // selectedTop
+    QColor(0xDD, 0xE8, 0xEF),  // selectedBottom
+    QColor(0xF0, 0xF2, 0xF4),  // disabledSurface
+    QColor(0x2B, 0x34, 0x3E),  // rail
+    QColor(0xFF, 0xFF, 0xFF),  // railText
+    QColor(0xC6, 0xD0, 0xDA),  // railMuted
+    QColor(0xEA, 0xF2, 0xEC),  // successSurface
+    QColor(0xF9, 0xE9, 0xE5),  // dangerSurface
+  };
+  // Explicit assignments avoid an MSVC /O2 ICE on initializer-list pointers
+  // to QColor members of this lambda-local aggregate.
+  colors.sky1 = softenFillSaturation(colors.sky1);
+  colors.sky2 = softenFillSaturation(colors.sky2);
+  colors.sky3 = softenFillSaturation(colors.sky3);
+  colors.sky5 = softenFillSaturation(colors.sky5);
+  colors.danger = softenFillSaturation(colors.danger);
+  colors.ok = softenFillSaturation(colors.ok);
+  colors.sky0 = blendSurface(colors.sky0, colors.surface, 0.2);
+  colors.sky4 = blendSurface(colors.sky4, colors.surface, 0.2);
+  colors.desk = blendSurface(colors.desk, colors.surface, 0.2);
+  colors.glossMiddle = blendSurface(colors.glossMiddle, colors.surface, 0.2);
+  colors.glossBottom = blendSurface(colors.glossBottom, colors.surface, 0.2);
+  colors.hoverTop = blendSurface(colors.hoverTop, colors.surface, 0.2);
+  colors.hoverBottom = blendSurface(colors.hoverBottom, colors.surface, 0.2);
+  colors.pressedTop = blendSurface(colors.pressedTop, colors.surface, 0.2);
+  colors.pressedBottom = blendSurface(colors.pressedBottom, colors.surface, 0.2);
+  colors.selectedTop = blendSurface(colors.selectedTop, colors.surface, 0.2);
+  colors.selectedBottom = blendSurface(colors.selectedBottom, colors.surface, 0.2);
+  colors.disabledSurface = blendSurface(colors.disabledSurface, colors.surface, 0.2);
+  colors.successSurface = blendSurface(colors.successSurface, colors.surface, 0.2);
+  colors.dangerSurface = blendSurface(colors.dangerSurface, colors.surface, 0.2);
+  // Text, outlines, disabled ink and the map-neutral surface stay unchanged.
+  colors.glossReflection = colors.surface;
+  colors.glossShoulder = blendSurface(colors.glossMiddle, colors.surface, 0.5);
+  colors.accentReflection = blendSurface(colors.sky1, colors.surface, 0.08);
+  return colors;
+}();
 
 class ChromeStyle : public QProxyStyle {
 public:
@@ -66,15 +125,16 @@ public:
       const bool part = opt->state.testFlag(State_NoChange);
       const bool dis = !opt->state.testFlag(State_Enabled);
       const bool hover = opt->state.testFlag(State_MouseOver);
-      const QColor fill(0x1E, 0x67, 0xC6);
-      const QColor edge(hover ? QColor(0x12, 0x4B, 0x94) : QColor(0x17, 0x5A, 0xB0));
-      const QColor tickInk(0xFF, 0xFF, 0xFF);
-      const QColor stone(hover ? QColor(0x17, 0x5A, 0xB0) : QColor(0xB9, 0xBF, 0xC7));
-      p->setPen(QPen(dis ? QColor(0xC3, 0xC8, 0xCF)
+      const auto& colors = tokens();
+      const QColor fill = colors.sky1;
+      const QColor edge = hover ? colors.sky3 : colors.sky2;
+      const QColor tickInk = dis ? colors.inkDisabled : colors.surface;
+      const QColor stone = hover ? colors.sky2 : colors.bevelDark;
+      p->setPen(QPen(dis ? colors.border
                          : ((on || part) ? edge : stone),
                      1.1));
-      p->setBrush(dis ? QColor(0xF2, 0xF3, 0xF5)
-                      : ((on || part) ? fill : QColor(255, 255, 255)));
+      p->setBrush(dis ? colors.disabledSurface
+                      : ((on || part) ? fill : colors.surface));
       p->drawRoundedRect(r, 3.5, 3.5);
       if (on) {
         QPainterPath tick;
@@ -88,7 +148,7 @@ public:
         const QRectF bar = r.adjusted(r.width() * 0.22, r.height() * 0.42,
                                       -r.width() * 0.22, -r.height() * 0.42);
         p->setPen(Qt::NoPen);
-        p->setBrush(QColor(255, 255, 255));
+        p->setBrush(tickInk);
         p->drawRoundedRect(bar, 1.2, 1.2);
       }
       p->restore();
@@ -114,8 +174,7 @@ public:
       }
       path.closeSubpath();
       p->setPen(Qt::NoPen);
-      p->setBrush(opt->state.testFlag(State_Enabled) ? QColor(0x2A, 0x31, 0x38)
-                                                     : QColor(0xA5, 0xAB, 0xB3));
+      p->setBrush(opt->state.testFlag(State_Enabled) ? tokens().ink : tokens().inkDisabled);
       p->drawPath(path);
       p->restore();
       return;
@@ -128,27 +187,60 @@ void setGroup(QPalette& pal, QPalette::ColorGroup g, const Tokens& t, bool disab
   const QColor text = disabled ? t.inkDisabled : t.ink;
   pal.setColor(g, QPalette::Window, t.sky4);
   pal.setColor(g, QPalette::WindowText, text);
-  pal.setColor(g, QPalette::Base, disabled ? t.sky0 : Qt::white);
-  pal.setColor(g, QPalette::AlternateBase, disabled ? t.sky2 : t.sky0);
+  pal.setColor(g, QPalette::Base, disabled ? t.disabledSurface : t.surface);
+  pal.setColor(g, QPalette::AlternateBase, t.glossMiddle);
   pal.setColor(g, QPalette::Text, text);
-  pal.setColor(g, QPalette::Button, disabled ? t.sky4 : Qt::white);
+  pal.setColor(g, QPalette::Button, disabled ? t.disabledSurface : t.surface);
   pal.setColor(g, QPalette::ButtonText, text);
   pal.setColor(g, QPalette::BrightText, text);
-  pal.setColor(g, QPalette::Highlight, disabled ? t.sky3 : t.sky5);
-  pal.setColor(g, QPalette::HighlightedText, disabled ? t.ink : Qt::white);
-  pal.setColor(g, QPalette::PlaceholderText, disabled ? QColor(0xA5, 0xAB, 0xB3) : t.inkDisabled);
-  pal.setColor(g, QPalette::ToolTipBase, t.sky0);
+  pal.setColor(g, QPalette::Highlight, disabled ? t.disabledSurface : t.sky5);
+  pal.setColor(g, QPalette::HighlightedText, disabled ? t.inkDisabled : t.surface);
+  pal.setColor(g, QPalette::PlaceholderText, disabled ? t.inkDisabled : t.inkMuted);
+  pal.setColor(g, QPalette::ToolTipBase, t.surface);
   pal.setColor(g, QPalette::ToolTipText, text);
-  pal.setColor(g, QPalette::Light, disabled ? t.sky0 : t.bevelLight);
-  pal.setColor(g, QPalette::Midlight, t.sky0);
-  pal.setColor(g, QPalette::Mid, disabled ? t.sky2 : t.sky3);
-  pal.setColor(g, QPalette::Dark, disabled ? t.inkDisabled : t.sky6);
-  pal.setColor(g, QPalette::Shadow, disabled ? t.inkDisabled : t.border);
+  pal.setColor(g, QPalette::Light, t.bevelLight);
+  pal.setColor(g, QPalette::Midlight, t.glossMiddle);
+  pal.setColor(g, QPalette::Mid, t.border);
+  pal.setColor(g, QPalette::Dark, t.bevelDark);
+  pal.setColor(g, QPalette::Shadow, t.border);
 }
 
 }  // namespace
 
 const Tokens& tokens() { return kTokens; }
+
+const IconPalette& iconPalette() {
+  static const IconPalette colors = [] {
+    IconPalette palette = {
+      QColor(0x23, 0x29, 0x30),  // ink: common charcoal outline
+      QColor(0x32, 0x6B, 0x9B),  // file: steel blue
+      QColor(0x95, 0x60, 0x29),  // record: ochre
+      QColor(0x39, 0x73, 0x68),  // map: natural green
+      QColor(0x6B, 0x59, 0x96),  // align: muted violet
+      QColor(0x24, 0x78, 0x6C),  // output: teal
+      QColor(0x1D, 0x6E, 0xB8),  // water: river blue
+      QColor(0x93, 0x60, 0x39),  // earth: soil brown
+      QColor(0xD8, 0xBB, 0x7B),  // earthLight: sandy layer
+      QColor(0x79, 0x6B, 0x62),  // rock: warm stone
+      QColor(0x71, 0x82, 0x50),  // vegetation: muted olive
+      QColor(0x8F, 0x98, 0xA3),  // disabled: neutralized in icon rendering
+      QColor(0x16, 0x3F, 0x59),  // selected: dark blue accent
+    };
+    palette.file = softenFillSaturation(palette.file);
+    palette.record = softenFillSaturation(palette.record);
+    palette.map = softenFillSaturation(palette.map);
+    palette.align = softenFillSaturation(palette.align);
+    palette.output = softenFillSaturation(palette.output);
+    palette.water = softenFillSaturation(palette.water);
+    palette.earth = softenFillSaturation(palette.earth);
+    palette.earthLight = softenFillSaturation(palette.earthLight);
+    palette.rock = softenFillSaturation(palette.rock);
+    palette.vegetation = softenFillSaturation(palette.vegetation);
+    // Keep ink, disabled and selected-outline contrast exactly as before.
+    return palette;
+  }();
+  return colors;
+}
 
 const ButtonMetrics& buttonMetrics() {
   static const ButtonMetrics metrics;
@@ -175,6 +267,26 @@ QString resolvedStyleSheet(const QString& sheet) {
   for (const auto& entry : replacements)
     resolved.replace(QLatin1Char('@') + QString::fromLatin1(entry.name) + QLatin1Char('@'),
                      QString::number(entry.value));
+  const auto& colors = tokens();
+  const struct { const char* name; QColor value; } colorReplacements[] = {
+      {"accent", colors.sky1}, {"accentHover", colors.sky2}, {"accentDeep", colors.sky3},
+      {"ink", colors.ink}, {"inkMuted", colors.inkMuted}, {"inkDisabled", colors.inkDisabled},
+      {"border", colors.border}, {"edgeLight", colors.bevelLight}, {"edgeDark", colors.bevelDark},
+      {"desk", colors.desk}, {"surface", colors.surface},
+      {"glossMiddle", colors.glossMiddle}, {"glossBottom", colors.glossBottom},
+      {"hoverTop", colors.hoverTop}, {"hoverBottom", colors.hoverBottom},
+      {"pressedTop", colors.pressedTop}, {"pressedBottom", colors.pressedBottom},
+      {"selectedTop", colors.selectedTop}, {"selectedBottom", colors.selectedBottom},
+      {"disabledSurface", colors.disabledSurface},
+      {"rail", colors.rail}, {"railText", colors.railText}, {"railMuted", colors.railMuted},
+      {"danger", colors.danger}, {"ok", colors.ok},
+      {"successSurface", colors.successSurface}, {"dangerSurface", colors.dangerSurface},
+      {"glossReflection", colors.glossReflection}, {"glossShoulder", colors.glossShoulder},
+      {"accentReflection", colors.accentReflection},
+  };
+  for (const auto& entry : colorReplacements)
+    resolved.replace(QLatin1Char('@') + QString::fromLatin1(entry.name) + QLatin1Char('@'),
+                     entry.value.name(QColor::HexRgb));
   return resolved;
 }
 
@@ -263,9 +375,9 @@ void excludeMapSurface(QWidget* w) {
 }
 
 QString colorSwatchStyle(const QColor& fill) {
-  const QColor use = fill.isValid() ? fill : QColor(Qt::white);
-  return QStringLiteral("background-color: %1; border: 1px solid #E5E7EB; border-radius: 8px;")
-      .arg(use.name());
+  const QColor use = fill.isValid() ? fill : tokens().surface;
+  return QStringLiteral("background-color: %1; border: 1px solid %2; border-radius: 8px;")
+      .arg(use.name(), tokens().border.name());
 }
 
 }  // namespace KaTheme

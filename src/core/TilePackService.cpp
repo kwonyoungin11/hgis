@@ -1,11 +1,18 @@
 #include "TilePackService.h"
 
 #include <cmath>
+#include <algorithm>
+#include <limits>
+#include <memory>
 #include <vector>
 
 #include <QFile>
 #include <QFileInfo>
 #include <QDir>
+#include <QSaveFile>
+#include <QTemporaryDir>
+
+#include <qgsfeedback.h>
 
 #include <cpl_conv.h>
 #include <cpl_string.h>
@@ -67,9 +74,10 @@ QString serviceXml(const Options& opt) {
   xml += QStringLiteral("<Projection>EPSG:3857</Projection>");
   xml += QStringLiteral("<BlockSizeX>256</BlockSizeX><BlockSizeY>256</BlockSizeY>");
   xml += QStringLiteral("<BandsCount>%1</BandsCount>").arg(opt.bandCount);
-  // 타일 서버가 한두 장 실패해도 전체가 깨지지 않게 한다.
-  xml += QStringLiteral("<ZeroBlockHttpCodes>204,404,403,500,502,503,504</ZeroBlockHttpCodes>");
-  xml += QStringLiteral("<ZeroBlockOnServerException>true</ZeroBlockOnServerException>");
+  // 실제 자료가 없는 칸만 비운다. 인증·서버 오류를 빈 타일로 저장하면
+  // 실패한 내려받기를 성공으로 보고하게 된다.
+  xml += QStringLiteral("<ZeroBlockHttpCodes>204,404</ZeroBlockHttpCodes>");
+  xml += QStringLiteral("<ZeroBlockOnServerException>false</ZeroBlockOnServerException>");
   xml += QStringLiteral("<Timeout>30</Timeout><MaxConnections>4</MaxConnections>");
   if (!opt.referer.isEmpty())
     xml += QStringLiteral("<Referer>%1</Referer>").arg(opt.referer);
@@ -79,33 +87,86 @@ QString serviceXml(const Options& opt) {
 }
 
 bool build(const Options& opt, double minX, double minY, double maxX, double maxY,
-           const QString& outPath, QString* errorOut) {
+           const QString& outPath, QString* errorOut, QgsFeedback* feedback,
+           const std::function<bool()>& cancellationRequested) {
+  if (errorOut) errorOut->clear();
   auto fail = [&](const QString& m) {
     if (errorOut) *errorOut = m;
     return false;
   };
+  struct Progress {
+    QgsFeedback* feedback;
+    const std::function<bool()>& cancellationRequested;
+    double begin = 0.0;
+    double span = 85.0;
+
+    bool cancelled() const {
+      if (cancellationRequested && cancellationRequested()) {
+        if (feedback) feedback->cancel();
+        return true;
+      }
+      return feedback && feedback->isCanceled();
+    }
+
+    static int CPL_STDCALL update(double fraction, const char*, void* data) {
+      auto* progress = static_cast<Progress*>(data);
+      // No exception may cross the GDAL C callback boundary.
+      try {
+        if (progress->cancelled()) return FALSE;
+        if (progress->feedback)
+          progress->feedback->setProgress(progress->begin +
+              std::clamp(fraction, 0.0, 1.0) * progress->span);
+        return TRUE;
+      } catch (...) {
+        return FALSE;
+      }
+    }
+  } progress{feedback, cancellationRequested};
+  const auto cancelled = [&]() {
+    if (!progress.cancelled()) return false;
+    fail(QStringLiteral("배경지도 내려받기를 취소했습니다. 기존 파일은 유지됩니다."));
+    return true;
+  };
+  if (cancelled()) return false;
   if (opt.urlTemplate.isEmpty()) return fail(QStringLiteral("타일 주소가 비었습니다."));
-  if (!(maxX > minX) || !(maxY > minY))
+  if (!std::isfinite(minX) || !std::isfinite(minY) || !std::isfinite(maxX) ||
+      !std::isfinite(maxY) || !(maxX > minX) || !(maxY > minY))
     return fail(QStringLiteral("범위가 비었습니다. 조사구역을 먼저 그리세요."));
   if (outPath.isEmpty()) return fail(QStringLiteral("저장 경로가 비었습니다."));
+  if (opt.minZoom < 0 || opt.maxZoom > 22 || opt.maxZoom < opt.minZoom)
+    return fail(QStringLiteral("내려받을 지도 단계가 올바르지 않습니다. 지도 범위를 다시 선택하세요."));
+  const double res = resolutionAtZoom(opt.maxZoom);
+  const double width = (maxX - minX) / res;
+  const double height = (maxY - minY) / res;
+  if (!std::isfinite(width) || !std::isfinite(height) ||
+      width > std::numeric_limits<int>::max() - 1.0 ||
+      height > std::numeric_limits<int>::max() - 1.0)
+    return fail(QStringLiteral("내려받을 지도 범위가 너무 큽니다. 조사지역으로 확대하고 다시 시도하세요."));
+  const int outW = qMax(1, static_cast<int>(std::lround(width)));
+  const int outH = qMax(1, static_cast<int>(std::lround(height)));
+
+  const QFileInfo target(outPath);
+  if (!QDir().mkpath(target.absolutePath()))
+    return fail(QStringLiteral("저장 폴더를 만들지 못했습니다. 폴더 권한과 남은 공간을 확인하세요."));
+  QTemporaryDir storage(QDir(target.absolutePath()).filePath(QStringLiteral("ka-hgis-tilepack-XXXXXX")));
+  if (!storage.isValid())
+    return fail(QStringLiteral("지도를 받을 임시 폴더를 만들지 못했습니다. 폴더 권한과 남은 공간을 확인하세요."));
+  const QString temporaryPath = QDir(storage.path()).filePath(QStringLiteral("map.mbtiles"));
+
+  struct CloseDataset {
+    void operator()(void* dataset) const { if (dataset) GDALClose(dataset); }
+  };
+  using Dataset = std::unique_ptr<void, CloseDataset>;
 
   GDALAllRegister();
   if (!GDALGetDriverByName("MBTiles"))
     return fail(QStringLiteral("이 GDAL에는 MBTiles 드라이버가 없습니다."));
 
   const QByteArray xml = serviceXml(opt).toUtf8();
-  GDALDatasetH src = GDALOpen(xml.constData(), GA_ReadOnly);
+  Dataset src(GDALOpen(xml.constData(), GA_ReadOnly));
+  if (cancelled()) return false;
   if (!src)
-    return fail(QStringLiteral("타일 서비스를 열지 못했습니다: %1")
-                    .arg(QString::fromUtf8(CPLGetLastErrorMsg())));
-
-  // 최대 줌의 해상도에 맞춰 출력 크기를 잡는다. 그래야 그 줌의 타일을 그대로 받는다.
-  const double res = resolutionAtZoom(opt.maxZoom);
-  const int outW = qMax(1, static_cast<int>(std::lround((maxX - minX) / res)));
-  const int outH = qMax(1, static_cast<int>(std::lround((maxY - minY) / res)));
-
-  QDir().mkpath(QFileInfo(outPath).absolutePath());
-  if (QFile::exists(outPath)) QFile::remove(outPath);
+    return fail(QStringLiteral("배경지도 서버에 연결하지 못했습니다. 인터넷 연결과 배경지도 설정을 확인하세요. 기존 파일은 유지됩니다."));
 
   char** argv = nullptr;
   argv = CSLAddString(argv, "-of");
@@ -125,21 +186,22 @@ bool build(const Options& opt, double minX, double minY, double maxX, double max
   argv = CSLAddString(argv, "-co");
   argv = CSLAddString(argv, QStringLiteral("MAXZOOM=%1").arg(opt.maxZoom).toUtf8().constData());
 
-  GDALTranslateOptions* tOpt = GDALTranslateOptionsNew(argv, nullptr);
+  std::unique_ptr<GDALTranslateOptions, decltype(&GDALTranslateOptionsFree)> tOpt(
+      GDALTranslateOptionsNew(argv, nullptr), GDALTranslateOptionsFree);
   CSLDestroy(argv);
   if (!tOpt) {
-    GDALClose(src);
     return fail(QStringLiteral("내려받기 설정을 만들지 못했습니다."));
   }
+  GDALTranslateOptionsSetProgress(tOpt.get(), &Progress::update, &progress);
 
   int usageError = 0;
-  GDALDatasetH out =
-      GDALTranslate(outPath.toUtf8().constData(), src, tOpt, &usageError);
-  GDALTranslateOptionsFree(tOpt);
-  GDALClose(src);
-  if (!out) {
-    return fail(QStringLiteral("타일을 받지 못했습니다: %1")
-                    .arg(QString::fromUtf8(CPLGetLastErrorMsg())));
+  CPLErrorReset();
+  Dataset out(GDALTranslate(temporaryPath.toUtf8().constData(), src.get(), tOpt.get(), &usageError));
+  const bool transferFailed = CPLGetLastErrorType() >= CE_Failure;
+  src.reset();
+  if (cancelled()) return false;
+  if (!out || usageError || transferFailed) {
+    return fail(QStringLiteral("배경지도를 끝까지 받지 못했습니다. 인터넷 연결과 저장 공간을 확인하고 다시 시도하세요. 기존 파일은 유지됩니다."));
   }
 
   // 낮은 줌(멀리 볼 때)은 오버뷰로 채운다. 없으면 줌아웃에서 빈 화면이 된다.
@@ -147,13 +209,47 @@ bool build(const Options& opt, double minX, double minY, double maxX, double max
   if (levels > 0) {
     std::vector<int> factors;
     for (int i = 1; i <= levels; ++i) factors.push_back(1 << i);
-    GDALBuildOverviews(out, opt.jpeg ? "AVERAGE" : "NEAREST", static_cast<int>(factors.size()),
-                       factors.data(), 0, nullptr, nullptr, nullptr);
+    progress.begin = 85.0;
+    progress.span = 10.0;
+    const CPLErr error = GDALBuildOverviews(out.get(), opt.jpeg ? "AVERAGE" : "NEAREST",
+        static_cast<int>(factors.size()), factors.data(), 0, nullptr, &Progress::update, &progress);
+    if (cancelled()) return false;
+    if (error != CE_None)
+      return fail(QStringLiteral("축소 지도를 완성하지 못했습니다. 저장 공간을 확인하고 다시 내려받으세요. 기존 파일은 유지됩니다."));
   }
-  GDALClose(out);
+  if (GDALClose(out.release()) != CE_None)
+    return fail(QStringLiteral("배경지도 파일을 완전히 저장하지 못했습니다. 저장 공간을 확인하세요. 기존 파일은 유지됩니다."));
+  if (cancelled()) return false;
 
-  if (!QFile::exists(outPath) || QFileInfo(outPath).size() <= 0)
-    return fail(QStringLiteral("MBTiles 파일이 만들어지지 않았습니다."));
+  // Close SQLite first, then reopen the independent file before publishing it.
+  {
+    Dataset check(GDALOpenEx(temporaryPath.toUtf8().constData(), GDAL_OF_RASTER | GDAL_OF_READONLY,
+                            nullptr, nullptr, nullptr));
+    if (!check || GDALGetRasterCount(check.get()) < 1 || GDALGetRasterXSize(check.get()) <= 0 ||
+        GDALGetRasterYSize(check.get()) <= 0 || QFileInfo(temporaryPath).size() <= 0)
+      return fail(QStringLiteral("받은 배경지도 파일을 다시 읽지 못했습니다. 기존 파일은 유지됩니다. 다시 내려받으세요."));
+  }
+
+  // Same QSaveFile pattern as project saving: never fall back to overwriting
+  // the original in place. Cancellation before commit discards only this copy.
+  QFile input(temporaryPath);
+  QSaveFile output(target.absoluteFilePath());
+  output.setDirectWriteFallback(false);
+  if (!input.open(QIODevice::ReadOnly) || !output.open(QIODevice::WriteOnly))
+    return fail(QStringLiteral("배경지도 저장 파일을 열지 못했습니다. 폴더 권한과 남은 공간을 확인하세요. 기존 파일은 유지됩니다."));
+  const qint64 total = input.size();
+  while (!input.atEnd()) {
+    if (cancelled()) return false;
+    const QByteArray data = input.read(1024 * 1024);
+    if (input.error() != QFileDevice::NoError || output.write(data) != data.size())
+      return fail(QStringLiteral("받은 지도를 저장하지 못했습니다. 저장 공간을 확인하세요. 기존 파일은 유지됩니다."));
+    if (feedback && total > 0)
+      feedback->setProgress(95.0 + 4.0 * static_cast<double>(input.pos()) / total);
+  }
+  if (cancelled()) return false;
+  if (!output.commit())
+    return fail(QStringLiteral("새 배경지도 파일로 교체하지 못했습니다. 파일을 사용하는 프로그램을 닫고 다시 시도하세요. 기존 파일은 유지됩니다."));
+  if (feedback) feedback->setProgress(100.0);
   return true;
 }
 

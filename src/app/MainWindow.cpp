@@ -51,6 +51,7 @@
 #include "core/RiverMapService.h"
 #include "core/VworldSettings.h"
 #include "core/LocationSearch.h"
+#include "core/KoreaRegionCatalog.h"
 #include "core/AdminBoundaryService.h"
 #include "KaRegionLocator.h"
 #include "core/WorkflowGuide.h"
@@ -244,7 +245,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   delAct->setShortcutContext(Qt::WindowShortcut);
   connect(delAct, &QAction::triggered, this, [this]() {
     if (routeEditKeyToActiveStudio(true)) return;
-    deleteSelectedFeatures();
+    QWidget* focus = QApplication::focusWidget();
+    if (m_alignPointList && focus && (focus == m_alignPointList || m_alignPointList->isAncestorOf(focus)))
+      deleteSelectedAlignPoint();
+    else if (m_layerTree && focus && (focus == m_layerTree || m_layerTree->isAncestorOf(focus)))
+      removeSelectedLayers();
+    else
+      deleteSelectedFeatures();
   });
   addAction(delAct);
   auto* fullAct = new QAction(QStringLiteral("전체 화면"), this);
@@ -317,8 +324,10 @@ void MainWindow::closeEvent(QCloseEvent* event) {
   m_closingWindow = true;
   if (m_referenceDownload) m_referenceDownload->cancel();
   m_locator->cancel();
+  if (m_searchProgress) { m_searchProgress->hide(); m_searchProgress->deleteLater(); m_searchProgress = nullptr; }
   m_locationSearchBusy = false;
   m_adminBoundary->cancel();
+  if (m_boundaryProgress) { m_boundaryProgress->hide(); m_boundaryProgress->deleteLater(); m_boundaryProgress = nullptr; }
   QSettings st = RecentSurveys::userSettings();
   RecentSurveys::setSkipAutoRestore(st, false);
   st.setValue(QStringLiteral("MainWindow/geometry"), saveGeometry());
@@ -335,6 +344,7 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 void MainWindow::finishOpenedProject(const QString& gpkgPath, const QString& sourceLabel,
                                      qint64 elapsedMs) {
 #if KA_HGIS_HAS_QGIS
+  LayerOps::restoreThematicOverlayVisibility(QgsProject::instance());
   LayerOps::pruneDuplicateSatelliteLayers(QgsProject::instance());
   LayerOps::addNonEmptyDomainLayers(QgsProject::instance(), gpkgPath);
   m_workspaceRestoreSuppressesAutosave = false;
@@ -404,8 +414,10 @@ bool MainWindow::openSurveyGpkg(const QString& gpkgPath, OpenSurveyMode mode) {
   ++m_surveyGeneration;
   if (m_referenceDownload) m_referenceDownload->cancel();
   m_locator->cancel();
+  if (m_searchProgress) { m_searchProgress->hide(); m_searchProgress->deleteLater(); m_searchProgress = nullptr; }
   m_locationSearchBusy = false;
   m_adminBoundary->cancel();
+  if (m_boundaryProgress) { m_boundaryProgress->hide(); m_boundaryProgress->deleteLater(); m_boundaryProgress = nullptr; }
   QScopedValueRollback<bool> opening(m_isOpeningSurvey, true);
 #if KA_HGIS_HAS_QGIS
   // 프로젝트 읽기가 이전 레이어를 해제하기 전에 도구와 편집 참조를 종료한다.
@@ -413,7 +425,6 @@ bool MainWindow::openSurveyGpkg(const QString& gpkgPath, OpenSurveyMode mode) {
   stopCaptureTool();
   m_editLayer = nullptr;
   m_isSplittingPolygon = false;
-  m_committedUndo.clear();
   m_undoActions.clear();
 #endif
   QElapsedTimer t;
@@ -724,7 +735,7 @@ void MainWindow::buildMenus() {
   auto paintPrimary = [](QToolButton* b, const QString& iconId) {
     if (!b) return;
     b->setObjectName(QStringLiteral("btnPrimary"));
-    b->setIcon(KaIcons::icon(iconId, QColor(0x12, 0x4B, 0x94)));
+    b->setIcon(KaIcons::icon(iconId));
   };
   auto [actNew, btnNew] = addIcon(QStringLiteral("survey"), QStringLiteral("new"),
                                   QStringLiteral("새 조사"),
@@ -879,16 +890,16 @@ void MainWindow::buildMenus() {
       QTimer::singleShot(0, this, [this]() { syncThematicButtons(); });
     });
   }
-  addIcon(QStringLiteral("align"), QStringLiteral("georef"), QStringLiteral("사진·CAD\n정합"),
-          QStringLiteral("사진과 CAD 도면을 배경 지도에 정합합니다"), &MainWindow::georefAssistant);
+  addIcon(QStringLiteral("align"), QStringLiteral("georef"), QStringLiteral("좌표없는 사진·CAD를\n도면에 합치기"),
+          QStringLiteral("좌표없는 사진·CAD를 도면에 합치기"), &MainWindow::georefAssistant);
 
   auto* btnBuffer = new QToolButton(ribbon);
   btnBuffer->setObjectName(QStringLiteral("btnBuffer"));
   btnBuffer->setIcon(KaIcons::icon(QStringLiteral("buffer")));
-  btnBuffer->setText(QStringLiteral("주변 유적"));
+  btnBuffer->setText(QStringLiteral("주변유적 500M·1000M\n표시하기"));
   btnBuffer->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   btnBuffer->setCheckable(true);
-  btnBuffer->setToolTip(QStringLiteral("선택한 면 둘레에 주변 유적 거리 경계를 그립니다"));
+  btnBuffer->setToolTip(QStringLiteral("주변유적 500M·1000M 표시하기 — 선택한 면 둘레에 거리 경계를 그립니다"));
   connect(btnBuffer, &QToolButton::clicked, this, [this, btnBuffer](bool on) {
     if (on) showSubToolsBuffer();
     else hideSubTools();
@@ -902,7 +913,7 @@ void MainWindow::buildMenus() {
   addIcon(QStringLiteral("out"), QStringLiteral("section"), QStringLiteral("단면도"),
           QStringLiteral("단면 GeoTIFF로 표고·거리 눈금 도면을 만듭니다"),
           &MainWindow::openSectionDesigner);
-  addIcon(QStringLiteral("out"), QStringLiteral("transform"), QStringLiteral("5179 반출"),
+  addIcon(QStringLiteral("out"), QStringLiteral("transform"), QStringLiteral("5179좌표계\n내보내기"),
           QStringLiteral("인트라넷 제출. 선택한 레이어를 EPSG:5179 SHP 파일로만 저장합니다. 지도에는 올리지 않습니다."),
           &MainWindow::convertSelectedTo5179);
 
@@ -910,8 +921,27 @@ void MainWindow::buildMenus() {
   region->setObjectName(QStringLiteral("regionLocator"));
   connect(region, &KaRegionLocator::searchRequested, this,
           [this](const QString& q) { searchLocation(q); });
-  connect(region, &KaRegionLocator::regionFieldMapRequested, this,
-          &MainWindow::applySurfaceSurveyFieldMap);
+  connect(region, &KaRegionLocator::regionSelected, this, [this](const QString& sido) {
+    const auto bounds = KoreaRegionCatalog::overviewBounds(sido);
+    if (!bounds || m_isOpeningSurvey) return;
+    // Province chips navigate directly. An older address reply must not move
+    // the map back after this newer user selection.
+    if (m_locator) m_locator->cancel();
+    m_locationSearchBusy = false;
+    if (m_searchProgress) {
+      m_searchProgress->hide();
+      m_searchProgress->deleteLater();
+      m_searchProgress = nullptr;
+    }
+    LocationHit hit;
+    hit.title = sido;
+    hit.west = bounds->west; hit.south = bounds->south;
+    hit.east = bounds->east; hit.north = bounds->north;
+    hit.lon = (hit.west + hit.east) * 0.5;
+    hit.lat = (hit.south + hit.north) * 0.5;
+    hit.hasBbox = true;
+    zoomToLocation(hit);
+  });
   ribbon->addWidget(QStringLiteral("find"), region);
 
   auto* webBtn = new QToolButton(ribbon);
@@ -1377,12 +1407,15 @@ void MainWindow::buildUi() {
   // deleteLater가 ACCESS_VIOLATION을 낸다(현장 덤프 2026-08-31). KaApplication의
   // qgis/parallel_rendering=false와 같은 값이어야 서로 싸우지 않는다.
   m_canvas->setParallelRenderingEnabled(false);
+  // provider_wms may enter another event loop from partial tile output while
+  // the previous reply is still active. Keep the completed image until the next
+  // render completes, avoiding that reentrant response-lifetime path.
+  m_canvas->setMapSettingsFlags(m_canvas->mapSettings().flags() &
+                               ~Qgis::MapSettingsFlags(Qgis::MapSettingsFlag::RenderPartialOutput));
   // 미리보기 작업은 켠다 — 이게 꺼져 있으면 화면을 끄는 동안 캔버스가 비어
   // 흰 화면이 보인다. 스레드 풀이 2개 이상이라야 실제로 겹쳐서 돈다.
   m_canvas->setPreviewJobsEnabled(true);
-  // 렌더가 끝날 때까지 기다리지 말고 받은 타일부터 화면에 올린다.
-  // 한 장 그리는 데 2.4초가 걸리므로, 이 값이 크면 그 동안 화면이 비어 보인다.
-  // 작을수록 위성이 타일 단위로 차오르며 채워져 깜빡임이 덜 보인다.
+  // Completed renders and the existing cache still refresh normally.
   m_canvas->setMapUpdateInterval(80);
   m_canvas->setAcceptDrops(true);
   m_canvas->setSegmentationTolerance(2.0);
@@ -1589,8 +1622,12 @@ void MainWindow::buildUi() {
       updateAlignOverlay();
     logCanvasPaintState();
   });
-  connect(QgsProject::instance(), &QgsProject::layersAdded, this, [this](const QList<QgsMapLayer*>&) {
+  connect(QgsProject::instance(), &QgsProject::layersAdded, this, [this](const QList<QgsMapLayer*>& layers) {
+    for (auto* layer : layers) {
+      if (auto* vector = qobject_cast<QgsVectorLayer*>(layer)) watchUndoFeatureIds(vector);
+    }
     if (m_isOpeningSurvey) return;
+    LayerOps::restoreThematicOverlayVisibility(QgsProject::instance());
     LayerOps::ensureSatelliteAtBottom(QgsProject::instance());
     QTimer::singleShot(0, this, [this]() { refreshMapCanvasNow(); syncThematicButtons(); });
   });
@@ -2396,14 +2433,15 @@ void MainWindow::openRecentSurvey(const QString& path) {
   ++m_surveyGeneration;
   if (m_referenceDownload) m_referenceDownload->cancel();
   m_locator->cancel();
+  if (m_searchProgress) { m_searchProgress->hide(); m_searchProgress->deleteLater(); m_searchProgress = nullptr; }
   m_locationSearchBusy = false;
   m_adminBoundary->cancel();
+  if (m_boundaryProgress) { m_boundaryProgress->hide(); m_boundaryProgress->deleteLater(); m_boundaryProgress = nullptr; }
   QScopedValueRollback<bool> opening(m_isOpeningSurvey, true);
   stopAlignSession();
   stopCaptureTool();
   m_editLayer = nullptr;
   m_isSplittingPolygon = false;
-  m_committedUndo.clear();
   m_undoActions.clear();
   m_surveySessionReady = false;
   m_surveyPath.clear();
@@ -2416,6 +2454,7 @@ void MainWindow::openRecentSurvey(const QString& path) {
   }
   LayerOps::pruneDuplicateSatelliteLayers(QgsProject::instance());
   LayerOps::restoreMissingLayerTreeNodes(QgsProject::instance());
+  LayerOps::restoreThematicOverlayVisibility(QgsProject::instance());
   if (QFile::exists(companionGpkg)) {
     m_surveyPath = companionGpkg;
     LayerOps::addNonEmptySavedGpkgLayers(QgsProject::instance(), companionGpkg);
@@ -2546,13 +2585,14 @@ void MainWindow::newSurvey() {
   stopAlignSession();
   stopCaptureTool();
   m_editLayer = nullptr;
-  m_committedUndo.clear();
   m_undoActions.clear();
   ++m_surveyGeneration;
   if (m_referenceDownload) m_referenceDownload->cancel();
   m_locator->cancel();
+  if (m_searchProgress) { m_searchProgress->hide(); m_searchProgress->deleteLater(); m_searchProgress = nullptr; }
   m_locationSearchBusy = false;
   m_adminBoundary->cancel();
+  if (m_boundaryProgress) { m_boundaryProgress->hide(); m_boundaryProgress->deleteLater(); m_boundaryProgress = nullptr; }
   m_surveyPath.clear();  // 비우는 동안 자동 저장이 이전 조사에 덮어쓰지 않게 한다
   m_workspaceRestoreSuppressesAutosave = false;
   if (m_canvas) m_canvas->freeze(true);
@@ -2604,6 +2644,11 @@ bool MainWindow::routeEditKeyToActiveStudio(bool isDelete) {
   QWidget* focus = QApplication::focusWidget();
   if (qobject_cast<QLineEdit*>(focus) || qobject_cast<QAbstractSpinBox*>(focus))
     return true;  // 글자를 고치는 중이다. 도형·레이어를 지우면 안 된다.
+  if (m_viewTabs && m_terrain3dLayoutStudio && m_viewTabs->currentWidget() == m_terrain3dLayoutStudio) {
+    if (isDelete) m_terrain3dLayoutStudio->deleteSelectedItems();
+    else m_terrain3dLayoutStudio->undoLastChange();
+    return true;
+  }
   if (!m_viewTabs || !m_drawingStudio) return false;
   if (m_viewTabs->currentWidget() != m_drawingStudio) return false;
   if (isDelete)
@@ -3146,6 +3191,18 @@ void MainWindow::startSelectTool() {
     connect(m_featureSelectTool, &KaFeatureSelectTool::requestMerge, this, &MainWindow::mergeFeaturePolygons);
     connect(m_featureSelectTool, &KaFeatureSelectTool::requestSplit, this, &MainWindow::startSplitPolygonTool);
     connect(m_featureSelectTool, &KaFeatureSelectTool::requestClip, this, &MainWindow::clipOverlappingLayers);
+    connect(m_featureSelectTool, &KaFeatureSelectTool::featureGeometryEdited, this,
+            [this](QgsVectorLayer* layer, const QgsFeature& before) {
+      if (!layer) return;
+      KaUndoAction action;
+      action.type = KaUndoAction::FeatureChanged;
+      action.layerId = layer->id();
+      action.featureId = before.id();
+      action.featureData = before;
+      action.description = QStringLiteral("꼭짓점 편집");
+      m_undoActions.append(action);
+      QgsProject::instance()->setDirty(true);
+    });
   }
 
   if (m_canvas->mapTool() == m_featureSelectTool) {
@@ -3746,146 +3803,6 @@ void MainWindow::convertShpFileTo5179() {
 #endif
 }
 
-void MainWindow::undoLastAction() {
-  auto* focus = QApplication::focusWidget();
-  if (qobject_cast<QLineEdit*>(focus) || qobject_cast<QAbstractSpinBox*>(focus) ||
-      qobject_cast<QTextEdit*>(focus) || qobject_cast<QPlainTextEdit*>(focus))
-    return;
-#if KA_HGIS_HAS_QGIS
-  if (m_viewTabs && m_terrain3dLayoutStudio &&
-      m_viewTabs->currentWidget() == m_terrain3dLayoutStudio) {
-    m_terrain3dLayoutStudio->undoLastChange();
-    return;
-  }
-  if (m_viewTabs && m_drawingStudio && m_viewTabs->currentWidget() == m_drawingStudio) {
-    m_drawingStudio->undoLastChange();
-    return;
-  }
-  if (m_captureTool && m_canvas && m_canvas->mapTool() == m_captureTool &&
-      m_captureTool->undoLastVertex()) {
-    statusBar()->showMessage(QStringLiteral("꼭짓점 하나를 되돌렸습니다."), 4000);
-    return;
-  }
-  if (m_alignTool && m_canvas && m_canvas->mapTool() == m_alignTool &&
-      m_alignTool->removeLastPair()) {
-    statusBar()->showMessage(m_alignTool->statusText(), 4000);
-    return;
-  }
-
-  while (!m_undoActions.isEmpty()) {
-    const auto act = m_undoActions.takeLast();
-    if (act.type == KaUndoAction::LayerAdded) {
-      if (QgsProject::instance()->mapLayer(act.layerId)) {
-        QgsProject::instance()->removeMapLayer(act.layerId);
-        if (m_canvas) m_canvas->refresh();
-        refreshWorkPanel();
-        statusBar()->showMessage(QStringLiteral("구간 분리(클립) 레이어 생성을 되돌렸습니다."), 5000);
-        return;
-      }
-    } else if (act.type == KaUndoAction::FeatureAdded) {
-      auto* vl = qobject_cast<QgsVectorLayer*>(QgsProject::instance()->mapLayer(act.layerId));
-      QString err;
-      if (LayerOps::undoCommittedFeature(vl, act.featureId, &err)) {
-        const QString key = LayerOps::layerKeyOf(vl);
-        if (key.startsWith(QLatin1String("user_poly")) && vl->featureCount() <= 0) {
-          if (m_editLayer == vl) m_editLayer = nullptr;
-          QgsProject::instance()->removeMapLayer(vl->id());
-          vl = nullptr;
-        }
-        if (m_canvas) LayerOps::refreshCanvasIfIdle(m_canvas);
-        refreshWorkPanel();
-        statusBar()->showMessage(QStringLiteral("추가되었던 도형 생성을 되돌렸습니다."), 5000);
-        return;
-      }
-    } else if (act.type == KaUndoAction::FeatureDeleted) {
-      auto* vl = qobject_cast<QgsVectorLayer*>(QgsProject::instance()->mapLayer(act.layerId));
-      QString err;
-      if (LayerOps::restoreDeletedFeature(vl, act.featureData, &err)) {
-        if (m_canvas) LayerOps::refreshCanvasIfIdle(m_canvas);
-        refreshWorkPanel();
-        statusBar()->showMessage(QStringLiteral("잘못 지운 도형을 원래대로 복원했습니다."), 5000);
-        return;
-      }
-    }
-  }
-
-  while (!m_committedUndo.isEmpty()) {
-    const auto rec = m_committedUndo.takeLast();
-    auto* vl = qobject_cast<QgsVectorLayer*>(QgsProject::instance()->mapLayer(rec.first));
-    QString err;
-    if (LayerOps::undoCommittedFeature(vl, rec.second, &err)) {
-      const QString key = LayerOps::layerKeyOf(vl);
-      if (key.startsWith(QLatin1String("user_poly")) && vl->featureCount() <= 0) {
-        if (m_editLayer == vl) m_editLayer = nullptr;
-        QgsProject::instance()->removeMapLayer(vl->id());
-        vl = nullptr;
-      }
-      if (m_canvas)
-        LayerOps::refreshCanvasIfIdle(m_canvas);
-      refreshWorkPanel();
-      statusBar()->showMessage(QStringLiteral("바로 전에 그린 것을 되돌렸습니다."), 5000);
-      return;
-    }
-  }
-#endif
-  statusBar()->showMessage(QStringLiteral("되돌릴 것이 없습니다."), 4000);
-}
-
-void MainWindow::deleteSelectedFeatures() {
-#if KA_HGIS_HAS_QGIS
-  auto* focus = QApplication::focusWidget();
-  if (qobject_cast<QLineEdit*>(focus) || qobject_cast<QAbstractSpinBox*>(focus) ||
-      qobject_cast<QTextEdit*>(focus) || qobject_cast<QPlainTextEdit*>(focus))
-    return;
-
-  auto selected = KaFeatureSelectTool::allSelectedFeatures(m_canvas);
-  if (selected.isEmpty()) return;
-
-  int deletedCount = 0;
-  for (const auto& sel : selected) {
-    auto* vl = sel.layer.data();
-    if (!vl || !vl->isValid() || LayerOps::isReferenceLayer(vl)) continue;
-
-    QgsFeature existing = vl->getFeature(sel.fid);
-    if (!existing.isValid()) continue;
-
-    const bool startedHere = !vl->isEditable();
-    if (startedHere && !vl->startEditing()) continue;
-
-    if (vl->deleteFeature(sel.fid)) {
-      if (vl->commitChanges(false)) {
-        KaUndoAction act;
-        act.type = KaUndoAction::FeatureDeleted;
-        act.layerId = vl->id();
-        act.featureId = sel.fid;
-        act.featureData = existing;
-        act.description = QStringLiteral("도형 삭제");
-        m_undoActions.append(act);
-        deletedCount++;
-      } else {
-        vl->rollBack();
-      }
-    } else {
-      if (startedHere) vl->rollBack();
-    }
-  }
-
-  if (deletedCount > 0) {
-    if (m_canvas) {
-      for (QgsMapLayer* ml : m_canvas->layers()) {
-        if (auto* vl = qobject_cast<QgsVectorLayer*>(ml)) {
-          if (vl->selectedFeatureCount() > 0)
-            vl->removeSelection();
-        }
-      }
-      m_canvas->refresh();
-    }
-    refreshWorkPanel();
-    statusBar()->showMessage(QStringLiteral("선택한 %1개 도형을 삭제했습니다. (Ctrl+Z로 즉시 복원 가능)").arg(deletedCount), 6000);
-  }
-#endif
-}
-
 bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
 #if KA_HGIS_HAS_QGIS
   if (!event) return QMainWindow::eventFilter(watched, event);
@@ -3991,11 +3908,14 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
     if (event->type() == QEvent::KeyPress) {
       auto* ke = static_cast<QKeyEvent*>(event);
       const bool measuring = m_measureTool && m_canvas && m_canvas->mapTool() == m_measureTool;
-      if (!measuring && (ke->key() == Qt::Key_Delete || ke->key() == Qt::Key_Backspace)) {
-        removeSelectedLayers();
+      if (!measuring && ke->key() == Qt::Key_Delete) {
+        if (onCanvas) {
+          if (m_captureTool && m_canvas->mapTool() == m_captureTool) return false;
+          deleteSelectedFeatures();
+        } else removeSelectedLayers();
         return true;
       }
-      if (ke->key() == Qt::Key_F2) {
+      if (!onCanvas && ke->key() == Qt::Key_F2) {
         renameSelectedLayer();
         return true;
       }
@@ -4077,7 +3997,7 @@ void MainWindow::saveOfflineTilePack() {
   if (QMessageBox::question(
           this, QStringLiteral("오프라인 저장"),
           QStringLiteral("지금 화면 범위를 타일 %1장(줌 %2~%3)으로 받아 둡니다.\n"
-                         "받는 동안 잠시 멈춥니다. 계속할까요?")
+                         "받는 동안 지도 작업을 계속할 수 있습니다. 계속할까요?")
               .arg(QLocale().toString(tiles))
               .arg(opt.minZoom)
               .arg(opt.maxZoom),
@@ -4090,43 +4010,28 @@ void MainWindow::saveOfflineTilePack() {
                                                    QStringLiteral("_"));
   const QString out = QDir(dir).filePath(QStringLiteral("%1_오프라인.mbtiles").arg(safe));
 
-  statusBar()->showMessage(QStringLiteral("배경 타일을 받는 중… %1장").arg(tiles), 0);
-  QApplication::setOverrideCursor(Qt::WaitCursor);
-  QElapsedTimer t;
-  t.start();
-  QString err;
-  const bool ok = TilePackService::build(opt, ext.xMinimum(), ext.yMinimum(), ext.xMaximum(),
-                                         ext.yMaximum(), out, &err);
-  QApplication::restoreOverrideCursor();
-  KaCrashGuard::logLine(QStringLiteral("[tilepack] %1 %2 ms tiles=%3 z=%4-%5 ok=%6 %7")
-                            .arg(rl->name())
-                            .arg(t.elapsed())
-                            .arg(tiles)
-                            .arg(opt.minZoom)
-                            .arg(opt.maxZoom)
-                            .arg(ok)
-                            .arg(err));
-  statusBar()->clearMessage();
-  if (!ok) {
-    notify(Notice::Critical, QStringLiteral("오프라인 저장"),
-           err.isEmpty() ? QStringLiteral("타일을 받지 못했습니다.") : err);
-    return;
-  }
-
   const QString packName = QStringLiteral("%1 (오프라인)").arg(rl->name());
-  QString addErr;
-  if (!LayerOps::addTilePackBasemap(QgsProject::instance(), m_canvas, out, packName, &addErr)) {
-    notify(Notice::Warning, QStringLiteral("오프라인 저장"),
-           QStringLiteral("파일은 만들었지만 지도에 올리지 못했습니다: %1").arg(addErr));
-    return;
-  }
-  // 같은 그림을 두 번 그릴 이유가 없다. 원격 쪽은 끈다(지우지는 않는다).
-  LayerOps::toggleLayerVisibility(QgsProject::instance(), m_canvas, rl->name(), false);
-  syncThematicButtons();
-  notify(Notice::Success, QStringLiteral("오프라인 저장"),
-         QStringLiteral("%1 — 타일 %2장을 저장했습니다. 이제 인터넷 없이 뜹니다.")
-             .arg(QDir::toNativeSeparators(out))
-             .arg(QLocale().toString(tiles)));
+  const QPointer<QgsRasterLayer> online(rl);
+  startFileDownload(QStringLiteral("오프라인 지도"), [opt, ext, out](QgsFeedback* feedback, const std::function<bool()>& cancelled) {
+    PreparedReferenceMap result;
+    if (TilePackService::build(opt, ext.xMinimum(), ext.yMinimum(), ext.xMaximum(), ext.yMaximum(), out, &result.error, feedback, cancelled)) {
+      result.status = PreparedReferenceMap::Status::Ready;
+      result.outputCommitted = true;
+      result.rasterUri = out;
+    } else if (cancelled()) result.status = PreparedReferenceMap::Status::Cancelled;
+    return result;
+  }, [this, online, packName](const PreparedReferenceMap& result) {
+    QString error;
+    if (!LayerOps::addTilePackBasemap(QgsProject::instance(), m_canvas, result.rasterUri, packName, &error)) {
+      notify(Notice::Warning, QStringLiteral("오프라인 지도"), QStringLiteral("파일을 저장했지만 지도에 표시하지 못했습니다. 파일함에서 다시 열어 주세요.\n%1\n%2").arg(result.rasterUri, error));
+      return;
+    }
+    if (online) {
+      if (auto* node = QgsProject::instance()->layerTreeRoot()->findLayer(online->id())) node->setItemVisibilityChecked(false);
+    }
+    QgsProject::instance()->setDirty(true);
+    notify(Notice::Success, QStringLiteral("오프라인 지도"), QStringLiteral("내려받기를 마쳤습니다. 인터넷 없이 이 범위의 지도를 볼 수 있습니다.\n%1").arg(QDir::toNativeSeparators(result.rasterUri)));
+  });
 #endif
 }
 
@@ -4144,139 +4049,14 @@ void MainWindow::clearDrawnFeaturesOfCurrentLayer() {
   }
   if (QMessageBox::question(
           this, QStringLiteral("그린 도형 삭제"),
-          QStringLiteral("%1의 도형 %2개를 GPKG에서 지웁니다. 되돌릴 수 없습니다.\n계속할까요?")
+          QStringLiteral("%1의 도형 %2개를 지웁니다. Ctrl+Z로 복원할 수 있습니다.\n계속할까요?")
               .arg(vl->name())
               .arg(n),
           QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
     return;
 
-  QString err;
-  if (!LayerOps::purgeCommittedFeatures(vl, &err)) {
-    notify(Notice::Warning, QStringLiteral("그린 도형 삭제"),
-           err.isEmpty()
-               ? QStringLiteral("지우지 못했습니다. 편집 중인 다른 창을 닫고 다시 해 보세요.")
-               : err);
-    return;
-  }
-  vl->triggerRepaint();
-  if (m_canvas) m_canvas->refresh();
-  m_committedUndo.clear();
-  m_undoActions.clear();
-  updateNextActionStatus();
-  refreshWorkPanel();
-  notify(Notice::Success, QStringLiteral("그린 도형 삭제"),
-         QStringLiteral("%1의 도형 %2개를 지웠습니다. 이제 새로 그리면 됩니다.")
-             .arg(vl->name())
-             .arg(n));
-#endif
-}
-
-void MainWindow::removeSelectedLayers() {
-#if KA_HGIS_HAS_QGIS
-  if (!m_layerTree) return;
-
-  QSet<QString> ids;
-  QStringList names;
-
-  QList<QgsMapLayer*> layers = m_layerTree->selectedLayers();
-  if (layers.isEmpty()) {
-    if (QgsMapLayer* cur = m_layerTree->currentLayer())
-      layers.append(cur);
-  }
-  for (QgsMapLayer* l : layers) {
-    if (!l) continue;
-    ids.insert(l->id());
-    names << l->name();
-  }
-
-  if (ids.isEmpty() && m_layerTree->selectionModel()) {
-    const QModelIndexList idxs = m_layerTree->selectionModel()->selectedIndexes();
-    auto* model = qobject_cast<QgsLayerTreeModel*>(m_layerTree->model());
-    for (const QModelIndex& idx : idxs) {
-      if (!idx.isValid() || !model) continue;
-      QgsLayerTreeNode* node = model->index2node(idx);
-      if (!node || !QgsLayerTree::isLayer(node)) continue;
-      QgsMapLayer* l = QgsLayerTree::toLayer(node)->layer();
-      if (!l) continue;
-      ids.insert(l->id());
-      names << l->name();
-    }
-  }
-
-  if (ids.isEmpty()) {
-    if (auto* node = m_layerTree->currentNode()) {
-      if (QgsLayerTree::isLayer(node)) {
-        if (QgsMapLayer* l = QgsLayerTree::toLayer(node)->layer()) {
-          ids.insert(l->id());
-          names << l->name();
-        }
-      }
-    }
-  }
-
-  if (ids.isEmpty()) {
-    statusBar()->showMessage(QStringLiteral("삭제할 레이어를 먼저 클릭하세요"), 4000);
-    return;
-  }
-
-  // 그리기는 그릴 때마다 GPKG에 바로 커밋한다(자동 저장). 그래서 레이어만 빼면
-  // 도형은 파일에 남고, 「그리기 → 조사구역」이 같은 표를 다시 열어 되살아난다.
-  // 현장 규칙: 현재 조사 GPKG에서 직접 그린 레이어만 도형을 지우고, 외부에서 추가한 SHP/CAD/참조 파일은 목록에서만 제거한다(원본 파일 보존).
-  QStringList drawn;
-  QList<QgsVectorLayer*> domainWithData;
-  for (const QString& id : ids) {
-    auto* vl = qobject_cast<QgsVectorLayer*>(QgsProject::instance()->mapLayer(id));
-    if (!isProjectSurveyDomainLayer(vl, m_surveyPath)) continue;
-    if (vl->featureCount() <= 0) continue;
-    domainWithData.append(vl);
-    drawn << QStringLiteral("%1 %2개").arg(vl->name()).arg(vl->featureCount());
-  }
-
-  if (!domainWithData.isEmpty()) {
-    const auto ans = QMessageBox::question(
-        this, QStringLiteral("조사 자료 삭제"),
-        QStringLiteral("%1를 지웁니다. 되돌릴 수 없습니다. 계속할까요?")
-            .arg(drawn.join(QStringLiteral(", "))),
-        QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
-    if (ans != QMessageBox::Yes)
-      return;
-  }
-
-  int purged = 0;
-  QStringList purgeFail;
-  for (QgsVectorLayer* vl : domainWithData) {
-    if (!vl) continue;
-    const int n = static_cast<int>(vl->featureCount());
-    QString err;
-    if (LayerOps::purgeCommittedFeatures(vl, &err)) {
-      purged += n;
-    } else {
-      purgeFail << vl->name();
-      ids.remove(vl->id());
-      names.removeAll(vl->name());
-    }
-  }
-  if (!purgeFail.isEmpty()) {
-    notify(Notice::Warning, QStringLiteral("조사 자료 삭제"),
-           QStringLiteral("%1의 도형을 GPKG에서 지우지 못해 레이어를 남겨 두었습니다.")
-               .arg(purgeFail.join(QStringLiteral(", "))));
-  }
-  if (ids.isEmpty())
-    return;
-
-  QgsProject::instance()->removeMapLayers(QList<QString>(ids.begin(), ids.end()));
-  if (m_canvas) {
-    m_canvas->refresh();
-    m_canvas->redrawAllLayers();
-  }
-  refreshLayerEmptyState();
-  updateNextActionStatus();
-  statusBar()->showMessage(
-      purged > 0 ? QStringLiteral("삭제: %1 — 그린 도형 %2개도 지웠습니다")
-                       .arg(names.join(QStringLiteral(", ")))
-                       .arg(purged)
-                 : QStringLiteral("삭제: %1").arg(names.join(QStringLiteral(", "))),
-      6000);
+  vl->selectAll();
+  deleteSelectedFeatures();
 #endif
 }
 
@@ -4445,7 +4225,6 @@ void MainWindow::loadSurveyLayers(const QString& gpkgOrStub) {
   QgsProject* proj = QgsProject::instance();
   stopAlignSession();
   m_editLayer = nullptr;
-  m_committedUndo.clear();
   m_undoActions.clear();
   LayerOps::removeSurveyDomainLayers(proj);
   proj->setCrs(QgsCoordinateReferenceSystem(m_workCrs));
@@ -4526,16 +4305,10 @@ void MainWindow::moveSelectedLayer(int dir) {
   if (idx < 0) return;
   const int dest = idx + dir;
   if (dest < 0 || dest >= parent->children().size()) return;
-  QList<QgsMapLayer*> order;
-  for (QgsLayerTreeNode* child : parent->children()) {
-    if (auto* ln = qobject_cast<QgsLayerTreeLayer*>(child)) {
-      if (ln->layer()) order.append(ln->layer());
-    }
-  }
-  if (idx < order.size() && dest < order.size()) {
-    order.move(idx, dest);
-    parent->reorderGroupLayers(order);
+  QPointer<QgsMapLayer> layer = QgsLayerTree::toLayer(node)->layer();
+  if (LayerOps::moveLegendLayer(QgsLayerTree::toLayer(node), dest)) {
     onLayerTreeRowsMoved();
+    if (layer) m_layerTree->setCurrentLayer(layer);
   }
 #else
   Q_UNUSED(dir);
@@ -5195,11 +4968,16 @@ void MainWindow::editFeatureAttributes(QgsVectorLayer* layer, const QgsFeature& 
   }
   layer->endEditCommand();
 
+  KaUndoAction undo;
+  undo.type = KaUndoAction::AttributesChanged;
+  undo.layerId = layer->id();
+  undo.featureId = feat.id();
+  undo.featureData = feat;
+  m_undoActions.append(undo);
   if (!wasEditable) {
     if (!layer->commitChanges()) {
       QMessageBox::warning(this, QStringLiteral("속성"),
                            QStringLiteral("저장 실패\n%1").arg(layer->commitErrors().join(QLatin1Char('\n'))));
-      layer->rollBack();
       return;
     }
   }
@@ -5292,7 +5070,6 @@ void MainWindow::onGeometryCaptured(const QgsGeometry& geom) {
     if (addedId < 0 && feat.id() >= 0)
       addedId = static_cast<qint64>(feat.id());
     if (addedId >= 0) {
-      m_committedUndo.append(qMakePair(layer->id(), addedId));
       KaUndoAction act;
       act.type = KaUndoAction::FeatureAdded;
       act.layerId = layer->id();
@@ -6109,8 +5886,6 @@ void MainWindow::ensureAlignSplit() {
   m_alignPointList->setObjectName(QStringLiteral("alignPointList"));
   m_alignPointList->setMaximumHeight(130);
   m_alignPointList->setToolTip(QStringLiteral("찍은 점. Delete로 지웁니다"));
-  auto* delSc = new QShortcut(QKeySequence::Delete, m_alignPointList);
-  connect(delSc, &QShortcut::activated, this, &MainWindow::deleteSelectedAlignPoint);
   ll->addWidget(m_alignPointList);
 
   mapLay->removeWidget(m_canvas);
@@ -6903,22 +6678,8 @@ void MainWindow::toggleDemMap() {
     const bool makeVisible = !wasVisible;
     // 켜는 참인데 지금 화면이 기존 DEM 밖으로 나가 있으면, 화면 전체를 덮도록 새로 받는다.
     if (makeVisible && !LayerOps::demCoversCanvas(proj, m_canvas)) {
-      QString rebuildErr;
-      if (LayerOps::addDemColorReliefMap(proj, m_canvas, &rebuildErr)) {
-        if (m_btnDem)
-          m_btnDem->setChecked(true);
-        if (!m_canvas->isDrawing()) {
-          LayerOps::syncMapCanvas(proj, m_canvas, false);
-          m_canvas->refresh();
-        }
-        statusBar()->showMessage(
-            rebuildErr.isEmpty()
-                ? QStringLiteral("지금 보이는 지도 전체를 DEM으로 다시 채웠습니다.")
-                : rebuildErr,
-            8000);
-        return;
-      }
-      // 새로 받지 못하면 있던 DEM이라도 켠다.
+      startDemDownload();
+      return;
     }
     LayerOps::toggleLayerVisibility(proj, m_canvas, QStringLiteral("DEM"), makeVisible);
     if (m_btnDem)
@@ -6941,25 +6702,7 @@ void MainWindow::toggleDemMap() {
     return;
   }
 
-  QString err;
-  if (!LayerOps::addDemColorReliefMap(proj, m_canvas, &err)) {
-    notify(Notice::Warning, QStringLiteral("DEM"),
-           err.isEmpty() ? QStringLiteral("DEM을 올리지 못했습니다.") : err);
-    if (m_btnDem)
-      m_btnDem->setChecked(false);
-    return;
-  }
-  if (!m_canvas->isDrawing()) {
-    LayerOps::syncMapCanvas(proj, m_canvas, false);
-    m_canvas->refresh();
-  }
-  if (m_btnDem)
-    m_btnDem->setChecked(true);
-  statusBar()->showMessage(
-      err.isEmpty()
-          ? QStringLiteral("지금 보이는 지도 전체를 DEM으로 채웠습니다. 범례에 높이(m)가 나옵니다. 다시 누르면 숨깁니다.")
-          : err,
-      err.isEmpty() ? 6000 : 10000);
+  startDemDownload();
 #else
   QMessageBox::information(this, QStringLiteral("스텁"), QStringLiteral("DEM 시뮬레이션"));
 #endif
@@ -7227,13 +6970,7 @@ void MainWindow::startReferenceDownload(ReferenceMapKind kind, const QgsRectangl
   }
   const QString title = (kind == ReferenceMapKind::Soil || kind == ReferenceMapKind::PaleoSoil) ? QStringLiteral("토양도")
       : kind == ReferenceMapKind::Geology ? QStringLiteral("지질도") : QStringLiteral("수계도");
-  auto* progress = new QProgressDialog(title + QStringLiteral(" 자료를 내려받는 중입니다. 지도 작업을 계속할 수 있습니다."),
-                                       QStringLiteral("취소"), 0, 0, this);
-  progress->setWindowTitle(title + QStringLiteral(" 내려받기"));
-  progress->setWindowModality(Qt::NonModal);
-  progress->setMinimumDuration(0);
-  progress->setAutoClose(false);
-  progress->setAutoReset(false);
+  auto* progress = createDownloadProgress(title);
   const auto context = QgsProject::instance()->transformContext();
   const quint64 generation = m_surveyGeneration;
   const QPointer<MainWindow> window(this);
@@ -7870,14 +7607,15 @@ void MainWindow::openProject() {
   ++m_surveyGeneration;
   if (m_referenceDownload) m_referenceDownload->cancel();
   m_locator->cancel();
+  if (m_searchProgress) { m_searchProgress->hide(); m_searchProgress->deleteLater(); m_searchProgress = nullptr; }
   m_locationSearchBusy = false;
   m_adminBoundary->cancel();
+  if (m_boundaryProgress) { m_boundaryProgress->hide(); m_boundaryProgress->deleteLater(); m_boundaryProgress = nullptr; }
   QScopedValueRollback<bool> opening(m_isOpeningSurvey, true);
   stopAlignSession();
   stopCaptureTool();
   m_editLayer = nullptr;
   m_isSplittingPolygon = false;
-  m_committedUndo.clear();
   m_undoActions.clear();
   m_surveySessionReady = false;
   m_surveyPath.clear();
@@ -7890,6 +7628,7 @@ void MainWindow::openProject() {
   }
   LayerOps::pruneDuplicateSatelliteLayers(QgsProject::instance());
   LayerOps::restoreMissingLayerTreeNodes(QgsProject::instance());
+  LayerOps::restoreThematicOverlayVisibility(QgsProject::instance());
   for (QgsMapLayer* ml : QgsProject::instance()->mapLayers()) {
     auto* vl = qobject_cast<QgsVectorLayer*>(ml);
     if (!vl || !vl->isValid()) continue;
@@ -7954,6 +7693,16 @@ void MainWindow::searchLocation(const QString& query) {
   if (m_locationSearchBusy) return;
   m_locationSearchBusy = true;
   statusBar()->showMessage(QStringLiteral("위치 검색 중… %1").arg(q), 0);
+  if (m_searchProgress) { m_searchProgress->hide(); m_searchProgress->deleteLater(); }
+  m_searchProgress = createDownloadProgress(QStringLiteral("위치 자료"));
+  m_searchProgress->setWindowTitle(QStringLiteral("위치 검색"));
+  connect(m_searchProgress, &QProgressDialog::canceled, this, [this]() {
+    m_locator->cancel();
+    m_locationSearchBusy = false;
+    if (m_searchProgress) { m_searchProgress->deleteLater(); m_searchProgress = nullptr; }
+    statusBar()->showMessage(QStringLiteral("위치 검색을 취소했습니다."), 4000);
+  });
+  m_searchProgress->show();
   m_locator->search(q);
 }
 
@@ -7963,6 +7712,14 @@ void MainWindow::applySurfaceSurveyFieldMap(const QString& sido, const QString& 
   if (!m_adminBoundary) return;
   statusBar()->showMessage(
       QStringLiteral("읍면동 경계를 받는 중… %1 %2 %3").arg(sido, city, dong), 0);
+  if (m_boundaryProgress) { m_boundaryProgress->hide(); m_boundaryProgress->deleteLater(); }
+  m_boundaryProgress = createDownloadProgress(QStringLiteral("읍면동 경계"));
+  connect(m_boundaryProgress, &QProgressDialog::canceled, this, [this]() {
+    m_adminBoundary->cancel();
+    if (m_boundaryProgress) { m_boundaryProgress->deleteLater(); m_boundaryProgress = nullptr; }
+    statusBar()->showMessage(QStringLiteral("읍면동 경계 내려받기를 취소했습니다."), 4000);
+  });
+  m_boundaryProgress->show();
   m_adminBoundary->fetchEmd(sido, city, dong);
 #else
   Q_UNUSED(sido);
@@ -7972,11 +7729,13 @@ void MainWindow::applySurfaceSurveyFieldMap(const QString& sido, const QString& 
 }
 
 void MainWindow::onAdminBoundaryFailed(const QString& message) {
+  if (m_boundaryProgress) { m_boundaryProgress->hide(); m_boundaryProgress->deleteLater(); m_boundaryProgress = nullptr; }
   statusBar()->showMessage(message, 8000);
   QMessageBox::warning(this, QStringLiteral("현장 지도"), message);
 }
 
 void MainWindow::onAdminBoundaryFetched(const AdminBoundaryParse& parsed) {
+  if (m_boundaryProgress) { m_boundaryProgress->hide(); m_boundaryProgress->deleteLater(); m_boundaryProgress = nullptr; }
 #if KA_HGIS_HAS_QGIS
   if (!parsed.ok) {
     onAdminBoundaryFailed(parsed.error);
@@ -8036,12 +7795,14 @@ void MainWindow::onAdminBoundaryFetched(const AdminBoundaryParse& parsed) {
 }
 
 void MainWindow::onLocationFailed(const QString& message) {
+  if (m_searchProgress) { m_searchProgress->hide(); m_searchProgress->deleteLater(); m_searchProgress = nullptr; }
   m_locationSearchBusy = false;
   statusBar()->showMessage(message, 8000);
   QMessageBox::information(this, QStringLiteral("위치 검색"), message);
 }
 
 void MainWindow::onLocationResults(const QVector<LocationHit>& hits) {
+  if (m_searchProgress) { m_searchProgress->hide(); m_searchProgress->deleteLater(); m_searchProgress = nullptr; }
   m_locationSearchBusy = false;
   if (hits.isEmpty()) {
     onLocationFailed(QStringLiteral("검색 결과 없음"));
@@ -8118,7 +7879,11 @@ void MainWindow::zoomToLocation(const LocationHit& hit) {
     LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, dest.authid());
 
     const QgsPointXY p = xf.transform(QgsPointXY(lon, lat));
-    if (hit.hasBbox && hit.west != 0.0 && hit.east != 0.0) {
+    m_startupViewApplied = true; // Explicit navigation wins over queued initial framing.
+    showMapWorkspace();
+    LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
+    const bool useBounds = hit.hasBbox && hit.west != 0.0 && hit.east != 0.0;
+    if (useBounds) {
       QgsRectangle r(hit.west, hit.south, hit.east, hit.north);
       r = xf.transformBoundingBox(r);
       r.scale(1.2);
@@ -8127,11 +7892,10 @@ void MainWindow::zoomToLocation(const LocationHit& hit) {
       const double pad = dest.authid().contains(QLatin1String("4326")) ? 0.004 : 400.0;
       m_canvas->setExtent(QgsRectangle(p.x() - pad, p.y() - pad, p.x() + pad, p.y() + pad));
     }
-    if (m_canvas->scale() > 8000.0)
+    if (!useBounds && m_canvas->scale() > 8000.0)
       m_canvas->zoomScale(3000.0, true);
     LayerOps::clampCanvasToKorea(m_canvas);
     markFoundLocation(p, hit.title);
-    LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
     LayerOps::refreshCanvasIfIdle(m_canvas);
     statusBar()->showMessage(
         QStringLiteral("이동: %1  (lon %2, lat %3 → %4)")

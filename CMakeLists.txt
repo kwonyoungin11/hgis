@@ -63,6 +63,7 @@ add_library(ka_core STATIC
   src/core/SurveyProjectFactory.cpp
   src/core/SurveyStorage.cpp
   src/core/PreparedReferenceMap.cpp
+  src/core/DemDownloadService.cpp
   src/core/ExportService.cpp
   src/core/ProjectStateBuilder.cpp
   src/core/LayoutService.cpp
@@ -128,25 +129,47 @@ target_compile_definitions(ka_core PUBLIC KA_HGIS_HAS_QGIS=1 "CORE_EXPORT=__decl
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
   "${CMAKE_SOURCE_DIR}/data/theme/ka-hgis.qss")
 file(READ "${CMAKE_SOURCE_DIR}/data/theme/ka-hgis.qss" KA_QSS_CONTENT)
-string(FIND "${KA_QSS_CONTENT}" "/* ---- View tabs" _split_pos)
-if(_split_pos GREATER 0)
-  string(SUBSTRING "${KA_QSS_CONTENT}" 0 ${_split_pos} KA_QSS_PART1)
-  string(SUBSTRING "${KA_QSS_CONTENT}" ${_split_pos} -1 KA_QSS_PART2)
-else()
-  set(KA_QSS_PART1 "${KA_QSS_CONTENT}")
-  set(KA_QSS_PART2 "")
-endif()
+# CMake string lengths are UTF-8 byte counts. Bound each MSVC raw literal
+# to 8 KiB and split only after a newline, preserving Korean byte sequences.
+set(_ka_qss_remaining "${KA_QSS_CONTENT}")
+set(KA_QSS_LITERALS "")
+while(TRUE)
+  string(LENGTH "${_ka_qss_remaining}" _ka_qss_length)
+  if(_ka_qss_length GREATER 8192)
+    string(SUBSTRING "${_ka_qss_remaining}" 0 8192 _ka_qss_prefix)
+    string(FIND "${_ka_qss_prefix}" "\n" _ka_qss_split REVERSE)
+    if(_ka_qss_split LESS 0)
+      message(FATAL_ERROR "ka-hgis.qss has a line longer than 8192 UTF-8 bytes; wrap that line before embedding it.")
+    endif()
+    math(EXPR _ka_qss_chunk_length "${_ka_qss_split} + 1")
+  else()
+    set(_ka_qss_chunk_length ${_ka_qss_length})
+  endif()
+  string(SUBSTRING "${_ka_qss_remaining}" 0 ${_ka_qss_chunk_length} _ka_qss_chunk)
+  string(FIND "${_ka_qss_chunk}" ")KAQSS\"" _ka_qss_delimiter)
+  if(NOT _ka_qss_delimiter LESS 0)
+    message(FATAL_ERROR "ka-hgis.qss contains the reserved raw-string delimiter )KAQSS\".")
+  endif()
+  string(APPEND KA_QSS_LITERALS "R\"KAQSS(${_ka_qss_chunk})KAQSS\"\n")
+  if(_ka_qss_length LESS_EQUAL 8192)
+    break()
+  endif()
+  string(SUBSTRING "${_ka_qss_remaining}" ${_ka_qss_chunk_length} -1 _ka_qss_remaining)
+endwhile()
 configure_file(
   "${CMAKE_SOURCE_DIR}/src/app/ka-hgis.qss.inc.in"
   "${CMAKE_BINARY_DIR}/generated/ka-hgis.qss.inc"
   @ONLY
+  NEWLINE_STYLE UNIX
 )
 
 add_executable(ka-hgis
   src/app/app.rc
   src/app/main.cpp
   src/app/MainWindow.cpp
-  src/app/MainWindowContextMenus.cpp
+    src/app/MainWindowContextMenus.cpp
+    src/app/MainWindowUndo.cpp
+    src/app/MainWindowDownloads.cpp
   src/app/KaBeginnerRibbon.cpp
   src/app/KaApplication.cpp
   src/app/KaReferenceDownloadJob.cpp
@@ -333,6 +356,7 @@ if(KA_HGIS_BUILD_TESTS)
   add_executable(ka_section_studio_tests
     tests/test_section_studio.cpp
     src/app/KaSectionDrawingStudio.cpp
+    src/app/KaTheme.cpp
   )
   target_link_libraries(ka_section_studio_tests PRIVATE ${KA_TEST_LIBS})
   target_include_directories(ka_section_studio_tests PRIVATE ${KA_INCLUDES} ${CMAKE_BINARY_DIR}/generated)
@@ -351,6 +375,8 @@ if(KA_HGIS_BUILD_TESTS)
   add_executable(ka_theme_tests
     tests/test_theme.cpp
     src/app/KaTheme.cpp
+    src/app/KaBeginnerRibbon.cpp
+    src/app/KaIcons.cpp
   )
   set_target_properties(ka_theme_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   target_link_libraries(ka_theme_tests PRIVATE Qt6::Test Qt6::Core Qt6::Gui Qt6::Widgets)
@@ -359,6 +385,33 @@ if(KA_HGIS_BUILD_TESTS)
     ${CMAKE_BINARY_DIR}/generated
   )
   add_test(NAME theme_qss COMMAND ka_theme_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+  add_executable(ka_region_locator_tests tests/test_region_locator.cpp
+    src/app/KaRegionLocator.cpp src/app/KaTheme.cpp src/core/KoreaRegionCatalog.cpp)
+  set_target_properties(ka_region_locator_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  target_link_libraries(ka_region_locator_tests PRIVATE Qt6::Test Qt6::Core Qt6::Gui Qt6::Widgets)
+  target_include_directories(ka_region_locator_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/generated)
+  add_test(NAME region_locator_popup COMMAND ka_region_locator_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+  add_executable(ka_layer_state_tests tests/test_layer_state.cpp)
+  set_target_properties(ka_layer_state_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  target_link_libraries(ka_layer_state_tests PRIVATE ka_core Qt6::Test)
+  add_test(NAME layer_state_regressions COMMAND ka_layer_state_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+  add_executable(ka_map_render_tests tests/test_map_render.cpp)
+  set_target_properties(ka_map_render_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  target_link_libraries(ka_map_render_tests PRIVATE ka_core Qt6::Test Qt6::Network)
+  add_test(NAME map_render COMMAND ka_map_render_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  set_tests_properties(region_locator_popup layer_state_regressions map_render PROPERTIES TIMEOUT 60)
+
+  add_executable(ka_hgis_above_labels_tests tests/test_above_labels.cpp src/app/KaAboveLabelsOverlay.cpp)
+  set_target_properties(ka_hgis_above_labels_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  target_link_libraries(ka_hgis_above_labels_tests PRIVATE ka_core Qt6::Test)
+  add_test(NAME above_labels COMMAND ka_hgis_above_labels_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  add_test(NAME above_labels_125 COMMAND ka_hgis_above_labels_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  add_test(NAME above_labels_150 COMMAND ka_hgis_above_labels_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  add_test(NAME above_labels_200 COMMAND ka_hgis_above_labels_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  set_tests_properties(above_labels above_labels_125 above_labels_150 above_labels_200 PROPERTIES TIMEOUT 60)
 
   add_executable(ka_recent_tests
     tests/test_recent.cpp
@@ -421,8 +474,12 @@ if(KA_HGIS_BUILD_TESTS)
       "${OSGEO4W_ROOT}/bin"
     )
     string(JOIN "\\;" _ka_path_esc ${_ka_path})
-    set_tests_properties(checklist_engine workflow_engine georef_engine feature_presets buffer_ring measure_tape dem_trench_engine theme_qss recent_surveys section_layout_engine section_studio_engine terrain_3d_engine save_open_window e2e_opaque_suite network_services storage_safety reference_download PROPERTIES
+    set_tests_properties(checklist_engine workflow_engine georef_engine feature_presets buffer_ring measure_tape dem_trench_engine theme_qss recent_surveys section_layout_engine section_studio_engine terrain_3d_engine save_open_window e2e_opaque_suite network_services storage_safety reference_download region_locator_popup layer_state_regressions map_render above_labels above_labels_125 above_labels_150 above_labels_200 PROPERTIES
       ENVIRONMENT "PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen")
+    set_property(TEST above_labels APPEND PROPERTY ENVIRONMENT "QT_SCALE_FACTOR=1")
+    set_property(TEST above_labels_125 APPEND PROPERTY ENVIRONMENT "QT_SCALE_FACTOR=1.25")
+    set_property(TEST above_labels_150 APPEND PROPERTY ENVIRONMENT "QT_SCALE_FACTOR=1.5")
+    set_property(TEST above_labels_200 APPEND PROPERTY ENVIRONMENT "QT_SCALE_FACTOR=2")
     # This qgis-dev uses a fixed qgis-project-XXXXXX.zip inside TEMP for project
     # archives. Separate test processes must never share that staging file.
     file(TO_CMAKE_PATH "$ENV{TEMP}" _ka_test_temp_root)
@@ -434,7 +491,8 @@ if(KA_HGIS_BUILD_TESTS)
     foreach(_ka_test IN ITEMS checklist_engine workflow_engine georef_engine feature_presets
         buffer_ring measure_tape dem_trench_engine theme_qss recent_surveys section_layout_engine
         section_studio_engine terrain_3d_engine save_open_window e2e_opaque_suite network_services
-        storage_safety reference_download)
+        storage_safety reference_download region_locator_popup layer_state_regressions map_render
+        above_labels above_labels_125 above_labels_150 above_labels_200)
       set(_ka_test_temp "${_ka_test_temp_root}/ka-hgis-tests-${_ka_test_temp_id}/${_ka_test}")
       file(MAKE_DIRECTORY "${_ka_test_temp}")
       set_property(TEST ${_ka_test} APPEND PROPERTY ENVIRONMENT

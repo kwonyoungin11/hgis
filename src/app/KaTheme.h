@@ -13,9 +13,22 @@ struct Tokens {
   QColor sky0, sky1, sky2, sky3, sky4, sky5, sky6;
   QColor ink, inkMuted, inkDisabled, border, bevelLight, bevelDark;
   QColor canvasNeutral, desk, danger, ok;
+  QColor surface, glossMiddle, glossBottom, hoverTop, hoverBottom;
+  QColor pressedTop, pressedBottom, selectedTop, selectedBottom, disabledSurface;
+  QColor rail, railText, railMuted, successSurface, dangerSurface;
+  QColor glossReflection, glossShoulder, accentReflection;
 };
 
 const Tokens& tokens();
+
+// Restrained function colors; labels and outlines remain dark for field use.
+struct IconPalette {
+  QColor ink, file, record, map, align, output;
+  QColor water, earth, earthLight, rock, vegetation;
+  QColor disabled, selected;
+};
+
+const IconPalette& iconPalette();
 
 struct ButtonMetrics {
   int ribbonIconSize = 40;

@@ -1,5 +1,6 @@
 ﻿#include "KaSectionDrawingStudio.h"
 
+#include "KaTheme.h"
 #include "core/LayerOps.h"
 #include "core/LayoutService.h"
 #include "core/SectionLayoutService.h"
@@ -61,29 +62,29 @@ QIcon scaleBarPreviewIcon(const char* style) {
     pm.fill(Qt::transparent);
     QPainter p(&pm);
     p.setRenderHint(QPainter::Antialiasing, true);
-    p.setPen(QPen(QColor(214, 211, 209), 1));
-    p.setBrush(QColor(250, 250, 249));
+    p.setPen(QPen(KaTheme::tokens().border, 1));
+    p.setBrush(KaTheme::tokens().bevelLight);
     p.drawRoundedRect(QRectF(1, 4, 70, 32), 5, 5);
     const QString s = QString::fromUtf8(style);
     if (s == QLatin1String("Line Ticks Up")) {
-        p.setPen(QPen(QColor(68, 64, 60), 1.6));
+        p.setPen(QPen(KaTheme::tokens().ink, 1.6));
         p.drawLine(QPointF(10, 26), QPointF(62, 26));
         for (int i = 0; i < 5; ++i) {
             const double x = 10.0 + i * 13.0;
             p.drawLine(QPointF(x, 26), QPointF(x, 14));
         }
     } else if (s == QLatin1String("Single Box")) {
-        p.setPen(QPen(QColor(68, 64, 60), 1));
+        p.setPen(QPen(KaTheme::tokens().ink, 1));
         for (int i = 0; i < 4; ++i) {
-            p.setBrush(i % 2 == 0 ? QColor(68, 64, 60) : QColor(250, 250, 249));
+            p.setBrush(i % 2 == 0 ? KaTheme::tokens().ink : KaTheme::tokens().bevelLight);
             p.drawRect(QRectF(10 + i * 13, 16, 13, 10));
         }
     } else {
-        p.setPen(QPen(QColor(68, 64, 60), 1));
+        p.setPen(QPen(KaTheme::tokens().ink, 1));
         for (int row = 0; row < 2; ++row) {
             for (int i = 0; i < 4; ++i) {
                 const bool dark = ((i + row) % 2) == 0;
-                p.setBrush(dark ? QColor(68, 64, 60) : QColor(250, 250, 249));
+                p.setBrush(dark ? KaTheme::tokens().ink : KaTheme::tokens().bevelLight);
                 p.drawRect(QRectF(10 + i * 13, 12 + row * 8, 13, 8));
             }
         }
@@ -275,7 +276,7 @@ QWidget* KaSectionDrawingStudio::buildCenterPanel()
 
     m_view = new QgsLayoutView(container);
     m_view->setObjectName(QStringLiteral("sectionLayoutView"));
-    m_view->setBackgroundBrush(QBrush(QColor(229, 231, 235)));
+    m_view->setBackgroundBrush(QBrush(KaTheme::tokens().desk));
     vl->addWidget(m_view, 1);
 
     m_toolSelect = new QgsLayoutViewToolSelect(m_view);
@@ -587,7 +588,7 @@ void KaSectionDrawingStudio::attachLayoutToView()
     if (m_toolSelect)
         m_view->setTool(m_toolSelect);
 
-    m_view->setBackgroundBrush(QBrush(QColor(229, 231, 235)));
+    m_view->setBackgroundBrush(QBrush(KaTheme::tokens().desk));
     fitPaperInView();
 }
 

@@ -4,7 +4,10 @@
 #include <QImage>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFontDatabase>
+#include <QFontMetrics>
 #include <QSettings>
+#include <QSpinBox>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QTabWidget>
@@ -24,6 +27,11 @@
 #include "app/MainWindow.h"
 #include "app/KaCaptureMapTool.h"
 #include "app/KaAttributeMapTool.h"
+#include "app/KaFeatureSelectTool.h"
+#include "app/KaVertexEditTool.h"
+#include "app/KaDrawingStudio.h"
+#include "app/KaTheme.h"
+#include "app/KaRegionLocator.h"
 #include "core/LayerOps.h"
 #include "core/RecentSurveys.h"
 #include "core/SurveyProjectFactory.h"
@@ -32,10 +40,14 @@
 #include <qgsfeature.h>
 #include <qgsexception.h>
 #include <qgsgeometry.h>
+#include <qgscoordinatetransform.h>
 #include <qgslayertree.h>
 #include <qgslayertreemodel.h>
 #include <qgslayertreeregistrybridge.h>
 #include <qgslayertreeview.h>
+#include <qgslayout.h>
+#include <qgslayoutitemmap.h>
+#include <qgslayoutview.h>
 #include <qgsmapcanvas.h>
 #include <qgsmaptopixel.h>
 #include <qgsmessagebar.h>
@@ -136,7 +148,7 @@ private:
     LayerMenuState state;
     QTimer inspect;
     inspect.setSingleShot(true);
-    connect(&inspect, &QTimer::timeout, &window, [&state, triggerId] {
+    connect(&inspect, &QTimer::timeout, &window, [&window, &state, triggerId] {
       auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget());
       if (!menu) return;
       state.seen = true;
@@ -144,6 +156,10 @@ private:
       for (const auto* action : menu->actions())
         state.actions.append({action->objectName(), action->text(), action->toolTip(),
                               action->isEnabled(), action->isSeparator()});
+      const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+      const QString sample = window.property("qaMenuKind").toString();
+      if (!output.isEmpty() && !sample.isEmpty())
+        menu->grab().save(QDir(output).filePath(QStringLiteral("menu-%1.png").arg(sample)));
       if (!triggerId.isEmpty()) {
         for (auto* action : menu->actions()) {
           if (action->objectName() == triggerId && action->isEnabled()) {
@@ -241,19 +257,111 @@ private:
   }
 private slots:
   void cleanup() { QgsProject::instance()->clear(); }
+  void provinceChipMovesMapWithoutLoadingLayers_data() {
+    QTest::addColumn<QString>("crs");
+    for (const QString& crs : {QStringLiteral("EPSG:5186"), QStringLiteral("EPSG:5187")})
+      QTest::newRow(qPrintable(crs)) << crs;
+  }
+  void provinceChipMovesMapWithoutLoadingLayers() {
+    QFETCH(QString, crs);
+    MainWindow window;
+    disableRendering(window);
+    window.resize(1800, 1000);
+    window.show();
+    auto* canvas = window.findChild<QgsMapCanvas*>();
+    auto* locator = window.findChild<KaRegionLocator*>();
+    QVERIFY(canvas && locator);
+    QVERIFY(QMetaObject::invokeMethod(&window, crs.endsWith('6') ? "setWorkCrs5186" : "setWorkCrs5187", Qt::DirectConnection));
+    const auto layerIds = QgsProject::instance()->mapLayers().keys();
+    const QgsCoordinateTransform transform(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:4326")),
+                                           QgsCoordinateReferenceSystem(crs), QgsProject::instance());
+    struct Visit { const char* chip; double lon; double lat; };
+    for (const Visit& visit : {Visit{"서울", 126.978, 37.5665}, Visit{"울산", 129.3114, 35.5396},
+                              Visit{"제주", 126.531, 33.4996}}) {
+      QToolButton* chip = nullptr;
+      for (auto* button : locator->findChildren<QToolButton*>())
+        if (button->text() == QString::fromUtf8(visit.chip)) chip = button;
+      QVERIFY(chip);
+      chip->click();
+      QCoreApplication::processEvents();
+      QCOMPARE(canvas->mapSettings().destinationCrs().authid(), crs);
+      QCOMPARE(QgsProject::instance()->crs().authid(), crs);
+      const QgsPointXY expected = transform.transform(QgsPointXY(visit.lon, visit.lat));
+      QVERIFY2(canvas->extent().contains(expected), qPrintable(QStringLiteral("%1 is outside %2").arg(chip->text(), canvas->extent().toString())));
+      QVERIFY(canvas->extent().width() > 10000.);
+      QCOMPARE(QgsProject::instance()->mapLayers().keys(), layerIds);
+      QVERIFY(!locator->findChild<QPushButton*>(QStringLiteral("regionFieldMap")));
+    }
+    QgsProject::instance()->setDirty(false);
+  }
+  void drawingStudio_largeScaleChipsApplyToMapAndInput() {
+    QgsProject project;
+    project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
+    QgsMapCanvas canvas;
+    canvas.setRenderFlag(false);
+    canvas.setDestinationCrs(project.crs());
+    canvas.setExtent(QgsRectangle(190000, 560000, 191000, 561000));
+    KaDrawingStudio studio(&project, &canvas, 297.0, 210.0);
+    studio.setAttribute(Qt::WA_DontShowOnScreen);
+    auto* view = studio.findChild<QgsLayoutView*>();
+    QVERIFY(view && view->currentLayout());
+    view->setUpdatesEnabled(false);
+    studio.show();
+    // Complete the studio's queued initial map placement before selecting a scale.
+    QCoreApplication::processEvents();
+    auto* map = dynamic_cast<QgsLayoutItemMap*>(view->currentLayout()->itemById(QStringLiteral("ka_map")));
+    QVERIFY(map);
+    QCOMPARE(map->crs().authid(), QStringLiteral("EPSG:5187"));
+    auto* spin = studio.findChild<QSpinBox*>(QStringLiteral("drawingScale"));
+    QVERIFY(spin);
+    const QFontMetrics font(spin->font());
+    QVERIFY(font.inFont(QChar(u'1')));
+    QVERIFY(font.inFont(QChar(u'한')));
+    auto* input = spin->findChild<QLineEdit*>();
+    QVERIFY(input);
+    const auto chips = studio.findChildren<QToolButton*>(QStringLiteral("scaleChip"));
+    // Exercise both new choices and a return to an existing choice through the
+    // actual clicked signal; setting the spinbox directly would miss bad wiring.
+    for (const int denominator : {10000, 25000, 5000}) {
+      QToolButton* target = nullptr;
+      int matches = 0;
+      for (QToolButton* chip : chips) {
+        if (chip->property("denom").toInt() == denominator) {
+          target = chip;
+          ++matches;
+        }
+      }
+      QCOMPARE(matches, 1);
+      QVERIFY(target && target->isEnabled());
+      target->click();
+      QCOMPARE(spin->value(), denominator);
+      QCOMPARE(input->text(), QString::number(denominator));
+      for (QToolButton* chip : chips)
+        QCOMPARE(chip->isChecked(), chip->property("denom").toInt() == denominator);
+      QVERIFY2(qAbs(map->scale() - denominator) < 0.5,
+               qPrintable(QStringLiteral("chip 1:%1 applied map scale %2")
+                              .arg(denominator).arg(map->scale(), 0, 'f', 3)));
+    }
+    const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+    if (!output.isEmpty() && QDir(output).exists()) {
+      const QString path = QDir(output).filePath(QStringLiteral("drawing-scale-chips-widget-render.png"));
+      QVERIFY2(spin->parentWidget()->grab().save(path), qPrintable(path));
+      qInfo().noquote() << "Automatic Qt widget render; not a portable field screenshot:" << path;
+    }
+  }
   void layerContextMenu_matchesLayerKind_data() {
     QTest::addColumn<QString>("kind");
     QTest::addColumn<QString>("firstAction");
-    QTest::newRow("survey-area") << QStringLiteral("survey_area") << QStringLiteral("layer.zoom");
-    QTest::newRow("feature-polygon") << QStringLiteral("feature_poly") << QStringLiteral("layer.draw");
-    QTest::newRow("control-points") << QStringLiteral("control_points") << QStringLiteral("layer.controlsAdd");
-    QTest::newRow("section-line") << QStringLiteral("section_line") << QStringLiteral("layer.sectionStudio");
-    QTest::newRow("trial-trench") << QStringLiteral("trial_trench") << QStringLiteral("layer.trenchConfigure");
-    QTest::newRow("satellite-xyz") << QStringLiteral("satellite") << QStringLiteral("layer.visible");
-    QTest::newRow("cadastral-wms") << QStringLiteral("cadastral") << QStringLiteral("layer.visible");
-    QTest::newRow("dem-raster") << QStringLiteral("dem") << QStringLiteral("layer.visible");
-    QTest::newRow("external-shapefile") << QStringLiteral("external_shp") << QStringLiteral("layer.zoom");
-    QTest::newRow("imported-reference-raster") << QStringLiteral("imported_raster") << QStringLiteral("layer.zoom");
+    QTest::newRow("survey-area") << QStringLiteral("survey_area") << QStringLiteral("layer.import");
+    QTest::newRow("feature-polygon") << QStringLiteral("feature_poly") << QStringLiteral("layer.import");
+    QTest::newRow("control-points") << QStringLiteral("control_points") << QStringLiteral("layer.import");
+    QTest::newRow("section-line") << QStringLiteral("section_line") << QStringLiteral("layer.import");
+    QTest::newRow("trial-trench") << QStringLiteral("trial_trench") << QStringLiteral("layer.import");
+    QTest::newRow("satellite-xyz") << QStringLiteral("satellite") << QStringLiteral("layer.import");
+    QTest::newRow("cadastral-wms") << QStringLiteral("cadastral") << QStringLiteral("layer.import");
+    QTest::newRow("dem-raster") << QStringLiteral("dem") << QStringLiteral("layer.import");
+    QTest::newRow("external-shapefile") << QStringLiteral("external_shp") << QStringLiteral("layer.import");
+    QTest::newRow("imported-reference-raster") << QStringLiteral("imported_raster") << QStringLiteral("layer.import");
   }
   void layerContextMenu_matchesLayerKind() {
     QFETCH(QString, kind);
@@ -263,6 +371,7 @@ private slots:
         m_files.path(), QStringLiteral("menu_%1").arg(kind), &error, QStringLiteral("EPSG:5187"));
     QVERIFY2(!path.isEmpty(), qPrintable(error));
     MainWindow window;
+    window.setProperty("qaMenuKind", kind);
     disableRendering(window);
     QVERIFY(window.openSurveyGpkg(path));
     disableRendering(window);
@@ -306,7 +415,7 @@ private slots:
         QVERIFY2(action.toolTip != action.text, qPrintable(action.id));
       }
     }
-    QVERIFY(ids.size() <= 10);
+    // Common positions are intentional: the user requested the earlier shared menu.
     QCOMPARE(ids.first(), firstAction);
     QCOMPARE(ids.last(), QStringLiteral("layer.remove"));
     int destructiveStart = menu.actions.size() - 1;
@@ -317,27 +426,13 @@ private slots:
     }
     QVERIFY(destructiveStart > 0);
     QVERIFY(menu.actions.at(destructiveStart - 1).separator);
-    if (domain) {
-      QVERIFY(!ids.contains(QStringLiteral("layer.opacity")));
-      QVERIFY(!ids.contains(QStringLiteral("layer.offline")));
-      QVERIFY(!ids.contains(QStringLiteral("layer.align")));
-    } else {
-      QVERIFY(!ids.contains(QStringLiteral("layer.clear")));
-      if (kind != QLatin1String("external_shp")) {
-        for (const QString& forbidden : {QStringLiteral("layer.draw"), QStringLiteral("layer.vertices"),
-             QStringLiteral("layer.attributes"), QStringLiteral("layer.export")})
-          QVERIFY2(!ids.contains(forbidden), qPrintable(forbidden));
-      }
-    }
-    if (kind != QLatin1String("survey_area")) QVERIFY(!ids.contains(QStringLiteral("layer.trenchCreate")));
-    if (kind != QLatin1String("control_points")) QVERIFY(!ids.contains(QStringLiteral("layer.controlsImport")));
-    if (kind != QLatin1String("section_line")) QVERIFY(!ids.contains(QStringLiteral("layer.sectionStudio")));
-    if (kind != QLatin1String("trial_trench")) QVERIFY(!ids.contains(QStringLiteral("layer.trenchConfigure")));
-    if (kind != QLatin1String("satellite")) QVERIFY(!ids.contains(QStringLiteral("layer.offline")));
-    if (kind == QLatin1String("imported_raster")) QVERIFY(ids.contains(QStringLiteral("layer.align")));
-    if (kind == QLatin1String("dem")) QVERIFY(!ids.contains(QStringLiteral("layer.align")));
+    for (const QString& common : {QStringLiteral("layer.import"), QStringLiteral("layer.rename"),
+        QStringLiteral("layer.style"), QStringLiteral("layer.attributes"), QStringLiteral("layer.labels"),
+        QStringLiteral("layer.opacity"), QStringLiteral("layer.zoom"), QStringLiteral("layer.fullExtent")})
+      QVERIFY2(ids.contains(common), qPrintable(common));
+    if (!domain) QVERIFY(!ids.contains(QStringLiteral("layer.clear")));
     if (auto* vector = qobject_cast<QgsVectorLayer*>(layer)) {
-      // A live edit buffer must never be silently discarded by list removal.
+      // Removal keeps the live layer and edit buffer in undo history.
       QVERIFY(vector->startEditing());
       QgsFeature extra = vector->getFeature(*vector->allFeatureIds().constBegin());
       extra.setId(FID_NULL);
@@ -349,7 +444,7 @@ private slots:
       for (const auto& action : dirtyMenu.actions) {
         if (action.id != QLatin1String("layer.remove")) continue;
         removeFound = true;
-        QVERIFY(!action.enabled);
+        QVERIFY(action.enabled);
         QVERIFY(!action.toolTip.trimmed().isEmpty());
         QVERIFY(action.toolTip != action.text);
       }
@@ -357,6 +452,164 @@ private slots:
       QVERIFY(vector->rollBack());
     }
   }
+  void changingLabelFontKeepsEveryLayerAndItsVisibility() {
+    const QString path = makeSurvey(QStringLiteral("글자 크기 검증"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    auto* project = QgsProject::instance();
+    auto* layer = LayerOps::findByLayerKey(project, QStringLiteral("survey_area"));
+    auto* tree = window.findChild<QgsLayerTreeView*>(QStringLiteral("layerTree"));
+    auto* canvas = window.findChild<QgsMapCanvas*>();
+    QVERIFY(layer && tree && canvas);
+    const auto ids = project->mapLayers().keys();
+    QMap<QString, bool> visibility;
+    for (auto* node : project->layerTreeRoot()->findLayers()) visibility[node->layerId()] = node->itemVisibilityChecked();
+    window.resize(1800, 1000);
+    window.show();
+    tree->expandAll();
+    tree->setCurrentLayer(layer);
+    canvas->setExtent(QgsRectangle(189980, 559980, 190130, 560130));
+    QSignalSpy rendered(canvas, &QgsMapCanvas::mapCanvasRefreshed);
+    canvas->setRenderFlag(true);
+    canvas->refresh();
+    QTRY_VERIFY_WITH_TIMEOUT(!rendered.isEmpty(), 15000);
+    const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+    if (!output.isEmpty()) QVERIFY(window.grab().save(QDir(output).filePath(QStringLiteral("map-before-font.png"))));
+    bool changed = false;
+    QTimer::singleShot(0, &window, [&]() {
+      auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget());
+      if (!menu) return;
+      auto* sizeAction = menu->findChild<QAction*>(QStringLiteral("layer.labelSize"));
+      auto* sizes = sizeAction ? sizeAction->menu() : nullptr;
+      if (sizes) {
+        for (auto* action : sizes->actions()) if (action->text() == QLatin1String("12 pt")) {
+          action->trigger(); changed = true; break;
+        }
+      }
+      menu->close();
+    });
+    const QModelIndex index = tree->layerTreeModel()->node2index(project->layerTreeRoot()->findLayer(layer));
+    window.showLayerTreeContextMenu(tree, tree->visualRect(index).center());
+    QVERIFY(changed);
+    QCOMPARE(LayerOps::labelFontSize(layer), 12.0);
+    rendered.clear(); canvas->refresh();
+    QTRY_VERIFY_WITH_TIMEOUT(!rendered.isEmpty(), 15000);
+    QCOMPARE(project->mapLayers().keys(), ids);
+    for (auto it = visibility.cbegin(); it != visibility.cend(); ++it) {
+      auto* node = project->layerTreeRoot()->findLayer(it.key());
+      QVERIFY(node);
+      QCOMPARE(node->itemVisibilityChecked(), it.value());
+    }
+    if (!output.isEmpty()) QVERIFY(window.grab().save(QDir(output).filePath(QStringLiteral("map-after-font.png"))));
+    canvas->setRenderFlag(false);
+  }
+
+  void layerDeleteKeyPreservesSourceAndUndoRestoresPendingEdits() {
+    const QString path = makeSurvey(QStringLiteral("delete_key_undo"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    disableRendering(window);
+    auto* tree = window.findChild<QgsLayerTreeView*>(QStringLiteral("layerTree"));
+    auto* project = QgsProject::instance();
+    auto* layer = LayerOps::findByLayerKey(project, QStringLiteral("survey_area"));
+    QVERIFY(tree && layer);
+    const QString id = layer->id();
+    QVERIFY(layer->startEditing());
+    const auto ids = layer->allFeatureIds();
+    const QgsFeatureId fid = *ids.constBegin();
+    const int field = layer->fields().indexOf(QStringLiteral("survey_name"));
+    QVERIFY(layer->changeAttributeValue(fid, field, QStringLiteral("저장 전 기록")));
+    window.show();
+    QApplication::setActiveWindow(&window);
+    tree->setCurrentLayer(layer);
+    tree->setFocus();
+    QApplication::processEvents();
+    const QByteArray original = contents(path);
+    QTest::keyClick(tree, Qt::Key_Delete);
+    QVERIFY(!project->mapLayer(id));
+    QCOMPARE(contents(path), original);
+    QTest::keyClick(tree, Qt::Key_Z, Qt::ControlModifier);
+    QCOMPARE(project->mapLayer(id), layer);
+    QVERIFY(project->layerTreeRoot()->findLayer(id));
+    QVERIFY(layer->isModified());
+    QCOMPARE(layer->getFeature(fid).attribute(field).toString(), QStringLiteral("저장 전 기록"));
+    QCOMPARE(contents(path), original);
+    QVERIFY(layer->rollBack());
+  }
+
+  void ctrlZRestoresVertexEditsAndGroupedFeatureDeletion() {
+    const QString path = makeSurvey(QStringLiteral("vertex_undo"));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    disableRendering(window);
+    auto* layer = LayerOps::findByLayerKey(QgsProject::instance(), QStringLiteral("survey_area"));
+    auto* canvas = window.findChild<QgsMapCanvas*>();
+    QVERIFY(layer && canvas);
+    const auto ids = layer->allFeatureIds();
+    const QgsFeatureId fid = *ids.constBegin();
+    const QgsGeometry original = layer->getFeature(fid).geometry();
+    QVERIFY(QMetaObject::invokeMethod(&window, "startSelectTool", Qt::DirectConnection));
+    auto* select = window.findChild<KaFeatureSelectTool*>();
+    auto* vertex = select ? select->findChild<KaVertexEditTool*>() : nullptr;
+    QVERIFY(vertex);
+    window.show();
+    QApplication::setActiveWindow(&window);
+    canvas->setFocus();
+    QApplication::processEvents();
+    vertex->setTarget(layer, fid);
+    QVERIFY(vertex->moveVertexTo(0, QgsPointXY(190020, 560020)));
+    QVERIFY(!layer->getFeature(fid).geometry().equals(original));
+    QTest::keyClick(canvas, Qt::Key_Z, Qt::ControlModifier);
+    QVERIFY(layer->getFeature(fid).geometry().equals(original));
+    vertex->setTarget(layer, fid);
+    QVERIFY(vertex->insertVertexAt(1, QgsPointXY(190040, 560000)));
+    QTest::keyClick(canvas, Qt::Key_Z, Qt::ControlModifier);
+    QVERIFY(layer->getFeature(fid).geometry().equals(original));
+    vertex->setTarget(layer, fid);
+    QVERIFY(vertex->deleteVertexAt(1));
+    QTest::keyClick(canvas, Qt::Key_Z, Qt::ControlModifier);
+    QVERIFY(layer->getFeature(fid).geometry().equals(original));
+    if (!layer->isEditable()) QVERIFY(layer->startEditing());
+    QgsFeature second(layer->fields());
+    second.setGeometry(QgsGeometry::fromRect(QgsRectangle(190200, 560000, 190250, 560050)));
+    QVERIFY(layer->addFeature(second));
+    QVERIFY(layer->commitChanges());
+    layer->selectAll();
+    canvas->setLayers({layer});
+    QTest::keyClick(canvas, Qt::Key_Delete);
+    QCOMPARE(layer->featureCount(), 0);
+    QTest::keyClick(canvas, Qt::Key_Z, Qt::ControlModifier);
+    QCOMPARE(layer->featureCount(), 2);
+    QTest::keyClick(canvas, Qt::Key_Z, Qt::ControlModifier);
+    QCOMPARE(layer->featureCount(), 2); // no duplicated fallback history
+    // Restoring a deletion into a dirty edit buffer creates a temporary FID.
+    // Saving must remap the earlier geometry command to the committed FID.
+    const auto restoredIds = layer->allFeatureIds();
+    const auto editedId = *restoredIds.constBegin();
+    const auto previous = layer->getFeature(editedId).geometry();
+    if (!layer->isEditable()) QVERIFY(layer->startEditing());
+    const int nameField = layer->fields().indexOf(QStringLiteral("survey_name"));
+    QVERIFY(layer->changeAttributeValue(editedId, nameField, QStringLiteral("미저장 기록")));
+    vertex->setTarget(layer, editedId);
+    QVERIFY(vertex->moveVertexTo(0, QgsPointXY(190025, 560025)));
+    layer->selectByIds({editedId});
+    QTest::keyClick(canvas, Qt::Key_Delete);
+    QTest::keyClick(canvas, Qt::Key_Z, Qt::ControlModifier);
+    QVERIFY(saveNow(window));
+    QTest::keyClick(canvas, Qt::Key_Z, Qt::ControlModifier);
+    bool previousFound = false;
+    QgsFeature restored;
+    auto iterator = layer->getFeatures();
+    while (iterator.nextFeature(restored)) previousFound |= restored.geometry().equals(previous);
+    QVERIFY(previousFound);
+  }
+
   void layerContextMenu_usesClickedRowAndLeavesSourceIntact() {
     const QString path = makeSurvey(QStringLiteral("menu_target"));
     QVERIFY(!path.isEmpty());
@@ -1380,6 +1633,19 @@ int main(int argc, char** argv) {
   CPLSetConfigOption("GDAL_HTTP_PROXY", "127.0.0.1:1");
   CPLSetConfigOption("GDAL_HTTP_TIMEOUT", "1");
   QgsApplication app(argc, argv, true);
+#ifdef Q_OS_WIN
+  if (QGuiApplication::platformName() == QLatin1String("offscreen")) {
+    // Match the installed field font: offscreen Qt does not discover it itself.
+    const QDir windows(qEnvironmentVariable("WINDIR"));
+    for (const QString& file : {QStringLiteral("malgun.ttf"), QStringLiteral("malgunbd.ttf")}) {
+      const QString path = windows.filePath(QStringLiteral("Fonts/") + file);
+      if (QFontDatabase::addApplicationFont(path) < 0) {
+        qCritical().noquote() << "Could not load the installed QA font:" << path;
+        return 1;
+      }
+    }
+  }
+#endif
   QTemporaryDir settings;
   const QString capabilitiesPath = settings.filePath(QStringLiteral("cadastral-capabilities.xml"));
   const QString mapPath = settings.filePath(QStringLiteral("white-map.png"));
@@ -1417,6 +1683,7 @@ int main(int argc, char** argv) {
   });
   QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settings.path());
   s_testSettingsPath = settings.path();
+  KaTheme::apply(&app);
   TestSaveOpen tests;
   const int result = QTest::qExec(&tests, argc, argv);
   QgsApplication::exitQgis();

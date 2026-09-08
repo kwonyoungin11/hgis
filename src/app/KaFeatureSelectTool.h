@@ -4,6 +4,7 @@
 #include <qgsmapmouseevent.h>
 #include <qgspointxy.h>
 #include <qgsfeatureid.h>
+#include <qgsfeature.h>
 
 #include <QPointer>
 #include <QList>
@@ -35,10 +36,13 @@ public:
 
   // 자석은 꼭짓점을 끌 때도 그대로 걸린다.
   void setSnapEnabled(bool on);
+  // Update editing handles after an external Undo restores the feature geometry.
+  void refreshSelectedGeometry();
 
 signals:
   void selectionChanged(int totalSelected);
   void statusMessage(const QString& msg);
+  void featureGeometryEdited(QgsVectorLayer* layer, const QgsFeature& before);
   void requestMerge();
   void requestSplit();
   void requestClip();
