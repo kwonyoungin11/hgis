@@ -6,7 +6,7 @@ $receiptPath = Join-Path $releaseRoot 'build/release-verified.json'
 $releaseExe = Join-Path $releaseRoot 'build/Release/ka-hgis.exe'
 
 function Get-ReleaseFingerprint {
-  $paths = @(& git -C $releaseRoot -c core.quotepath=false ls-files --cached --others --exclude-standard -- src tests data cmake scripts CMakeLists.txt CMakePresets.json)
+  $paths = @(& git -C $releaseRoot -c core.quotepath=false ls-files --cached --others --exclude-standard -- src tests data cmake scripts launch.ps1 CMakeLists.txt CMakePresets.json)
   if ($LASTEXITCODE -ne 0 -or $paths.Count -eq 0) { throw 'Cannot enumerate release inputs.' }
   $lines = foreach ($path in ($paths | Sort-Object -Unique)) {
     $absolute = Join-Path $releaseRoot $path
@@ -63,7 +63,7 @@ try {
     ctestPassed = $true
     smokePassed = $true
   } | ConvertTo-Json | Set-Content -LiteralPath $receiptPath -Encoding UTF8
-  Write-Host 'Release verified. scripts/publish-desktop.ps1 can now publish this exact build.'
+  Write-Host 'Release verified for the desktop shortcut. Portable output was not changed.'
 } finally {
   $env:QT_QPA_PLATFORM = $oldPlatform
   Pop-Location

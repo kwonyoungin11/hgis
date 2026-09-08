@@ -13,11 +13,81 @@
 #include <qgssinglesymbolrenderer.h>
 #include <qgsfillsymbol.h>
 #include <qgscoordinatetransform.h>
+#include <qgsvectorlayerlabeling.h>
+#include <qgspallabeling.h>
+#include <qgsexpression.h>
+#include <qgsexpressioncontext.h>
 #include "core/LayerOps.h"
 
 class LayerStateTest : public QObject {
   Q_OBJECT
 private slots:
+  void newSurveyPolygonShowsAreaByDefault() {
+    QgsVectorLayer layer(QStringLiteral("Polygon?crs=EPSG:5186&field=survey_name:string"),
+                         QStringLiteral("조사구역"), QStringLiteral("memory"));
+    LayerOps::markSurveyLayer(&layer, QStringLiteral("survey_area"));
+    QVERIFY(LayerOps::applyDomainDrawStyle(&layer));
+    QVERIFY(layer.labelsEnabled());
+    QVERIFY(LayerOps::labelShowArea(&layer));
+    QgsFeature feature(layer.fields());
+    feature.setGeometry(QgsGeometry::fromRect(QgsRectangle(190000, 450000, 190020, 450010)));
+    QgsExpressionContext context;
+    context.setFeature(feature);
+    QgsExpression expression(layer.labeling()->settings().fieldName);
+    const QString text = expression.evaluate(&context).toString();
+    QVERIFY2(text.contains(QStringLiteral("200")) && text.contains(QStringLiteral("㎡")), qPrintable(text));
+  }
+
+  void drawingUpdatesPreserveLabelPreferences_data() {
+    QTest::addColumn<bool>("areaOn");
+    QTest::addColumn<bool>("visible");
+    QTest::newRow("area-visible") << true << true;
+    QTest::newRow("name-visible") << false << true;
+    QTest::newRow("area-hidden") << true << false;
+    QTest::newRow("name-hidden") << false << false;
+  }
+  void drawingUpdatesPreserveLabelPreferences() {
+    QFETCH(bool, areaOn); QFETCH(bool, visible);
+    QgsVectorLayer layer(QStringLiteral("Polygon?crs=EPSG:5187&field=survey_name:string"),
+                         QStringLiteral("조사구역"), QStringLiteral("memory"));
+    LayerOps::markSurveyLayer(&layer, QStringLiteral("survey_area"));
+    QVERIFY(LayerOps::applyNameAttributeLabels(&layer, QStringLiteral("survey_name"), 12., areaOn));
+    layer.setLabelsEnabled(visible);
+    const auto before = layer.labeling()->settings();
+    QVERIFY(LayerOps::setLabelFontSize(&layer, 14.));
+    QCOMPARE(layer.labeling()->settings().fieldName, before.fieldName);
+    QCOMPARE(layer.labeling()->settings().format().color(), before.format().color());
+    QCOMPARE(layer.labelsEnabled(), visible);
+    // These are the existing new-feature/attribute-save/vertex-move paths.
+    QVERIFY(LayerOps::applyDomainDrawStyle(&layer));
+    QVERIFY(LayerOps::applyAreaM2Labels(&layer));
+    QCOMPARE(layer.labeling()->settings().fieldName, before.fieldName);
+    QCOMPARE(LayerOps::labelFontSize(&layer), 14.);
+    QCOMPARE(LayerOps::labelShowArea(&layer), areaOn);
+    QCOMPARE(layer.labelsEnabled(), visible);
+  }
+
+  void legacyAreaExpressionMatchesItsCheckbox() {
+    QgsVectorLayer layer(QStringLiteral("Polygon?crs=EPSG:5186"), QStringLiteral("구역"), QStringLiteral("memory"));
+    QVERIFY(LayerOps::applyAreaM2Labels(&layer));
+    // Older drawing code left this flag behind after enabling the area expression.
+    layer.setCustomProperty(QStringLiteral("ka_hgis/label_show_area"), false);
+    QVERIFY(LayerOps::labelShowArea(&layer));
+  }
+
+  void polygonWithoutNameCanTurnAreaOff() {
+    QgsVectorLayer layer(QStringLiteral("Polygon?crs=EPSG:5187"), QStringLiteral("구역"), QStringLiteral("memory"));
+    QVERIFY(LayerOps::applyAreaM2Labels(&layer));
+    QVERIFY(LayerOps::applyNameAttributeLabels(&layer, {}, 12., false));
+    QgsFeature feature(layer.fields());
+    feature.setGeometry(QgsGeometry::fromRect(QgsRectangle(190000, 450000, 190020, 450010)));
+    QgsExpressionContext context;
+    context.setFeature(feature);
+    QgsExpression expression(layer.labeling()->settings().fieldName);
+    QCOMPARE(expression.evaluate(&context).toString(), QString());
+    QVERIFY(!LayerOps::labelShowArea(&layer));
+  }
+
   void zoomKeepsTheWholeLayer_data() {
     QTest::addColumn<QString>("crs");
     QTest::addColumn<QgsRectangle>("bounds");

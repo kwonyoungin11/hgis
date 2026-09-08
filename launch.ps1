@@ -24,13 +24,12 @@ if ($env:KA_HGIS_DETACHED -ne "1") {
 
 try {
   . "$here\scripts\dev-env.ps1"
-  $candidates = @(
-    (Join-Path $here "build\Release\ka-hgis.exe"),
-    (Join-Path $here "build\ka-hgis.exe"),
-    (Join-Path $here "dist\ka-hgis-portable\ka-hgis.exe")
-  )
-  $exe = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-  if (-not $exe) { throw "ka-hgis.exe 없음. Release 빌드가 필요합니다." }
+  # The desktop shortcut always runs the local Release build. Portable output
+  # is a separate, explicitly requested deliverable, never a silent fallback.
+  $exe = Join-Path $here "build\Release\ka-hgis.exe"
+  if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+    throw "실행 파일이 없습니다. Release 빌드를 완료한 뒤 바탕 화면 아이콘을 다시 눌러 주세요."
+  }
 
   $work = Split-Path $exe
   Write-LaunchLog "start exe=$exe cwd=$work OSGEO=$($env:OSGEO4W_ROOT)"

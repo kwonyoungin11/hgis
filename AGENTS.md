@@ -114,7 +114,7 @@ Use PowerShell on this machine:
 ```powershell
 $env:PATH = "C:\Program Files\CMake\bin;" + $env:PATH
 . .\scripts\dev-env.ps1
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DOSGEO4W_ROOT=$env:OSGEO4W_ROOT -DKA_HGIS_BUILD_TESTS=ON
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 "-DOSGEO4W_ROOT=$env:OSGEO4W_ROOT" -DKA_HGIS_BUILD_TESTS=ON
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
@@ -123,10 +123,11 @@ For startup, UI, menu, map, or project-open changes, also run:
 
 ```powershell
 .\scripts\run-ka-hgis.ps1 --smoke-quit
-.\scripts\publish-desktop.ps1
 ```
 
-After UI/map C++ changes, the field check is the desktop **고고학 전용 HGIS** portable path (`dist\ka-hgis-portable`), not only `build\Release`.
+The user's normal entry point is the desktop **고고학 전용 HGIS** shortcut: `scripts/start-ka-hgis.vbs` -> `launch.ps1` -> `build/Release/ka-hgis.exe`. Keep that icon connected to the current Release build. Do not silently fall back to an older executable. Verify this launch chain for UI/map changes; do not close, restart, or operate the user's running app without a request.
+
+Portable creation, `scripts/publish-desktop.ps1`, and copying to `dist/ka-hgis-portable` or L: are separate delivery actions. Run them **only when the user explicitly requests portable output**, never automatically as a verification step. This is the user's latest workflow requirement and supersedes historical portable-check instructions.
 
 Docs/settings/hooks/rules-only changes do not require CMake, ctest, smoke, or publish unless they modify C++ build behavior. Validate those changes with file reads, diff review, and targeted text checks.
 

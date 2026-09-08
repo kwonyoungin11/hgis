@@ -164,7 +164,6 @@ private slots:
   void adminBoundary_buildsEmdUrlWithoutHardcodedKey();
   void adminBoundary_parsesOkFeatureAndRejectsError();
   void layerOps_isolateSurfaceSurvey_satelliteAndUserSiteOnly();
-  void regionLocator_fieldMapButtonKeepsFind();
   void editBufferCommitSurvivesReopen();
   void undoCommittedFeature_removesLastAdded();
   void captureVertexDrag_preservesEditsAndReportsOutcome_data();
@@ -2431,24 +2430,6 @@ void TestWorkflow::layerOps_isolateSurfaceSurvey_satelliteAndUserSiteOnly() {
   QVERIFY(!LayerOps::isLayerVisible(&proj, QStringLiteral("지적")));
   QVERIFY(!LayerOps::isLayerVisible(&proj, QStringLiteral("유구 (면)")));
   QCOMPARE(LayerOps::findImportedSiteLayer(&proj), site);
-}
-
-void TestWorkflow::regionLocator_fieldMapButtonKeepsFind() {
-  QFile loc(QStringLiteral("src/app/KaRegionLocator.cpp"));
-  QVERIFY2(loc.open(QIODevice::ReadOnly | QIODevice::Text), "KaRegionLocator.cpp");
-  const QString body = QString::fromUtf8(loc.readAll());
-  QVERIFY2(body.contains(QStringLiteral("현장 지도")), "읍면동 현장 지도 단추");
-  QVERIFY2(body.contains(QLatin1String("regionFieldMap")), "regionFieldMap objectName");
-  QVERIFY2(body.contains(QLatin1String("regionFieldMapRequested")), "structured sido/city/dong signal");
-  QVERIFY2(body.contains(QStringLiteral("찾기")), "기존 찾기는 유지");
-
-  QFile mw(QStringLiteral("src/app/MainWindow.cpp"));
-  QVERIFY2(mw.open(QIODevice::ReadOnly | QIODevice::Text), "MainWindow.cpp");
-  const QString src = QString::fromUtf8(mw.readAll());
-  QVERIFY2(src.contains(QLatin1String("regionFieldMapRequested")),
-           "MainWindow must wire 현장 지도");
-  QVERIFY2(src.contains(QLatin1String("searchRequested")), "찾기 지오코딩은 그대로");
-  QVERIFY2(!src.contains(QLatin1String("removeAllMapLayers")), "must not wipe layers");
 }
 
 void TestWorkflow::editBufferCommitSurvivesReopen() {

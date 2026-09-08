@@ -11,6 +11,7 @@
 #include <QStringConverter>
 #include <QRegularExpression>
 #include <cmath>
+#include <memory>
 #include <limits>
 #include <algorithm>
 #include <QPainter>
@@ -249,11 +250,14 @@ bool LayerOps::applyDomainDrawStyle(QgsVectorLayer* layer, const QString& layerK
   layer->setCustomProperty(QStringLiteral("ka_hgis/style_width_mm"), strokeW);
   layer->setCustomProperty(QStringLiteral("ka_hgis/style_marker_mm"), markerSize);
   layer->setRenderer(new QgsSingleSymbolRenderer(sym));
-  const QString detectedField = detectNameField(layer);
-  if (!detectedField.isEmpty())
-    applyNameAttributeLabels(layer, detectedField, 5.0, false);
-  else if (gt == Qgis::GeometryType::Polygon)
-    applyAreaM2Labels(layer);
+  // Drawing and attribute edits also call this function. Initialize labels
+  // only once so a later edit cannot reset size, content or visibility.
+  if (!layer->labeling()) {
+    if (gt == Qgis::GeometryType::Polygon)
+      applyAreaM2Labels(layer);
+    else if (const QString field = detectNameField(layer); !field.isEmpty())
+      applyNameAttributeLabels(layer, field, 5.0, false);
+  }
   layer->triggerRepaint();
   return true;
 }
@@ -493,7 +497,7 @@ bool LayerOps::applyNameAttributeLabels(QgsVectorLayer* layer, const QString& fi
     s.fieldName = QStringLiteral("format_number(area($geometry), 1) || ' ㎡'");
     s.isExpression = true;
   } else if (isPolygon) {
-    s.fieldName = QStringLiteral("format_number(area($geometry), 1) || ' ㎡'");
+    s.fieldName = QStringLiteral("''");
     s.isExpression = true;
   } else if (layer->fields().count() > 0) {
     s.fieldName = QStringLiteral("\"%1\"").arg(layer->fields().at(0).name());
@@ -538,6 +542,37 @@ bool LayerOps::applyNameAttributeLabels(QgsVectorLayer* layer, const QString& fi
   return true;
 }
 
+bool LayerOps::setLabelFontSize(QgsVectorLayer* layer, double fontSizePt) {
+  if (!layer || !layer->isValid() || !std::isfinite(fontSizePt) || fontSizePt <= 0.)
+    return false;
+  if (!layer->labeling()) {
+    const bool visible = layer->labelsEnabled();
+    const bool ok = applyNameAttributeLabels(layer, currentLabelField(layer), fontSizePt,
+                                             layer->geometryType() == Qgis::GeometryType::Polygon);
+    if (ok) layer->setLabelsEnabled(visible);
+    return ok;
+  }
+  // Keep expressions, rules, placement, color, buffers and visibility intact.
+  // In particular an area-only label must not become an empty name field.
+  std::unique_ptr<QgsAbstractVectorLayerLabeling> labeling(layer->labeling()->clone());
+  if (!labeling) return false;
+  for (const QString& provider : labeling->subProviders()) {
+    auto settings = std::make_unique<QgsPalLayerSettings>(labeling->settings(provider));
+    QgsTextFormat format = settings->format();
+    QFont font = format.font();
+    font.setPointSizeF(fontSizePt);
+    format.setFont(font);
+    format.setSize(fontSizePt);
+    format.setSizeUnit(Qgis::RenderUnit::Points);
+    settings->setFormat(format);
+    labeling->setSettings(settings.release(), provider); // QGIS takes ownership.
+  }
+  layer->setLabeling(labeling.release());
+  layer->setCustomProperty(QStringLiteral("ka_hgis/label_font_size"), fontSizePt);
+  layer->triggerRepaint();
+  return true;
+}
+
 double LayerOps::labelFontSize(const QgsVectorLayer* layer, double defaultSize) {
   if (!layer) return defaultSize;
   const QVariant v = layer->customProperty(QStringLiteral("ka_hgis/label_font_size"));
@@ -553,14 +588,16 @@ double LayerOps::labelFontSize(const QgsVectorLayer* layer, double defaultSize) 
 
 bool LayerOps::labelShowArea(const QgsVectorLayer* layer, bool defaultShow) {
   if (!layer) return defaultShow;
+  // Old drawing code enabled the expression but left an earlier false flag.
+  // The checkbox must reflect what the current labeling actually displays.
+  if (layer->labeling()) {
+    const auto settings = layer->labeling()->settings();
+    if (settings.isExpression && settings.fieldName.contains(QLatin1String("area($geometry)")))
+      return true;
+  }
   const QVariant v = layer->customProperty(QStringLiteral("ka_hgis/label_show_area"));
   if (v.isValid())
     return v.toBool();
-  if (layer->labeling()) {
-    const QString expr = layer->labeling()->settings().fieldName;
-    if (expr.contains(QLatin1String("area($geometry)")))
-      return true;
-  }
   return defaultShow;
 }
 
@@ -574,6 +611,9 @@ QString LayerOps::currentLabelField(const QgsVectorLayer* layer) {
 bool LayerOps::applyAreaM2Labels(QgsVectorLayer* layer) {
   if (!layer || !layer->isValid()) return false;
   if (layer->geometryType() != Qgis::GeometryType::Polygon) return false;
+  // Geometry expressions update themselves when a feature changes. Replacing
+  // existing labeling here would discard the user's menu choices on each edit.
+  if (layer->labeling()) return true;
 
   QgsPalLayerSettings s;
   s.drawLabels = true;
@@ -604,6 +644,8 @@ bool LayerOps::applyAreaM2Labels(QgsVectorLayer* layer) {
 
   layer->setLabeling(new QgsVectorLayerSimpleLabeling(s));
   layer->setLabelsEnabled(true);
+  layer->setCustomProperty(QStringLiteral("ka_hgis/label_show_area"), true);
+  layer->setCustomProperty(QStringLiteral("ka_hgis/label_font_size"), 5.0);
   layer->triggerRepaint();
   return true;
 }

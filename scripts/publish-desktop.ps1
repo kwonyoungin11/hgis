@@ -1,5 +1,5 @@
-# Copy Release ka-hgis.exe to the folder the desktop icon launches.
-# Icon: 고고학 전용 HGIS.lnk -> dist\ka-hgis-portable\start.bat -> ka-hgis.exe
+# Update an existing portable folder only when the user explicitly requests it.
+# The desktop icon uses scripts/start-ka-hgis.vbs -> launch.ps1 -> build/Release.
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $src = Join-Path $root "build\Release\ka-hgis.exe"

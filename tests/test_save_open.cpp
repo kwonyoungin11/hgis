@@ -60,6 +60,8 @@
 #include <qgsvectorlayer.h>
 #include <qgsvectordataprovider.h>
 #include <qgsvectorfilewriter.h>
+#include <qgsvectorlayerlabeling.h>
+#include <qgspallabeling.h>
 
 static QString s_testSettingsPath;
 
@@ -463,6 +465,8 @@ private slots:
     auto* tree = window.findChild<QgsLayerTreeView*>(QStringLiteral("layerTree"));
     auto* canvas = window.findChild<QgsMapCanvas*>();
     QVERIFY(layer && tree && canvas);
+    QVERIFY(LayerOps::applyAreaM2Labels(layer));
+    const QString areaExpression = layer->labeling()->settings().fieldName;
     const auto ids = project->mapLayers().keys();
     QMap<QString, bool> visibility;
     for (auto* node : project->layerTreeRoot()->findLayers()) visibility[node->layerId()] = node->itemVisibilityChecked();
@@ -478,9 +482,12 @@ private slots:
     const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
     if (!output.isEmpty()) QVERIFY(window.grab().save(QDir(output).filePath(QStringLiteral("map-before-font.png"))));
     bool changed = false;
+    bool areaChecked = false;
     QTimer::singleShot(0, &window, [&]() {
       auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget());
       if (!menu) return;
+      auto* areaAction = menu->findChild<QAction*>(QStringLiteral("layer.labelArea"));
+      areaChecked = areaAction && areaAction->isChecked();
       auto* sizeAction = menu->findChild<QAction*>(QStringLiteral("layer.labelSize"));
       auto* sizes = sizeAction ? sizeAction->menu() : nullptr;
       if (sizes) {
@@ -493,6 +500,7 @@ private slots:
     const QModelIndex index = tree->layerTreeModel()->node2index(project->layerTreeRoot()->findLayer(layer));
     window.showLayerTreeContextMenu(tree, tree->visualRect(index).center());
     QVERIFY(changed);
+    QVERIFY(areaChecked);
     QCOMPARE(LayerOps::labelFontSize(layer), 12.0);
     rendered.clear(); canvas->refresh();
     QTRY_VERIFY_WITH_TIMEOUT(!rendered.isEmpty(), 15000);
@@ -503,6 +511,8 @@ private slots:
       QCOMPARE(node->itemVisibilityChecked(), it.value());
     }
     if (!output.isEmpty()) QVERIFY(window.grab().save(QDir(output).filePath(QStringLiteral("map-after-font.png"))));
+    QCOMPARE(layer->labeling()->settings().fieldName, areaExpression);
+    QVERIFY(LayerOps::labelShowArea(layer));
     canvas->setRenderFlag(false);
   }
 

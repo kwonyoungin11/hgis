@@ -299,8 +299,11 @@ void MainWindow::showLayerTreeContextMenu(QgsLayerTreeView* treeView, const QPoi
     QMenu* sizes = addSubmenu(labels, "layer.labelSize", QStringLiteral("글자 크기"));
     for (double size : {3., 4., 5., 6., 7., 8., 9., 10., 12., 14.}) {
       QAction* action = add(sizes, "layer.labelSizeValue", QStringLiteral("%1 pt").arg(size), labelReason,
-          [this, vector, currentField, size, refreshViews]() { if (vector) {
-            LayerOps::applyNameAttributeLabels(vector, currentField, size, LayerOps::labelShowArea(vector, false));
+          [this, vector, size, refreshViews]() { if (vector) {
+            if (!LayerOps::setLabelFontSize(vector, size)) {
+              statusBar()->showMessage(QStringLiteral("글자 크기를 바꾸지 못했습니다. 레이어를 다시 선택해 주세요."), 8000);
+              return;
+            }
             applyLabelStackOrder(); refreshViews();
           }});
       action->setCheckable(true); action->setChecked(qFuzzyCompare(size, LayerOps::labelFontSize(vector, 5.0)));

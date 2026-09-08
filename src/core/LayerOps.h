@@ -65,6 +65,7 @@ public:
   static QString detectNameField(const QgsVectorLayer* layer);
   static bool applyNameAttributeLabels(QgsVectorLayer* layer, const QString& fieldName = QString(),
                                        double fontSizePt = 5.0, bool showArea = false);
+  static bool setLabelFontSize(QgsVectorLayer* layer, double fontSizePt);
   static double labelFontSize(const QgsVectorLayer* layer, double defaultSize = 5.0);
   static bool labelShowArea(const QgsVectorLayer* layer, bool defaultShow = false);
   static QString currentLabelField(const QgsVectorLayer* layer);
