@@ -526,20 +526,20 @@ void TestTheme::chromeSurfaces_renderGlossAndReadableText() {
 }
 
 void TestTheme::softenedPalette_matchesPreviousIntensity() {
-  // Snapshot before the explicit 20% softening request (2026-09-08).
-  // Keep the previous colors here so the test does not reproduce current values.
+  // Snapshot of pre-soften Bloom/Fluent bases (2026-09-10). The test stores
+  // those bases so it cannot be satisfied by copying tokens() back into itself.
   const auto& tokens = KaTheme::tokens();
   const auto& icons = KaTheme::iconPalette();
   const struct { QColor before; QColor after; } surfaces[] = {
-      {QColor(0xEE, 0xF1, 0xF4), tokens.desk},
-      {QColor(0xF4, 0xF6, 0xF8), tokens.glossMiddle},
-      {QColor(0xE5, 0xEA, 0xF0), tokens.glossBottom},
-      {QColor(0xE0, 0xE9, 0xF0), tokens.hoverBottom},
-      {QColor(0xD6, 0xE0, 0xE9), tokens.pressedTop},
-      {QColor(0xE5, 0xEC, 0xF2), tokens.pressedBottom},
-      {QColor(0xF3, 0xF7, 0xFA), tokens.selectedTop},
-      {QColor(0xDD, 0xE8, 0xEF), tokens.selectedBottom},
-      {QColor(0xF0, 0xF2, 0xF4), tokens.disabledSurface},
+      {QColor(0xE8, 0xF1, 0xF8), tokens.desk},
+      {QColor(0xF0, 0xF7, 0xFB), tokens.glossMiddle},
+      {QColor(0xD7, 0xE8, 0xF4), tokens.glossBottom},
+      {QColor(0xCD, 0xE6, 0xF5), tokens.hoverBottom},
+      {QColor(0xB9, 0xD9, 0xEE), tokens.pressedTop},
+      {QColor(0xD4, 0xE8, 0xF4), tokens.pressedBottom},
+      {QColor(0xE7, 0xF5, 0xFC), tokens.selectedTop},
+      {QColor(0xC5, 0xE7, 0xF6), tokens.selectedBottom},
+      {QColor(0xE8, 0xEE, 0xF2), tokens.disabledSurface},
   };
   for (const auto& surface : surfaces) {
     QCOMPARE(surface.after.red(), qRound(surface.before.red() * 0.8 + 255 * 0.2));
@@ -547,7 +547,7 @@ void TestTheme::softenedPalette_matchesPreviousIntensity() {
     QCOMPARE(surface.after.blue(), qRound(surface.before.blue() * 0.8 + 255 * 0.2));
   }
   const struct { QColor before; QColor after; } fills[] = {
-      {QColor(0x2C, 0x6F, 0x91), tokens.sky1}, {QColor(0xA3, 0x3A, 0x2E), tokens.danger},
+      {QColor(0x00, 0x78, 0xD4), tokens.sky1}, {QColor(0xA3, 0x3A, 0x2E), tokens.danger},
       {QColor(0x32, 0x6B, 0x4A), tokens.ok}, {QColor(0x32, 0x6B, 0x9B), icons.file},
       {QColor(0x95, 0x60, 0x29), icons.record}, {QColor(0x39, 0x73, 0x68), icons.map},
       {QColor(0x6B, 0x59, 0x96), icons.align}, {QColor(0x24, 0x78, 0x6C), icons.output},

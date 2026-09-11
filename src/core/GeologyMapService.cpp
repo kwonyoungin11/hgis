@@ -311,6 +311,30 @@ QColor GeologyMapService::eraColor(const QString& eraClassName) {
   return QColor(200, 200, 200);
 }
 
+bool GeologyMapService::omitFromSheetLegend(const QString& label) {
+  const QString t = label.trimmed();
+  return t.contains(QStringLiteral("부정합")) || t.contains(QStringLiteral("주향경사")) ||
+         t.contains(QStringLiteral("지질경계")) || t.contains(QStringLiteral("단층추정"));
+}
+
+void GeologyMapService::pruneStructureLegend(QgsVectorLayer* layer) {
+  if (!layer || !layer->isValid()) return;
+  auto* cat = dynamic_cast<QgsCategorizedSymbolRenderer*>(layer->renderer());
+  if (!cat) return;
+  QgsCategoryList kept;
+  bool dropped = false;
+  for (const QgsRendererCategory& c : cat->categories()) {
+    if (omitFromSheetLegend(c.label()) || omitFromSheetLegend(c.value().toString())) {
+      dropped = true;
+      continue;
+    }
+    kept.append(c);
+  }
+  if (!dropped) return;
+  layer->setRenderer(new QgsCategorizedSymbolRenderer(cat->classAttribute(), kept));
+  layer->triggerRepaint();
+}
+
 bool GeologyMapService::applyGeologyStyle(QgsVectorLayer* layer,
                                           const QHash<QString, QColor>& officialColors) {
   if (!layer || !layer->isValid()) return false;

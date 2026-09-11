@@ -1,5 +1,85 @@
 # NOW — Grok resume (2026-08-22)
 
+## 지금 (2026-09-10 포터블 격리 · VWorld)
+
+사용자: 키 하드코딩, 다른PC 레이어에 위성·지적 없음, 이전 설치 정보가 남음.
+한 일: 소스에 키 없음. 포터블은 `config/secrets.ini` + `isolateUserState`. AppData/레지스트리 키·최근조사 무시.
+금지: 커밋, 소스에 프로덕션 키, 사용자 창 종료.
+필드: `L:\ka-hgis-portable` SHA256 `B3559C2A1650C2B9C252382DB488AC0B9A6C6E9899D063C2CBA87ED7EFB9BF3D`. 폴더 전체 복사. 홈 범례는 비움. 새 조사/조사 열기 뒤 위성·지적.
+
+## 지금 (2026-09-10 다른 PC 좌표계)
+
+사용자: 다른 컴퓨터에서 좌표계 안 맞음·지도 안 뜸. 어떤 PC/모니터/윈도우에서도 같아야 함.
+원인: PROJ가 개발PC `D:\OSGeo4W\share\proj`에 묶이면 다른 PC에서 5186/3857 무효.
+한 일: `KaPortableRuntime` — Wide env + `OSRSetPROJSearchPaths`로 포터블 `share/proj`. 부트에 5186/5187/3857 검사.
+금지: 커밋, 사용자 창 강제 종료.
+필드: `L:\ka-hgis-portable` 재배포됨. SHA256 `7C7849AD101ABA3DA49684103B8C52997DBDA5D9576DBEAF81B755798487D114` = Release. 폴더 **전체** 복사. EXE만 금지. start.bat.
+
+## 지금 (2026-09-10 L: 포터블)
+
+사용자: L드라이브에 포터블.
+한 일: `make-portable.ps1 -OutDir L:\ka-hgis-portable`. cmake ka-hgis 0 · 스크립트 0.
+증거: `L:\ka-hgis-portable\ka-hgis.exe` 3,780,608 bytes. SHA256 `C52F1205BD9C41D381ADAA050326C7AE32977B6C0D25413C55D06C292DC0C7AF` = `build\Release`. start.bat · proj.db · qwindows.dll 있음. data 유지.
+금지: 커밋, 사용자 창 강제 종료.
+필드: 옛 창 닫고 `L:\ka-hgis-portable\start.bat`.
+
+## 지금 (2026-09-10 단면도 확인 /unlazy)
+
+사용자: 현재 단면도 기능이 안 된다. 확인만.
+증거: section_layout 38/0 exit 0 · section_studio 12/0 exit 0 · 원장 section-broken 5/5. 엔진 테스트는 통과.
+현장 구멍(테스트 없음): 생성자가 `rebuildSheet` 뒤 `refreshLayers`라 이미 있는 래스터는 용지가 빈 눈금. 목록이 `isBasemapLayer`(WMS/XYZ만)라 DEM·가져온 GeoTIFF가 단면으로 잡힘. 위/아래/빼기는 조판을 다시 안 만듦. flatten 실패 전에 기존 `section_sheet` 삭제.
+금지: 이번 턴 제품 수정·커밋 없음. 고치려면 다음 지시.
+
+## 지금 (2026-09-10 조판 전체끄기 · 수치지형 합치기 · 지질 범례)
+
+사용자: 쪽바로수정하라 (조판 전체끄기, 같은 종류 합치기, 표고점 미적재, 지질 범례).
+한 일: 조판 `layoutLayerCheckAllBtn`+`syncMapFromLayers`만. 종류+기하 메모리 병합(`등고선 · 선`). ElevationPoint `visibleAtScale` false. 조판 지질은 맵 필터+구조류 제외(부정합/주향경사/지질경계/단층추정, 단층·지층 유지).
+검증: cmake Release 0 · import 22/0 17.9s · workflow 4범례 0 · theme 0 · catalog 0. Security review: Medium+ 없음.
+금지: 커밋, 포터블, 사용자 창 조작.
+필드: 옛 창 닫고 바탕 **고고학 전용 HGIS**. 이미 올라간 수치지형/지질은 다시 받아야 합쳐짐.
+
+## 지금 (2026-09-10 수치지형도 위치도 분류)
+
+사용자: 집 없음, 줌 렉, 보고서 표시만, 레이어 갈라짐.
+한 일: 등고·도로·수계·경계·건물·표고만 적재. 줌으로 분류 교체 제거. 건물 연한 회색 면. 범례에 선/면/점.
+검증: catalog 0 · import 0 (16.44s) · scope 0 · 원장 4/4. EXE `CB8D5E4C…050265`.
+금지: 커밋, 포터블, 사용자 창 조작.
+필드: 옛 창 닫고 바탕 **고고학 전용 HGIS**. 범례에 `건물 · 336064 · 면`이 있어야 집 윤곽이 보임.
+
+## 지금 (2026-09-10 Win11 Bloom 전체 크롬)
+
+사용자: 전체 테마를 그라데이션까지.
+한 일: 창/홈/리본/상태바 mica 워시. 레일만 `#0067C0`. 입력·툴팁·mapCard 단색. GIS exclude 유지. 홈 이중 프레임 제거(`startMain` 테두리 없음). 레일 「홈」은 `#startRailHome`이 `railText`.
+검증: 이중프레임 수정 후 BLOOM_CHROME_OK · theme_qss Passed 0.24s · `ka-hgis` Release 0. 그전 스모크 `APP_SMOKE_CLEAN_OK`.
+금지: 커밋, 포터블, 사용자 창 조작, 도메인 색/아이콘 selected 변경.
+필드: 옛 창 닫고 바탕 **고고학 전용 HGIS**. 홈은 파란 레일+본문 시안 워시, 지도 위 종이는 흰색.
+
+## 지금 (2026-09-10 수치지형도 10km 적재)
+
+사용자: 반경 10km·3장 수신인데 레이어에 한 장만 보임 (/unlazy).
+원인: 받기는 중심 10km, 적재 `query`는 조사창 extent만.
+한 일: `coverageBounds`(화면 ∪ 중심 ±10km). 상태 문구는 보관 vs 10km 적재 구분. 도두 도곽은 검토 유지.
+검증: catalog 0 · import 0 · scope 0 · neighbor/coverageBounds 0 · 원장 4/4. EXE `8DD7AA6C…F77050D`.
+금지: 커밋, 포터블, 사용자 창 조작, 수신 전체 무조건 적재, 병렬 렌더.
+필드: 옛 창 닫고 바탕 **고고학 전용 HGIS**. 조사 줌에서도 10km 안 이웃 도엽이 범례에 있어야 함.
+
+## 지금 (2026-09-10 순차적사고 MCP · Grok 4.6)
+
+사용자: 순차적사고 MCP를 Grok 4.6에 맞게 설치.
+한 일: `@modelcontextprotocol/server-sequential-thinking@2026.8.31` 를 사용자 `~/.cursor/mcp.json` + 프로젝트 `.cursor/mcp.json`에 stdio로 등록(Windows `cmd /c npx`). 부모는 매 턴 호출 금지. 복잡도 3+만 STA(`inherit`=Grok 4.6) 안에서 MCP.
+문서: https://cursor.com/docs/context/mcp · https://www.npmjs.com/package/@modelcontextprotocol/server-sequential-thinking
+필드: Cursor **Developer: Reload Window** 후 Settings → Tools & MCP에서 `sequential-thinking`이 초록인지 확인.
+금지: 커밋. 부모 첫 배치 sequentialthinking 스팸.
+
+## 지금 (2026-09-10 Win11 Bloom 테마)
+
+사용자: 첨부 Windows 11 Bloom 벽지 풍으로 앱 테마 변경 (/unlazy).
+한 일: KaTheme 토큰을 Fluent `#0078D4` / 마이카 데스크 / Bloom 레일 `#0067C0`로 교체. 홈 차콜 인라인 제거. Bloom은 168px 레일만. 시작 본문은 `@desk@`. railMuted `#F3FBFF`. 아이콘 selected는 기존 `#163F59`. 20% 완화 정책 유지. 지도 캔버스 제외 유지.
+금지: 커밋, 포터블, 사용자 실행 창 조작, 수치지형도 파일 손대기.
+검증: cmake configure 0 · ka_theme_tests 0 · theme_qss 21/21 (0.17s, ctest 0) · ka-hgis Release 0 · smoke wrapper 0 (`APP_SMOKE_CLEAN_OK`). 원장 `.unlazy/win11-theme` 5/5 met.
+필드: 옛 창 닫고 바탕화면 **고고학 전용 HGIS**. 홈 레일은 파란 Bloom, 본문은 밝은 시안-화이트, 단추 액센트는 Windows 파랑.
+커밋 금지.
+
 ## 지금 (2026-09-08 시작은 홈만 · 프로젝트는 수동 열기)
 
 사용자: 프로그램 실행 시 프로그램만 열고, 사용자가 열기로 프로젝트를 선택한다.

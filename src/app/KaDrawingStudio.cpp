@@ -407,7 +407,7 @@ QToolButton* makeRailTile(QWidget* parent, const QIcon& icon, const QString& tex
   b->setMinimumWidth(metrics.scaleButtonMinWidth);
   const int contentHeight = iconSize.height() + 2 * b->fontMetrics().lineSpacing()
                             + 2 * metrics.buttonPadding + 6;
-  b->setFixedHeight(std::max(metrics.layoutButtonHeight, contentHeight));
+  b->setFixedHeight(std::max({metrics.layoutButtonHeight, contentHeight, b->sizeHint().height()}));
   return b;
 }
 }
@@ -1016,6 +1016,18 @@ void KaDrawingStudio::buildUi() {
   layerLay->setSpacing(4);
   auto* leftCap = new QLabel(QStringLiteral("레이어"), layerBox);
   leftCap->setObjectName(QStringLiteral("cardCaption"));
+  auto* capRow = new QHBoxLayout();
+  capRow->setContentsMargins(0, 0, 0, 0);
+  capRow->setSpacing(6);
+  capRow->addWidget(leftCap);
+  capRow->addStretch(1);
+  m_layerCheckAllBtn = new QToolButton(layerBox);
+  m_layerCheckAllBtn->setObjectName(QStringLiteral("layoutLayerCheckAllBtn"));
+  m_layerCheckAllBtn->setFocusPolicy(Qt::NoFocus);
+  m_layerCheckAllBtn->setToolTip(QStringLiteral(
+      "레이어 체크를 한 번에 모두 끄거나 켭니다. 하나라도 켜져 있으면 전부 끕니다."));
+  connect(m_layerCheckAllBtn, &QToolButton::clicked, this, &KaDrawingStudio::toggleAllLayersChecked);
+  capRow->addWidget(m_layerCheckAllBtn);
   m_layerModel = new QgsLayerTreeModel(QgsProject::instance()->layerTreeRoot(), this);
   m_layerModel->setFlag(QgsLayerTreeModel::AllowNodeChangeVisibility, true);
   m_layerModel->setFlag(QgsLayerTreeModel::AllowNodeReorder, true);
@@ -1060,12 +1072,15 @@ void KaDrawingStudio::buildUi() {
   connect(m_layerModel, &QAbstractItemModel::modelReset, this, &KaDrawingStudio::syncMapFromLayers);
   connect(m_layerModel, &QAbstractItemModel::layoutChanged, this, &KaDrawingStudio::syncMapFromLayers);
   if (QgsLayerTree* tree = QgsProject::instance()->layerTreeRoot()) {
-    connect(tree, &QgsLayerTreeNode::visibilityChanged, this,
-            [this](QgsLayerTreeNode*) { syncMapFromLayers(); });
+    connect(tree, &QgsLayerTreeNode::visibilityChanged, this, [this](QgsLayerTreeNode*) {
+      refreshLayerCheckAllButton();
+      syncMapFromLayers();
+    });
   }
   layerBox->setMinimumHeight(96);
-  layerLay->addWidget(leftCap);
+  layerLay->addLayout(capRow);
   layerLay->addWidget(m_layerTree, 1);
+  refreshLayerCheckAllButton();
   auto* layerEmpty = new QLabel(
       QStringLiteral("이 도면에는 레이어가 없습니다.\n필요한 레이어를 켜고\n용지 위에 올려 보세요."),
       layerBox);
@@ -1183,9 +1198,13 @@ void KaDrawingStudio::buildUi() {
   auto* sideLay = new QVBoxLayout(side);
   sideLay->setContentsMargins(12, 8, 12, 8);
   sideLay->setSpacing(8);
+  sideLay->setSizeConstraint(QLayout::SetMinimumSize);
 
   m_cardLegend = new QFrame(side);
   m_cardLegend->setObjectName(QStringLiteral("itemInspector"));
+  // Keep each card's complete contents visible. Theme minimums alone may be
+  // smaller than a button's text/icon size after Qt repolishes the widgets.
+  m_cardLegend->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
   auto* legendLay = new QVBoxLayout(m_cardLegend);
   legendLay->setContentsMargins(10, 10, 10, 10);
   legendLay->setSpacing(6);
@@ -1240,6 +1259,7 @@ void KaDrawingStudio::buildUi() {
 
   m_cardNorth = new QFrame(side);
   m_cardNorth->setObjectName(QStringLiteral("itemInspector"));
+  m_cardNorth->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
   auto* northLay = new QVBoxLayout(m_cardNorth);
   northLay->setContentsMargins(10, 10, 10, 10);
   northLay->setSpacing(6);
@@ -1283,11 +1303,18 @@ void KaDrawingStudio::buildUi() {
 
   m_scaleBar = new QFrame(side);
   m_scaleBar->setObjectName(QStringLiteral("itemInspector"));
+  m_scaleBar->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
   const auto& buttonMetrics = KaTheme::buttonMetrics();
   auto* scaleLay = new QVBoxLayout(m_scaleBar);
   scaleLay->setContentsMargins(buttonMetrics.panelMargin, buttonMetrics.panelMargin,
                               buttonMetrics.panelMargin, buttonMetrics.panelMargin);
-  scaleLay->setSpacing(buttonMetrics.buttonSpacing);
+  scaleLay->setSpacing(0);
+  // Distribute the available panel height between rows instead of leaving it
+  // below the card. MinimumExpanding keeps the minimum gap on short screens.
+  const auto addScaleRowGap = [scaleLay, &buttonMetrics]() {
+    scaleLay->addSpacerItem(new QSpacerItem(0, buttonMetrics.panelMargin,
+        QSizePolicy::Minimum, QSizePolicy::MinimumExpanding));
+  };
   scaleLay->addWidget(new QLabel(QStringLiteral("도면 정보"), m_scaleBar));
   m_scaleSpin = new QSpinBox(m_scaleBar);
   m_scaleSpin->setRange(10, 5000000);
@@ -1309,6 +1336,7 @@ void KaDrawingStudio::buildUi() {
   scaleTop->addWidget(new QLabel(QStringLiteral("1 :"), m_scaleBar));
   scaleTop->addWidget(m_scaleSpin, 1);
   scaleTop->addWidget(applySc);
+  addScaleRowGap();
   scaleLay->addLayout(scaleTop);
   m_scaleProps = m_scaleBar;
   auto addChipRow = [&](const int* vals, int count) {
@@ -1341,6 +1369,7 @@ void KaDrawingStudio::buildUi() {
       spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
       row->addWidget(spacer, 1);
     }
+    addScaleRowGap();
     scaleLay->addLayout(row);
   };
   const int rowA[] = {100, 200, 250};
@@ -1366,6 +1395,7 @@ void KaDrawingStudio::buildUi() {
     connect(b, &QToolButton::clicked, this, [this, style]() { beginPlaceScaleBar(style); });
     barRow->addWidget(b);
   }
+  addScaleRowGap();
   scaleLay->addLayout(barRow);
   auto* extraRow = new QHBoxLayout;
   extraRow->setSpacing(buttonMetrics.buttonSpacing);
@@ -1378,9 +1408,9 @@ void KaDrawingStudio::buildUi() {
   connect(crsBtn, &QToolButton::clicked, this, &KaDrawingStudio::beginPlaceCrsLabel);
   extraRow->addWidget(crsBtn);
   extraRow->addStretch(1);
+  addScaleRowGap();
   scaleLay->addLayout(extraRow);
-  sideLay->addWidget(m_scaleBar);
-  sideLay->addStretch(1);
+  sideLay->addWidget(m_scaleBar, 1);
 
   auto* desk = new QWidget(right);
   auto* deskGrid = new QGridLayout(desk);
@@ -1469,14 +1499,28 @@ void KaDrawingStudio::buildUi() {
                              QStringLiteral("용지 크기(A4/A3) 및 방향(가로/세로)을 전환합니다"),
                              &KaDrawingStudio::openPaperSettingsDialog));
   side->setMinimumWidth(260);
-  side->setMaximumWidth(420);
+  side->setMaximumWidth(QWIDGETSIZE_MAX);
+  auto* inspectorScroll = new QScrollArea(root);
+  inspectorScroll->setObjectName(QStringLiteral("drawingInspectorScroll"));
+  inspectorScroll->setFrameShape(QFrame::NoFrame);
+  inspectorScroll->setWidgetResizable(true);
+  inspectorScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  inspectorScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+  inspectorScroll->setWidget(side);
+  side->ensurePolished();
+  // Reserve the scrollbar width as well, so the north-arrow row is never
+  // clipped at the narrowest splitter position.
+  const int inspectorMinWidth = side->sizeHint().width() +
+      inspectorScroll->style()->pixelMetric(QStyle::PM_ScrollBarExtent);
+  inspectorScroll->setMinimumWidth(std::max(260, inspectorMinWidth));
+  inspectorScroll->setMaximumWidth(std::max(420, inspectorMinWidth));
   m_studioSplit = new QSplitter(Qt::Horizontal, root);
   m_studioSplit->setObjectName(QStringLiteral("studioMainSplit"));
   m_studioSplit->setHandleWidth(10);
   m_studioSplit->setChildrenCollapsible(false);
   m_studioSplit->addWidget(leftCol);
   m_studioSplit->addWidget(right);
-  m_studioSplit->addWidget(side);
+  m_studioSplit->addWidget(inspectorScroll);
   m_studioSplit->setStretchFactor(0, 0);
   m_studioSplit->setStretchFactor(1, 1);
   m_studioSplit->setStretchFactor(2, 0);
@@ -2524,8 +2568,10 @@ void KaDrawingStudio::applyLegendSettings() {
   legend->setStyleFont(Qgis::LegendComponent::Group, bodyFont);
   legend->setStyleFont(Qgis::LegendComponent::Subgroup, bodyFont);
   legend->setStyleFont(Qgis::LegendComponent::SymbolLabel, QFont(QStringLiteral("Malgun Gothic"), qMax(7, pt - 1)));
-  if (auto* map = mapItem())
+  if (auto* map = mapItem()) {
     legend->setLinkedMap(map);
+    legend->setLegendFilterByMapEnabled(true);
+  }
   LayoutService::tuneSheetLegend(legend);
   legend->update();
 }
@@ -2538,6 +2584,7 @@ void KaDrawingStudio::placeLegend(const QRectF& layoutRect) {
   if (auto* legend = dynamic_cast<QgsLayoutItemLegend*>(findItemById(ly, kIdLegend))) {
     legend->setResizeToContents(false);
     legend->attemptSetSceneRect(layoutRect);
+    LayoutService::tuneSheetLegend(legend);
     legend->update();
   }
   finishPlace();
@@ -2696,6 +2743,44 @@ void KaDrawingStudio::updateLayerOpacityControl() {
 
 void KaDrawingStudio::repaintMapLayers() {
   syncMapFromLayers();
+}
+
+void KaDrawingStudio::toggleAllLayersChecked() {
+  QgsProject* proj = QgsProject::instance();
+  QgsLayerTree* root = proj ? proj->layerTreeRoot() : nullptr;
+  if (!root) return;
+  const QList<QgsLayerTreeLayer*> layers = root->findLayers();
+  if (layers.isEmpty()) return;
+  bool anyOn = false;
+  for (QgsLayerTreeLayer* n : layers) {
+    if (n && n->isVisible()) {
+      anyOn = true;
+      break;
+    }
+  }
+  const bool turnOn = !anyOn;
+  const auto children = root->children();
+  for (QgsLayerTreeNode* n : children) {
+    if (n) n->setItemVisibilityCheckedRecursive(turnOn);
+  }
+  refreshLayerCheckAllButton();
+  syncMapFromLayers();
+}
+
+void KaDrawingStudio::refreshLayerCheckAllButton() {
+  if (!m_layerCheckAllBtn) return;
+  QgsProject* proj = QgsProject::instance();
+  QgsLayerTree* root = proj ? proj->layerTreeRoot() : nullptr;
+  const QList<QgsLayerTreeLayer*> layers = root ? root->findLayers() : QList<QgsLayerTreeLayer*>();
+  m_layerCheckAllBtn->setEnabled(!layers.isEmpty());
+  bool anyOn = false;
+  for (QgsLayerTreeLayer* n : layers) {
+    if (n && n->isVisible()) {
+      anyOn = true;
+      break;
+    }
+  }
+  m_layerCheckAllBtn->setText(anyOn ? QStringLiteral("전체 끄기") : QStringLiteral("전체 켜기"));
 }
 
 void KaDrawingStudio::syncMapFromLayers() {

@@ -7,6 +7,8 @@ alwaysApply: true
 
 Do not call `sequentialthinking` MCP on every message. Do not spawn STA on greetings or one-line edits.
 
+MCP (Grok 4.6): `@modelcontextprotocol/server-sequential-thinking@2026.8.31` in `~/.cursor/mcp.json` and `.cursor/mcp.json`. STA (`model: inherit`) may call it; the parent must not.
+
 | Score | Action |
 | --- | --- |
 | 1–2 | Parent only |

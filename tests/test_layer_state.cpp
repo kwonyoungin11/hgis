@@ -75,6 +75,25 @@ private slots:
     QVERIFY(LayerOps::labelShowArea(&layer));
   }
 
+  void explicitFontSizeOverridesOnlySizeExpressions() {
+    QgsVectorLayer layer(QStringLiteral("Polygon?crs=EPSG:5186"), QStringLiteral("구역"), QStringLiteral("memory"));
+    QVERIFY(LayerOps::applyAreaM2Labels(&layer));
+    auto settings = layer.labeling()->settings();
+    auto& properties = settings.dataDefinedProperties();
+    properties.setProperty(QgsPalLayerSettings::Property::Size, QgsProperty::fromExpression(QStringLiteral("5")));
+    properties.setProperty(QgsPalLayerSettings::Property::FontSizeUnit, QgsProperty::fromValue(QStringLiteral("MapUnit")));
+    properties.setProperty(QgsPalLayerSettings::Property::Color, QgsProperty::fromValue(QStringLiteral("red")));
+    layer.setLabeling(new QgsVectorLayerSimpleLabeling(settings));
+    QVERIFY(LayerOps::setLabelFontSize(&layer, 12.));
+    const auto after = layer.labeling()->settings();
+    QVERIFY(!after.dataDefinedProperties().isActive(QgsPalLayerSettings::Property::Size));
+    QVERIFY(!after.dataDefinedProperties().isActive(QgsPalLayerSettings::Property::FontSizeUnit));
+    QVERIFY(after.dataDefinedProperties().isActive(QgsPalLayerSettings::Property::Color));
+    QCOMPARE(after.fieldName, settings.fieldName);
+    QCOMPARE(after.format().size(), 12.);
+    QCOMPARE(after.format().sizeUnit(), Qgis::RenderUnit::Points);
+  }
+
   void polygonWithoutNameCanTurnAreaOff() {
     QgsVectorLayer layer(QStringLiteral("Polygon?crs=EPSG:5187"), QStringLiteral("구역"), QStringLiteral("memory"));
     QVERIFY(LayerOps::applyAreaM2Labels(&layer));

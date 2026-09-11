@@ -1,5 +1,6 @@
 #include "LocationSearch.h"
 #include "VworldSettings.h"
+#include "KaPortableRuntime.h"
 #include <QNetworkRequest>
 #include <QNetworkReply>
 #include <QUrl>
@@ -22,6 +23,8 @@ static bool readCoordinate(const QJsonValue& value, double& coordinate) {
 }
 
 static QString secretsPath() {
+  if (KaPortableRuntime::discover(KaPortableRuntime::resolvedExeDir()).looksBundled())
+    return QDir(KaPortableRuntime::userConfigDir()).filePath(QStringLiteral("secrets.ini"));
   const QStringList cands = {
     QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../config/secrets.ini")),
     QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("config/secrets.ini")),

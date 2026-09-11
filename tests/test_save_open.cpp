@@ -8,6 +8,9 @@
 #include <QFontMetrics>
 #include <QSettings>
 #include <QSpinBox>
+#include <QScrollArea>
+#include <QScrollBar>
+#include <QSplitter>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QTabWidget>
@@ -19,6 +22,7 @@
 #include <QToolButton>
 #include <QUrlQuery>
 #include <QCryptographicHash>
+#include <QSet>
 #include <gdal.h>
 #include <cpl_error.h>
 #include <cpl_conv.h>
@@ -32,17 +36,29 @@
 #include "app/KaDrawingStudio.h"
 #include "app/KaTheme.h"
 #include "app/KaRegionLocator.h"
+#include "app/KaTopographicBrowser.h"
+#include "app/KaTopographicImportDialog.h"
+#include "app/KaTopographicScopePanel.h"
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QElapsedTimer>
 #include "core/LayerOps.h"
 #include "core/RecentSurveys.h"
 #include "core/SurveyProjectFactory.h"
 #include "core/SurveyStorage.h"
+#include "core/DemPresentation.h"
+#include "core/DemColorRampLegend.h"
 #include <qgsapplication.h>
 #include <qgsfeature.h>
+#include <qgsexpression.h>
+#include <qgsexpressioncontext.h>
 #include <qgsexception.h>
 #include <qgsgeometry.h>
 #include <qgscoordinatetransform.h>
+#include <qgscolorramplegendnode.h>
 #include <qgslayertree.h>
 #include <qgslayertreemodel.h>
+#include <qgslayertreemodellegendnode.h>
 #include <qgslayertreeregistrybridge.h>
 #include <qgslayertreeview.h>
 #include <qgslayout.h>
@@ -55,6 +71,8 @@
 #include <qgsnetworkaccessmanager.h>
 #include <qgsproject.h>
 #include <qgsrasterlayer.h>
+#include <qgsrastershader.h>
+#include <qgssinglebandpseudocolorrenderer.h>
 #include <qgssinglesymbolrenderer.h>
 #include <qgsfillsymbol.h>
 #include <qgsvectorlayer.h>
@@ -258,6 +276,203 @@ private:
     return QgsProject::instance()->addMapLayer(layer.release());
   }
 private slots:
+  void topographicActualWindowRemainsStableAfterCompletion() {
+    const QDir cache(qEnvironmentVariable("KA_HGIS_QA_TOPOGRAPHIC_SHP"));
+    if(qEnvironmentVariableIsEmpty("KA_HGIS_QA_TOPOGRAPHIC_SHP")) QSKIP("Opt-in real SHP rendering/idle diagnostic");
+    QList<TopographicCatalog::Record> records;
+    for(const auto& index:cache.entryInfoList({QStringLiteral("*.json")},QDir::Files)) {
+      QFile file(index.absoluteFilePath()); QVERIFY(file.open(QIODevice::ReadOnly));
+      const auto json=QJsonDocument::fromJson(file.readAll()).object();
+      const QDir data(cache.filePath(json.value("directory").toString()));
+      for(const auto& entry:json.value("records").toArray()) {
+        const auto object=entry.toObject(); const auto bounds=object.value("bounds").toArray();
+        QCOMPARE(bounds.size(),4);
+        TopographicCatalog::Record r;
+        r.source=data.filePath(object.value("file").toString()); r.layerName=object.value("layer").toString();
+        r.sourceSheet=object.value("sheet").toString(); r.displayName=object.value("name").toString();
+        r.crsWkt=object.value("crs").toString(); r.category=static_cast<TopographicCatalog::Category>(object.value("category").toInt());
+        r.extent=QgsRectangle(bounds[0].toDouble(),bounds[1].toDouble(),bounds[2].toDouble(),bounds[3].toDouble());
+        r.hasExtent=true; r.signature=index.baseName(); records.append(r);
+      }
+    }
+    QVERIFY(!records.isEmpty());
+    MainWindow window;
+    window.setRestoreLastSurveyEnabled(false);
+    QString path=makeSurvey(QStringLiteral("topographic-stability")); QVERIFY(!path.isEmpty());
+    const auto surveySource=qEnvironmentVariable("KA_HGIS_QA_TOPOGRAPHIC_SURVEY");
+    QByteArray originalSurvey;
+    if(!surveySource.isEmpty()) {
+      originalSurvey=contents(surveySource); QVERIFY(!originalSurvey.isEmpty());
+      path=m_files.filePath(QStringLiteral("field-survey-copy.gpkg"));
+      QVERIFY(QFile::copy(surveySource,path));
+    }
+    QVERIFY(window.openSurveyGpkg(path,MainWindow::OpenSurveyMode::LayersOnly));
+    window.resize(1500,950); window.show();
+    auto* canvas=window.findChild<QgsMapCanvas*>(); QVERIFY(canvas);
+    QTest::qWait(1000); // Let initial window geometry and project-open signals settle.
+    connect(canvas,&QgsMapCanvas::extentsChanged,&window,[canvas] {
+      qInfo()<<"extent"<<canvas->extent().toString()<<"crs"<<canvas->mapSettings().destinationCrs().authid()<<"scale"<<canvas->scale();
+    });
+    const auto crs=canvas->mapSettings().destinationCrs();
+    QgsRectangle bounds;
+    for(const auto& record:records) bounds.combineExtentWith(QgsCoordinateTransform(QgsCoordinateReferenceSystem(record.crsWkt),crs,QgsProject::instance()).transformBoundingBox(record.extent));
+    qInfo()<<"requested bounds"<<bounds.toString()<<"records"<<records.size();
+    if(surveySource.isEmpty()) canvas->setExtent(bounds);
+    else {
+      bool framed=false;
+      for(auto* raw:QgsProject::instance()->mapLayers()) {
+        if(raw->customProperty(QStringLiteral("ka_hgis/layer_key")).toString()!=QLatin1String("survey_area")) continue;
+        auto* survey=qobject_cast<QgsVectorLayer*>(raw); QVERIFY(survey);
+        QgsFeature feature;
+        auto features=survey->getFeatures(); QVERIFY(features.nextFeature(feature));
+        auto area=QgsCoordinateTransform(survey->crs(),crs,QgsProject::instance()).transformBoundingBox(feature.geometry().boundingBox());
+        QVERIFY(!area.isEmpty()); area.scale(1.3); canvas->setExtent(area); framed=true; break;
+      }
+      QVERIFY(framed);
+    }
+    canvas->refresh();
+    const auto initialExtent=canvas->extent();
+    auto topographicCount=[] {
+      int n=0;
+      for (auto* layer:QgsProject::instance()->mapLayers())
+        if (!layer->customProperty(QStringLiteral("ka_hgis/topographic_source")).toString().isEmpty()) ++n;
+      return n;
+    };
+    QStringList preservedIds;
+    for (auto* layer:QgsProject::instance()->mapLayers())
+      if (layer->customProperty(QStringLiteral("ka_hgis/topographic_source")).toString().isEmpty())
+        preservedIds.append(layer->id());
+    QVERIFY(!preservedIds.isEmpty());
+    const auto expected=TopographicCatalog::query(records,TopographicCatalog::coverageBounds(initialExtent),crs.toWkt(),QgsProject::instance()->transformContext(),
+        nullptr,{},canvas->scale());
+    QVERIFY(!expected.matches.isEmpty());
+    KaTopographicImportDialog importer(canvas,&window);
+    QTemporaryDir library;
+    KaTopographicScopePanel scope(canvas,nullptr,&importer,&window,library.path()); scope.hide();
+    QSignalSpy added(QgsProject::instance(),&QgsProject::layersAdded);
+    QSignalSpy removed(QgsProject::instance(),&QgsProject::layersRemoved);
+    QSignalSpy rendered(canvas,&QgsMapCanvas::mapCanvasRefreshed);
+    QSignalSpy canceled(canvas,&QgsMapCanvas::mapRefreshCanceled);
+    QElapsedTimer elapsed; elapsed.start();
+    QString error; QVERIFY2(importer.importVerified(records,&error),qPrintable(error));
+    QTRY_VERIFY_WITH_TIMEOUT(!importer.isAutomaticLoading(),120000);
+    QTRY_VERIFY_WITH_TIMEOUT(!canvas->isDrawing() && !rendered.isEmpty(),120000);
+    QSet<int> expectedGroups;
+    for (const auto& record : expected.matches)
+      expectedGroups.insert(static_cast<int>(record.category));
+    QCOMPARE(topographicCount(),expectedGroups.size());
+    QCOMPARE(QgsProject::instance()->mapLayers().size(),preservedIds.size()+expectedGroups.size());
+    QCOMPARE(canvas->extent(),initialExtent);
+    QVERIFY(added.size()<=1);
+    qInfo()<<"initial load milliseconds"<<elapsed.elapsed()<<"adds"<<added.size()<<"renders"<<rendered.size()<<"cancels"<<canceled.size()
+        <<"scale"<<canvas->scale()<<"topo"<<expected.matches.size()<<"preserved"<<preservedIds.size();
+    const auto ids=QgsProject::instance()->mapLayers().keys();
+    QMap<QString,bool> checks;
+    for(auto* node:QgsProject::instance()->layerTreeRoot()->findLayers()) checks.insert(node->layerId(),node->itemVisibilityChecked());
+    const int priorRenders=rendered.size(), priorAdds=added.size(), priorRemoves=removed.size();
+    // Leave the real scope watcher and MainWindow's 30 s health timer active.
+    QTest::qWait(35000);
+    QCOMPARE(QgsProject::instance()->mapLayers().keys(),ids);
+    for(auto* node:QgsProject::instance()->layerTreeRoot()->findLayers()) QCOMPARE(node->itemVisibilityChecked(),checks.value(node->layerId()));
+    QCOMPARE(added.size(),priorAdds); QCOMPARE(removed.size(),priorRemoves);
+    QVERIFY2(rendered.size()-priorRenders<=2,"Idle must not keep repainting/reloading");
+    const auto output=qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+    if(!output.isEmpty()) { QVERIFY(QDir().mkpath(output)); QVERIFY(window.grab().save(QDir(output).filePath(QStringLiteral("actual-window-idle.png")))); }
+    qInfo()<<"idle renders"<<rendered.size()-priorRenders<<"layer count"<<ids.size()<<"scope active"<<scope.isActive();
+    if(!surveySource.isEmpty()) {
+      int visit=0;
+      for(const auto& view:{bounds,initialExtent}) {
+        const auto before=rendered.size();
+        elapsed.restart(); canvas->setExtent(view); canvas->refresh();
+        // Wait until the extent debounce has processed this view and the final
+        // map render finishes; the watcher remains enabled throughout.
+        QTest::qWait(600);
+        QTRY_VERIFY_WITH_TIMEOUT(!importer.isAutomaticLoading() && !canvas->isDrawing() && rendered.size()>before,120000);
+        const auto visible=TopographicCatalog::query(records,TopographicCatalog::coverageBounds(canvas->extent()),crs.toWkt(),QgsProject::instance()->transformContext(),
+            nullptr,{},canvas->scale());
+        QSet<int> visibleGroups;
+        for (const auto& record : visible.matches)
+          visibleGroups.insert(static_cast<int>(record.category));
+        QCOMPARE(topographicCount(),visibleGroups.size());
+        QCOMPARE(QgsProject::instance()->mapLayers().size(),preservedIds.size()+visibleGroups.size());
+        for(const auto& id:preservedIds) {
+          QVERIFY(QgsProject::instance()->mapLayer(id));
+          auto* node=QgsProject::instance()->layerTreeRoot()->findLayer(id); QVERIFY(node);
+          QCOMPARE(node->itemVisibilityChecked(),checks.value(id));
+        }
+        const auto picture=canvas->grab().toImage();
+        int mapPixels=0;
+        for(int y=100;y<picture.height()-40;++y) for(int x=100;x<picture.width()-40;++x) {
+          const auto c=picture.pixelColor(x,y);
+          if(c.red()>=120 && c.red()<200 && c.red()==c.green() && c.green()==c.blue()) ++mapPixels;
+        }
+        QVERIFY2(mapPixels>100,"Reference geometry must remain visible after navigation");
+        qInfo()<<"navigation"<<visit<<"ms"<<elapsed.elapsed()<<"layers"<<visible.matches.size()<<"gray pixels"<<mapPixels;
+        if(!output.isEmpty()) QVERIFY(window.grab().save(QDir(output).filePath(QStringLiteral("actual-window-navigation-%1.png").arg(visit))));
+        ++visit;
+      }
+      QCOMPARE(contents(surveySource),originalSurvey);
+    }
+    QgsProject::instance()->setDirty(false);
+  }
+  void topographicDownloadKeepsMapVisibleAndUsesSurveyFolder() {
+    MainWindow window;
+    disableRendering(window);
+    const QString path=makeSurvey(QStringLiteral("browser-key-isolation"));
+    QVERIFY(!path.isEmpty());
+    QVERIFY(window.openSurveyGpkg(path,MainWindow::OpenSurveyMode::LayersOnly));
+    const QString directory=QFileInfo(path).absoluteDir().filePath(QStringLiteral("지형도"));
+    QVERIFY(QFileInfo(directory).isDir());
+    window.show();
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("viewTabs"));
+    QVERIFY(tabs);
+    QWidget* map=tabs->currentWidget();
+    QVERIFY(!window.findChild<KaTopographicBrowser*>());
+    QVERIFY(QMetaObject::invokeMethod(&window, "openTopographicDownload", Qt::DirectConnection));
+    auto* browser = window.findChild<KaTopographicBrowser*>();
+    QVERIFY(browser);
+    browser->stopAutomatic();
+    browser->navigate(QUrl(QStringLiteral("about:blank")));
+    QCOMPARE(browser->parentWidget(),&window);
+    QCOMPARE(browser->windowModality(),Qt::NonModal);
+    QCOMPARE(tabs->currentWidget(),map);
+    QCOMPARE(tabs->indexOf(browser),-1);
+    auto* details=browser->findChild<QWidget*>(QStringLiteral("topographicOfficialDetails"));
+    QVERIFY(details && details->isHidden());
+    browser->hide();
+    QVERIFY(QMetaObject::invokeMethod(&window, "openTopographicDownload", Qt::DirectConnection));
+    browser->stopAutomatic();
+    browser->navigate(QUrl(QStringLiteral("about:blank")));
+    QCOMPARE(window.findChild<KaTopographicBrowser*>(), browser);
+    QCOMPARE(tabs->currentWidget(),map);
+    QVERIFY(details->isHidden());
+    // A main-window shortcut must not edit the survey while its download window is active.
+    QString error;
+    auto* survey=LayerOps::ensureDomainLayer(QgsProject::instance(),path,QStringLiteral("survey_area"),QStringLiteral("조사구역"),&error);
+    QVERIFY(survey && survey->isValid());
+    survey->selectAll();
+    auto* canvas=window.findChild<QgsMapCanvas*>(); QVERIFY(canvas);
+    canvas->setCurrentLayer(survey);
+    const auto before=survey->featureCount();
+    QVERIFY(before>0);
+    QApplication::setActiveWindow(browser);
+    QCOMPARE(QApplication::activeWindow(),browser);
+    for(auto* action:window.actions())
+      if(action->shortcut()==QKeySequence(QKeySequence::Delete)) action->trigger();
+    QCOMPARE(survey->featureCount(),before);
+    browser->hide();
+    QgsProject::instance()->setDirty(false);
+    const QString secondSource=makeSurvey(QStringLiteral("second-survey-directory"));
+    QVERIFY(!secondSource.isEmpty());
+    const QString secondFolder=m_files.filePath(QStringLiteral("another-folder"));
+    QVERIFY(QDir().mkpath(secondFolder));
+    const QString other=QDir(secondFolder).filePath(QStringLiteral("another.gpkg"));
+    QVERIFY(QFile::copy(secondSource,other));
+    QVERIFY(window.openSurveyGpkg(other,MainWindow::OpenSurveyMode::LayersOnly));
+    QVERIFY(QFileInfo(QFileInfo(other).absoluteDir().filePath(QStringLiteral("지형도"))).isDir());
+    QVERIFY(QFileInfo(directory).isDir());
+    QgsProject::instance()->setDirty(false);
+  }
   void cleanup() { QgsProject::instance()->clear(); }
   void provinceChipMovesMapWithoutLoadingLayers_data() {
     QTest::addColumn<QString>("crs");
@@ -351,6 +566,99 @@ private slots:
       qInfo().noquote() << "Automatic Qt widget render; not a portable field screenshot:" << path;
     }
   }
+  void drawingInspectorUsesHeightWithoutOverlapping_data() {
+    QTest::addColumn<int>("height");
+    QTest::newRow("normal") << 930;
+    QTest::newRow("tall") << 1150;
+    QTest::newRow("short") << 620;
+  }
+  void drawingInspectorUsesHeightWithoutOverlapping() {
+    QFETCH(int, height);
+    QgsProject project;
+    project.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
+    QgsMapCanvas canvas;
+    canvas.setRenderFlag(false);
+    canvas.setDestinationCrs(project.crs());
+    canvas.setExtent(QgsRectangle(190000, 560000, 191000, 561000));
+    QTabWidget tabs;
+    KaDrawingStudio studio(&project, &canvas, 210., 297., &tabs);
+    studio.setParent(&tabs, Qt::Widget);
+    tabs.addTab(&studio, QStringLiteral("레이아웃"));
+    tabs.resize(1800, height);
+    tabs.show();
+    QCoreApplication::processEvents();
+    auto* scale = studio.findChild<QSpinBox*>(QStringLiteral("drawingScale"));
+    QVERIFY(scale);
+    QWidget* card = scale->parentWidget();
+    QWidget* panel = card->parentWidget();
+    auto* scroll = studio.findChild<QScrollArea*>(QStringLiteral("drawingInspectorScroll"));
+    const auto buttons = card->findChildren<QToolButton*>();
+    QToolButton* crsButton = nullptr;
+    for (auto* button : buttons) if (button->text() == QStringLiteral("좌표계")) crsButton = button;
+    QVERIFY(crsButton);
+    const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+    const QString tag = QString::fromLatin1(QTest::currentDataTag());
+    if (!output.isEmpty()) {
+      QVERIFY(tabs.grab().save(QDir(output).filePath(tag + QStringLiteral("-studio.png"))));
+      QVERIFY((scroll ? static_cast<QWidget*>(scroll) : panel)->grab().save(
+          QDir(output).filePath(tag + QStringLiteral("-panel.png"))));
+    }
+    const int bottomGap = panel->height() - crsButton->mapTo(panel, QPoint(0, crsButton->height())).y();
+    qInfo() << "inspector metrics: requested height" << height << "actual" << tabs.height()
+            << "panel" << panel->size() << "bottom gap" << bottomGap;
+    QVERIFY2(tabs.height() <= height, "Inspector must not force the app beyond its requested height");
+    QVERIFY2(scroll, "Short windows need a scrollable inspector");
+    QVERIFY2(bottomGap <= 24, qPrintable(QStringLiteral("Unused space below the last row: %1 px").arg(bottomGap)));
+    for (auto* button : panel->findChildren<QToolButton*>()) {
+      QVERIFY2(button->height() >= button->sizeHint().height(), qPrintable(
+          QStringLiteral("%1 button clipped to %2 px; content needs %3 px")
+              .arg(button->text()).arg(button->height()).arg(button->sizeHint().height())));
+      QVERIFY(button->parentWidget()->rect().contains(button->geometry()));
+    }
+    QList<QToolButton*> firstColumn;
+    for (int denominator : {100, 300, 1000, 10000}) {
+      for (auto* button : buttons)
+        if (button->property("denom").toInt() == denominator) firstColumn.append(button);
+    }
+    QCOMPARE(firstColumn.size(), 4);
+    for (int i = 1; i < firstColumn.size(); ++i) {
+      const auto* before = firstColumn[i - 1];
+      const auto* after = firstColumn[i];
+      const int gap = after->y() - before->geometry().bottom() - 1;
+      qInfo() << "preset row gap" << gap;
+      QVERIFY2(gap >= 8, qPrintable(QStringLiteral("Preset rows have only %1 px separation").arg(gap)));
+    }
+    for (int i = 0; i < buttons.size(); ++i)
+      for (int j = i + 1; j < buttons.size(); ++j)
+        QVERIFY(!buttons[i]->geometry().intersects(buttons[j]->geometry()));
+    if (height < 700) {
+      QVERIFY(scroll->verticalScrollBar()->maximum() > 0);
+      scroll->ensureWidgetVisible(crsButton);
+      QCoreApplication::processEvents();
+      const QRect lastRow(crsButton->mapTo(scroll->viewport(), QPoint()), crsButton->size());
+      QVERIFY(scroll->viewport()->rect().contains(lastRow));
+      if (!output.isEmpty()) QVERIFY(scroll->grab().save(QDir(output).filePath(tag + QStringLiteral("-scrolled.png"))));
+      auto* splitter = studio.findChild<QSplitter*>(QStringLiteral("studioMainSplit"));
+      QVERIFY(splitter);
+      splitter->setSizes({268, 1200, 1});
+      QCoreApplication::processEvents();
+      QVERIFY(scroll->viewport()->width() >= panel->minimumSizeHint().width());
+      for (auto* button : panel->findChildren<QToolButton*>()) {
+        QVERIFY(button->parentWidget()->rect().contains(button->geometry()));
+        QVERIFY2(button->width() >= button->sizeHint().width(), qPrintable(button->text()));
+      }
+      if (!output.isEmpty()) QVERIFY(scroll->grab().save(QDir(output).filePath(tag + QStringLiteral("-narrow.png"))));
+    }
+    scroll->ensureWidgetVisible(firstColumn.last());
+    QTest::mouseClick(firstColumn.last(), Qt::LeftButton);
+    QCOMPARE(scale->value(), 10000);
+    auto* view = studio.findChild<QgsLayoutView*>();
+    QVERIFY(view && view->currentLayout());
+    auto* map = dynamic_cast<QgsLayoutItemMap*>(view->currentLayout()->itemById(QStringLiteral("ka_map")));
+    QVERIFY(map && qAbs(map->scale() - 10000.) < .5);
+    QCOMPARE(map->crs().authid(), QStringLiteral("EPSG:5187"));
+  }
+
   void layerContextMenu_matchesLayerKind_data() {
     QTest::addColumn<QString>("kind");
     QTest::addColumn<QString>("firstAction");
@@ -514,6 +822,100 @@ private slots:
     QCOMPARE(layer->labeling()->settings().fieldName, areaExpression);
     QVERIFY(LayerOps::labelShowArea(layer));
     canvas->setRenderFlag(false);
+  }
+
+  void trenchPresetRespectsAreaAndDimensions_data() {
+    QTest::addColumn<bool>("changedCanvasCrs");
+    QTest::newRow("work-5187") << false;
+    QTest::newRow("canvas-changed-to-5186") << true;
+  }
+  void trenchPresetRespectsAreaAndDimensions() {
+    QFETCH(bool, changedCanvasCrs);
+    const QString path = makeSurvey(QStringLiteral("trench_limits_%1").arg(QString::fromLatin1(QTest::currentDataTag())));
+    QVERIFY(!path.isEmpty());
+    MainWindow window;
+    disableRendering(window);
+    QVERIFY(window.openSurveyGpkg(path));
+    disableRendering(window);
+    auto* project = QgsProject::instance();
+    auto* area = LayerOps::findByLayerKey(project, QStringLiteral("survey_area"));
+    auto* canvas = window.findChild<QgsMapCanvas*>();
+    auto* tree = window.findChild<QgsLayerTreeView*>(QStringLiteral("layerTree"));
+    QVERIFY(area && canvas && tree);
+    QgsGeometry boundary = QgsGeometry::fromRect(QgsRectangle(190000, 560000, 190025, 560115));
+    QVERIFY(area->startEditing());
+    QVERIFY(area->changeGeometry(*area->allFeatureIds().constBegin(), boundary));
+    QVERIFY(area->commitChanges());
+    area->setRenderer(new QgsSingleSymbolRenderer(QgsFillSymbol::createSimple(
+        {{QStringLiteral("color"), QStringLiteral("255,255,255,0")},
+         {QStringLiteral("outline_color"), QStringLiteral("194,93,20,255")},
+         {QStringLiteral("outline_width"), QStringLiteral("0.6")}}).release()));
+    tree->setCurrentLayer(area);
+    window.resize(1280, 860);
+    window.show();
+    QCoreApplication::processEvents();
+    if (changedCanvasCrs)
+      QVERIFY(QMetaObject::invokeMethod(&window, "setWorkCrs5186", Qt::DirectConnection));
+    QVERIFY(QMetaObject::invokeMethod(&window, "applyTrenchByRatio", Qt::DirectConnection, Q_ARG(double, 10.)));
+    auto* trenches = LayerOps::findByLayerKey(project, QStringLiteral("trial_trench"));
+    QVERIFY(trenches && trenches->featureCount() > 0);
+    const qint64 firstCount = trenches->featureCount();
+    // Loading/generating schedules renders. Finish their cancellation before
+    // measuring the frame requested below, not the old survey-opening frame.
+    canvas->setRenderFlag(false);
+    canvas->stopRendering();
+    QCoreApplication::processEvents();
+    QTRY_VERIFY_WITH_TIMEOUT(!canvas->isDrawing(), 15000);
+    QgsCoordinateTransform toCanvas(area->crs(), canvas->mapSettings().destinationCrs(), project);
+    const QgsRectangle viewBounds = toCanvas.transformBoundingBox(QgsRectangle(189935, 559990, 190090, 560125));
+    canvas->setExtent(viewBounds);
+    canvas->setLayers({trenches, area});
+    QSignalSpy rendered(canvas, &QgsMapCanvas::mapCanvasRefreshed);
+    canvas->setRenderFlag(true);
+    canvas->refresh();
+    QTRY_VERIFY_WITH_TIMEOUT(!rendered.isEmpty(), 15000);
+    QTRY_VERIFY_WITH_TIMEOUT(!canvas->isDrawing(), 15000);
+    QVERIFY(canvas->extent().contains(toCanvas.transformBoundingBox(boundary.boundingBox())));
+    QCOMPARE(canvas->mapSettings().destinationCrs().authid(), changedCanvasCrs ? QStringLiteral("EPSG:5186") : QStringLiteral("EPSG:5187"));
+    QCOMPARE(trenches->crs().authid(), area->crs().authid());
+    const QString output = qEnvironmentVariable("KA_HGIS_QA_OUTPUT_DIR");
+    if (!output.isEmpty()) QVERIFY(window.grab().save(QDir(output).filePath(changedCanvasCrs
+        ? QStringLiteral("trench-preset-canvas5186.png") : QStringLiteral("trench-preset.png"))));
+    canvas->setRenderFlag(false);
+    double total = 0.;
+    QgsFeature feature;
+    auto iterator = trenches->getFeatures();
+    while (iterator.nextFeature(feature)) {
+      const QgsGeometry geometry = feature.geometry();
+      total += geometry.area();
+      QgsExpressionContext labelContext;
+      labelContext.setFields(trenches->fields());
+      labelContext.setFeature(feature);
+      QgsExpression labelExpression(trenches->labeling()->settings().fieldName);
+      const QString label = labelExpression.evaluate(&labelContext).toString();
+      QVERIFY(label.contains(feature.attribute(QStringLiteral("name")).toString()));
+      QVERIFY(geometry.difference(boundary).area() < 1e-6);
+      const auto ring = geometry.asPolygon().constFirst();
+      QVERIFY(ring.size() >= 5);
+      QVERIFY(ring[0].distance(ring[1]) <= 2. + 1e-7);
+      QVERIFY(ring[1].distance(ring[2]) <= 20. + 1e-7);
+    }
+    QVERIFY2(qAbs(total - boundary.area() * .1) < 1e-4, qPrintable(QString::number(total, 'f', 6)));
+    tree->setCurrentLayer(area);
+    QVERIFY(QMetaObject::invokeMethod(&window, "applyTrenchByRatio", Qt::DirectConnection, Q_ARG(double, 10.)));
+    QCOMPARE(trenches->featureCount(), firstCount);
+    QVERIFY(trenches->isEditable() || trenches->startEditing());
+    const auto fid = *trenches->allFeatureIds().constBegin();
+    QVERIFY(trenches->changeAttributeValue(fid, trenches->fields().indexOf(QStringLiteral("name")), QStringLiteral("작성 중")));
+    tree->setCurrentLayer(area);
+    QVERIFY(QMetaObject::invokeMethod(&window, "applyTrenchByRatio", Qt::DirectConnection, Q_ARG(double, 10.)));
+    QVERIFY(trenches->isModified());
+    QCOMPARE(trenches->getFeature(fid).attribute(QStringLiteral("name")).toString(), QStringLiteral("작성 중"));
+    auto* messages = window.findChild<QgsMessageBar*>();
+    QVERIFY(messages && messages->currentItem());
+    QCOMPARE(messages->currentItem()->level(), Qgis::MessageLevel::Warning);
+    QVERIFY(messages->currentItem()->text().contains(QStringLiteral("저장하지 않은 편집")));
+    QVERIFY(trenches->rollBack());
   }
 
   void layerDeleteKeyPreservesSourceAndUndoRestoresPendingEdits() {
@@ -930,6 +1332,99 @@ private slots:
     QCOMPARE(canvas->mapSettings().destinationCrs().authid(), authId);
     QCOMPARE(chip->text(), QStringLiteral("작업 %1").arg(authId.mid(5)));
     QCOMPARE(upload->text(), QStringLiteral("→ 제출 5179"));
+  }
+  void embeddedOpenRestoresDemInActualTree_data() {
+    QTest::addColumn<QString>("preset");
+    QTest::addColumn<bool>("reliefEnabled");
+    QTest::newRow("legacy-gray") << QStringLiteral("legacy") << false;
+    QTest::newRow("lowland-relief-off") << QStringLiteral("lowland") << false;
+    QTest::newRow("viewport-relief-off") << QStringLiteral("viewport") << false;
+    QTest::newRow("national-relief-on") << QStringLiteral("national") << true;
+  }
+  void embeddedOpenRestoresDemInActualTree() {
+    QFETCH(QString, preset);
+    QFETCH(bool, reliefEnabled);
+    const QString name = QStringLiteral("dem-embedded-") + preset;
+    const QString rasterPath = m_files.filePath(name + QStringLiteral(".tif"));
+    GDALAllRegister();
+    const auto driver = GDALGetDriverByName("GTiff"); QVERIFY(driver);
+    {
+      std::unique_ptr<void, decltype(&GDALClose)> dataset(
+          GDALCreate(driver, rasterPath.toUtf8().constData(), 16, 16, 1, GDT_Float32, nullptr), GDALClose);
+      QVERIFY(dataset);
+      double transform[] = {190000., 10., 0., 560000., 0., -10.};
+      QCOMPARE(GDALSetGeoTransform(dataset.get(), transform), CE_None);
+      const QgsCoordinateReferenceSystem crs(QStringLiteral("EPSG:5187"));
+      QCOMPARE(GDALSetProjection(dataset.get(), crs.toWkt().toUtf8().constData()), CE_None);
+      float elevations[256];
+      for (int i = 0; i < 256; ++i) elevations[i] = 50.f + float(i % 16) * 50.f;
+      QCOMPARE(GDALRasterIO(GDALGetRasterBand(dataset.get(), 1), GF_Write, 0, 0, 16, 16,
+                            elevations, 16, 16, GDT_Float32, 0, 0), CE_None);
+    }
+    QString error;
+    const QString path = SurveyProjectFactory::createNewSurvey(m_files.path(), name, &error,
+                                                               QStringLiteral("EPSG:5187"));
+    QVERIFY2(!path.isEmpty(), qPrintable(error));
+    const auto colorAt = [](QgsRasterLayer* layer, double elevation) {
+      auto* renderer = dynamic_cast<QgsSingleBandPseudoColorRenderer*>(layer->renderer());
+      if (!renderer || !renderer->shader()) return QColor();
+      int r = 0, g = 0, b = 0, a = 0;
+      if (!renderer->shader()->shade(elevation, &r, &g, &b, &a)) return QColor();
+      return QColor(r, g, b, a);
+    };
+    QColor savedColor;
+    double savedMinimum = 0., savedMaximum = 2000.;
+    {
+      QgsProject saved;
+      saved.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5187")));
+      auto dem = std::make_unique<QgsRasterLayer>(rasterPath, QStringLiteral("DEM"), QStringLiteral("gdal"));
+      QVERIFY(dem->isValid());
+      if (preset != QLatin1String("legacy")) {
+        QVERIFY(DemPresentation::apply(dem.get(), preset, dem->extent()));
+        savedColor = colorAt(dem.get(), 100.); QVERIFY(savedColor.isValid());
+        auto* renderer = dynamic_cast<QgsSingleBandPseudoColorRenderer*>(dem->renderer());
+        savedMinimum = renderer->classificationMin(); savedMaximum = renderer->classificationMax();
+      }
+      LayerOps::markReferenceLayer(dem.get());
+      auto* layer = dem.get(); QVERIFY(saved.addMapLayer(layer)); dem.release();
+      if (preset != QLatin1String("legacy")) {
+        auto* shade = LayerOps::ensureDemRelief(&saved, layer); QVERIFY(shade);
+        auto* shadeNode = saved.layerTreeRoot()->findLayer(shade->id()); QVERIFY(shadeNode);
+        shadeNode->setItemVisibilityChecked(reliefEnabled);
+      }
+      layer->setCustomProperty(QStringLiteral("ka_hgis/dem_relief_enabled"), reliefEnabled);
+      QVERIFY2(SurveyStorage::writeEmbedded(&saved, path, &error), qPrintable(error));
+    }
+    QVERIFY(SurveyStorage::hasEmbeddedProject(path));
+    MainWindow window;
+    disableRendering(window);
+    auto* tree = window.findChild<QgsLayerTreeView*>(QStringLiteral("layerTree")); QVERIFY(tree);
+    auto* originalModel = tree->layerTreeModel();
+    QVERIFY(window.openSurveyGpkg(path));
+    auto* project = QgsProject::instance();
+    const auto layers = project->mapLayersByName(QStringLiteral("DEM")); QCOMPARE(layers.size(), 1);
+    auto* dem = qobject_cast<QgsRasterLayer*>(layers.first()); QVERIFY(dem && dem->isValid());
+    auto* node = project->layerTreeRoot()->findLayer(dem->id()); QVERIFY(node);
+    QCOMPARE(tree->layerTreeModel(), originalModel);
+    const auto legendNodes = originalModel->layerLegendNodes(node);
+    QCOMPARE(legendNodes.size(), 1);
+    QVERIFY2(dynamic_cast<DemColorRampLegend*>(dem->legend()), "Actual MainWindow open must reinstall the DEM legend.");
+    QVERIFY2(dynamic_cast<QgsColorRampLegendNode*>(legendNodes.first()), "The actual tree must show the continuous elevation ramp.");
+    QVERIFY(!legendNodes.first()->data(Qt::DisplayRole).toString().contains(QStringLiteral("Gray")));
+    QCOMPARE(dem->customProperty(QStringLiteral("ka_hgis/dem_preset")).toString(),
+             preset == QLatin1String("legacy") ? QStringLiteral("national") : preset);
+    auto* renderer = dynamic_cast<QgsSingleBandPseudoColorRenderer*>(dem->renderer()); QVERIFY(renderer);
+    QCOMPARE(renderer->classificationMin(), savedMinimum);
+    QCOMPARE(renderer->classificationMax(), savedMaximum);
+    if (savedColor.isValid()) QCOMPARE(colorAt(dem, 100.), savedColor);
+    QVERIFY(dem->findChild<QTimer*>(QStringLiteral("demViewportTimer")));
+    QCOMPARE(dem->customProperty(QStringLiteral("ka_hgis/dem_relief_enabled")).toBool(), reliefEnabled);
+    const auto shades = project->mapLayersByName(QStringLiteral("지형 음영"));
+    QCOMPARE(shades.size(), preset == QLatin1String("legacy") ? 0 : 1);
+    if (!shades.isEmpty()) {
+      auto* shadeNode = project->layerTreeRoot()->findLayer(shades.first()->id()); QVERIFY(shadeNode);
+      QCOMPARE(shadeNode->itemVisibilityChecked(), reliefEnabled);
+    }
   }
   void saveAndReopen_keepsTreeGeometryAttributesAndStyle() {
     const QString path = makeSurvey(QStringLiteral("왕복조사"));
@@ -1637,6 +2132,7 @@ static QByteArray localCadastralCapabilities() {
 }
 
 int main(int argc, char** argv) {
+  QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
   QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
   // GDAL WMS uses libcurl outside QGIS's request preprocessor. Keep its remote
   // requests offline too; these options are scoped to this test process.

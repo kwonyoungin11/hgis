@@ -20,6 +20,7 @@ class QGraphicsRectItem;
 class QKeyEvent;
 class QLabel;
 class QLineEdit;
+class QToolButton;
 class QShowEvent;
 class QSpinBox;
 class QTimer;
@@ -94,6 +95,8 @@ private slots:
   void zoomPaperVisible();
   void onRectDrawn(const QRectF& layoutRect);
   void syncMapFromLayers();
+  void toggleAllLayersChecked();
+  void refreshLayerCheckAllButton();
   void savePdf();
   void beginPlaceLegend();
   void beginPlaceNorth(const QString& svgRel);
@@ -169,6 +172,7 @@ private:
   KaLayoutCoordPointTool* m_toolCoordPoint = nullptr;
   QgsLayerTreeView* m_layerTree = nullptr;
   QgsLayerTreeModel* m_layerModel = nullptr;
+  QToolButton* m_layerCheckAllBtn = nullptr;
   class KaFileBrowserPanel* m_filesPanel = nullptr;
   // 일부러 지운 범례는 글자 설정을 만져도 되살아나지 않는다.
   bool m_legendRemoved = false;

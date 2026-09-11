@@ -12,6 +12,7 @@
 #include <QDebug>
 #include <QDir>
 #include <QFile>
+#include <QCryptographicHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -51,6 +52,7 @@
 #include <windows.h>
 #endif
 #include "core/VworldSettings.h"
+#include "core/KaPortableRuntime.h"
 #include "core/LayerOps.h"
 #include "core/SoilMapService.h"
 #include "core/SurveyProjectFactory.h"
@@ -78,12 +80,32 @@
 // 이미 같은 앱이 떠 있으면 그 창을 앞으로 가져온다(중복 실행 방지).
 // 느린 부팅 중 아이콘을 다시 누르거나 두 번 실행하면 같은 조사 GPKG를
 // 두 프로세스가 잡아 잠금 충돌·중복 다운로드가 나던 문제의 근본 대책.
+static bool kaSameExecutablePath(DWORD pid, const wchar_t* selfPath) {
+  HANDLE proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+  if (!proc)
+    return false;
+  wchar_t path[4096];
+  DWORD n = 4096;
+  const bool ok = QueryFullProcessImageNameW(proc, 0, path, &n) != 0;
+  CloseHandle(proc);
+  return ok && _wcsicmp(path, selfPath) == 0;
+}
+
 static bool kaActivateExistingInstance() {
-  CreateMutexW(nullptr, TRUE, L"Local\\ka-hgis-single-instance");
+  wchar_t selfPath[4096];
+  const DWORD selfLen = GetModuleFileNameW(nullptr, selfPath, 4096);
+  if (selfLen == 0 || selfLen >= 4096)
+    return false;
+  const QByteArray digest = QCryptographicHash::hash(
+      QString::fromWCharArray(selfPath, int(selfLen)).toCaseFolded().toUtf8(),
+      QCryptographicHash::Sha256);
+  const QString mutex = QStringLiteral("Local\\ka-hgis-single-instance-") +
+                        QString::fromLatin1(digest.toHex().left(16));
+  CreateMutexW(nullptr, TRUE, reinterpret_cast<LPCWSTR>(mutex.utf16()));
   if (GetLastError() != ERROR_ALREADY_EXISTS)
     return false;  // 첫 인스턴스 — 계속 부팅
 
-  // 다른 ka-hgis.exe 프로세스들의 PID를 모은다.
+  // 같은 경로의 ka-hgis만 앞으로. 다른 PC에 남은 예전 설치본은 건드리지 않는다.
   DWORD pids[64] = {};
   int pidCount = 0;
   const DWORD self = GetCurrentProcessId();
@@ -94,7 +116,7 @@ static bool kaActivateExistingInstance() {
     if (Process32FirstW(snap, &pe)) {
       do {
         if (pe.th32ProcessID != self && _wcsicmp(pe.szExeFile, L"ka-hgis.exe") == 0 &&
-            pidCount < 64)
+            kaSameExecutablePath(pe.th32ProcessID, selfPath) && pidCount < 64)
           pids[pidCount++] = pe.th32ProcessID;
       } while (Process32NextW(snap, &pe));
     }
@@ -144,53 +166,21 @@ static QString kaExeDir() {
 }
 
 static void applyBundledRuntime() {
-  const QDir app(kaExeDir());
-  const QString qgis = app.filePath(QStringLiteral("apps/qgis-dev"));
-  if (!QDir(qgis).exists())
+  const KaPortablePaths paths = KaPortableRuntime::discover(kaExeDir());
+  if (!paths.looksBundled()) {
+    // 번들이 아니면(개발 빌드) 예전에는 PATH 를 전혀 손대지 않고 launch.ps1 이
+    // 넣어 준 환경에만 기댔다. 그런데 Qt 가 띄우는 자식 프로세스
+    // QtWebEngineProcess.exe 는 D:\OSGeo4Wpps\Qt6in 에 있고 zlib.dll 은
+    // D:\OSGeo4Win 에 있어서, PATH 에 그 폴더가 없으면
+    // 「zlib.dll이 없어 코드 실행을 진행할 수 없습니다」로 죽는다.
+    // 앱이 스스로 채워 두면 어떤 방법으로 실행하든 자식이 DLL 을 찾는다.
+    KaPortableRuntime::prependOsgeoPath();
     return;
-  // Qt6/QGIS는 getenv 문자열을 UTF-8로 QString 변환한다. CP949로 넣으면 한글
-  // 경로에서 prefix가 내부적으로 깨져 srs.db 등을 못 찾는다. UTF-8로 넣는다.
-  qputenv("OSGEO4W_ROOT", app.absolutePath().toUtf8());
-  // 포터블 구조가 감지되면 외부(run.bat 등)가 CP949로 넣은 값 대신 항상 덮어쓴다.
-  qputenv("QGIS_PREFIX_PATH", qgis.toUtf8());
-  // PROJ와 GDAL은 윈도우에서 경로 문자열을 UTF-8로 해석한다. CP949(encodeName)로
-  // 넣으면 한글 폴더(예: "복사본", "바탕 화면")에서 proj.db를 못 찾아 좌표계 전체가
-  // 죽고, 시작 시 위성·지적 자동 올리기가 실패한다. 반드시 UTF-8로 넣는다.
-  const QString proj = app.filePath(QStringLiteral("share/proj"));
-  if (QDir(proj).exists()) {
-    qputenv("PROJ_DATA", proj.toUtf8());
-    qputenv("PROJ_LIB", proj.toUtf8());
   }
-  const QString gdal = app.filePath(QStringLiteral("apps/gdal-dev/share/gdal"));
-  if (QDir(gdal).exists())
-    qputenv("GDAL_DATA", gdal.toUtf8());
-  const QString qtPlug = app.filePath(QStringLiteral("apps/Qt6/plugins"));
-  if (QDir(qtPlug).exists()) {
-    QCoreApplication::addLibraryPath(qtPlug);
-    qputenv("QT_PLUGIN_PATH", qtPlug.toUtf8());
-  }
-  const QString qgisPlugDir = QDir(qgis).filePath(QStringLiteral("plugins"));
-  if (QDir(qgisPlugDir).exists())
-    qputenv("QGIS_PLUGIN_PATH", qgisPlugDir.toUtf8());
-  const QString qgisPlug = QDir(qgis).filePath(QStringLiteral("qtplugins"));
-  if (QDir(qgisPlug).exists())
-    QCoreApplication::addLibraryPath(qgisPlug);
-  QStringList prepend;
-  const QStringList rels = {
-      QString(),
-      QStringLiteral("bin"),
-      QStringLiteral("apps/qgis-dev/bin"),
-      QStringLiteral("apps/Qt6/bin"),
-      QStringLiteral("apps/gdal-dev/bin"),
-      QStringLiteral("apps/pdal-dev/bin"),
-  };
-  for (const QString& rel : rels) {
-    const QString p = rel.isEmpty() ? app.absolutePath() : app.filePath(rel);
-    if (QDir(p).exists())
-      prepend << QDir::toNativeSeparators(p);
-  }
-  const QString old = QString::fromLocal8Bit(qgetenv("PATH"));
-  qputenv("PATH", (prepend.join(QLatin1Char(';')) + QLatin1Char(';') + old).toLocal8Bit());
+  // 한글 폴더(복사본·바탕 화면)에서도 proj.db를 찾도록 UTF-8 + Wide env.
+  // EXE만 눌러도 start.bat 없이 동작한다.
+  KaPortableRuntime::applyEnvironment(paths);
+  KaPortableRuntime::isolateUserState(paths);
 }
 
 static bool prepareSessionTempDirectory() {
@@ -499,7 +489,7 @@ static int writePhase1Qa(MainWindow* w, const QString& outPath) {
     if (auto* btnDem = w->findChild<QToolButton*>(QStringLiteral("btnDem"))) {
       if (QMenu* dm = btnDem->menu()) {
         for (QAction* a : dm->actions()) {
-          if (a && a->text().contains(QStringLiteral("높이 구간"))) {
+          if (a && a->text().contains(QStringLiteral("DEM 표현"))) {
             demClasses = true;
             break;
           }
@@ -711,13 +701,20 @@ int KaApplication::run(int argc, char** argv) {
 #endif
 
   const bool sessionTempReady = prepareSessionTempDirectory();
+  QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
+  // 수치지형도·국가유산 인트라넷 창(QtWebEngine)이 페이지를 실제로 열게 한다.
+  // QApplication 을 만든 뒤에 걸면 늦다.
+  KaPortableRuntime::applyWebEngineFlags();
 
   // Keep 125/150/175% (4K) instead of snapping to 1x or 2x. Must precede QgsApplication.
   QGuiApplication::setHighDpiScaleFactorRoundingPolicy(
       Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
 
 #if KA_HGIS_HAS_QGIS
+  QCoreApplication::setOrganizationName(QStringLiteral("ka-hgis"));
+  QCoreApplication::setApplicationName(QStringLiteral("ka-hgis"));
   // PROJ/GDAL 환경은 QgsApplication이 첫 좌표계 컨텍스트를 만들기 전에 준비돼야 한다.
+  // 포터블이면 QSettings도 이 폴더 config로 묶어 다른 PC의 이전 설치를 읽지 않는다.
   applyBundledRuntime();
 #endif
   if (!sessionTempReady) {
@@ -772,6 +769,24 @@ int KaApplication::run(int argc, char** argv) {
   QgsApplication::setPluginPath(prefix + QStringLiteral("/plugins"));
   QgsApplication::setPkgDataPath(prefix);
   QgsApplication::initQgis();
+  {
+    const KaPortablePaths bundled = KaPortableRuntime::discover(kaExeDir());
+    if (bundled.looksBundled() && !bundled.projData.isEmpty()) {
+      KaPortableRuntime::bindProjSearchPaths(bundled.projData);
+      const bool crsOk = KaPortableRuntime::koreaWorkAndWebCrsValid();
+      KaCrashGuard::logLine(QStringLiteral("[boot] PROJ %1 · 5186/5187/3857 %2")
+                                .arg(bundled.projData, crsOk ? QStringLiteral("ok")
+                                                             : QStringLiteral("fail")));
+      if (!crsOk && !smokeQuit && !qaPhase1) {
+        QMessageBox::warning(
+            nullptr, QStringLiteral("좌표계 자료를 읽지 못했습니다"),
+            QStringLiteral(
+                "이 폴더의 proj.db로 작업 좌표계(5186/5187)와 위성·지적(3857)을 읽지 못했습니다.\n"
+                "폴더 전체를 복사한 뒤 ka-hgis.exe 또는 start.bat으로 다시 실행하세요.\n"
+                "실행 파일만 옮기면 지도가 나타나지 않습니다."));
+      }
+    }
+  }
   QgsNetworkAccessManager::instance()->setupDefaultProxyAndCache();
   // 끊긴 현장 연결에서 WMS/XYZ 요청이 무제한 기다리지 않도록 한다.
   QgsNetworkAccessManager::setTimeout(15000);
@@ -780,6 +795,12 @@ int KaApplication::run(int argc, char** argv) {
   // 버전에서 먹지 않아 캐시 객체에 직접 건다.
   if (auto* dc = qobject_cast<QNetworkDiskCache*>(QgsNetworkAccessManager::instance()->cache())) {
     dc->setMaximumCacheSize(2LL * 1024 * 1024 * 1024);
+    const KaPortablePaths bundled = KaPortableRuntime::discover(kaExeDir());
+    if (bundled.looksBundled()) {
+      const QString cache = QDir(bundled.exeDir).filePath(QStringLiteral("cache/tiles"));
+      QDir().mkpath(cache);
+      dc->setCacheDirectory(cache);
+    }
     KaCrashGuard::logLine(QStringLiteral("[boot] 타일 캐시 %1 MB — %2")
                               .arg(dc->maximumCacheSize() / (1024 * 1024))
                               .arg(dc->cacheDirectory()));

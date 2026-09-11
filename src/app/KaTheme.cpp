@@ -35,36 +35,36 @@ QColor blendSurface(const QColor& color, const QColor& surface, double fraction)
 // Shared chrome colors. Map symbols, page contents and IconPalette are separate.
 const Tokens kTokens = [] {
   Tokens colors = {
-    QColor(0xDD, 0xE8, 0xEF),  // sky0 selection wash
-    QColor(0x2C, 0x6F, 0x91),  // sky1 accent
-    QColor(0x24, 0x5D, 0x7A),  // sky2 accent hover
-    QColor(0x1D, 0x4B, 0x63),  // sky3 deep accent
-    QColor(0xEE, 0xF1, 0xF4),  // sky4 window
-    QColor(0x2C, 0x6F, 0x91),  // sky5 selection highlight
+    QColor(0xD6, 0xF0, 0xFC),  // sky0 Bloom selection wash
+    QColor(0x00, 0x78, 0xD4),  // sky1 Windows accent https://fluent2.microsoft.design/color
+    QColor(0x00, 0x67, 0xC0),  // sky2 accent hover (darker so white text stays >= 4.5)
+    QColor(0x00, 0x5A, 0x9E),  // sky3 deep accent
+    QColor(0xF3, 0xF3, 0xF3),  // sky4 Mica light fallback
+    QColor(0x00, 0x78, 0xD4),  // sky5 selection highlight (= sky1)
     QColor(0x20, 0x28, 0x31),  // sky6 ink
     QColor(0x20, 0x28, 0x31),  // ink
     QColor(0x52, 0x60, 0x6D),  // inkMuted
     QColor(0x59, 0x68, 0x74),  // inkDisabled, readable on disabledSurface
     QColor(0xCB, 0xD3, 0xDB),  // border
     QColor(0xFF, 0xFF, 0xFF),  // bevelLight
-    QColor(0xAA, 0xB5, 0xC0),  // bevelDark
+    QColor(0x9B, 0xB4, 0xC6),  // bevelDark
     QColor(0xFF, 0xFF, 0xFF),  // canvasNeutral
-    QColor(0xEE, 0xF1, 0xF4),  // desk
+    QColor(0xE8, 0xF1, 0xF8),  // desk Bloom mica tint
     QColor(0xA3, 0x3A, 0x2E),  // danger
     QColor(0x32, 0x6B, 0x4A),  // ok
     QColor(0xFF, 0xFF, 0xFF),  // surface
-    QColor(0xF4, 0xF6, 0xF8),  // glossMiddle
-    QColor(0xE5, 0xEA, 0xF0),  // glossBottom
+    QColor(0xF0, 0xF7, 0xFB),  // glossMiddle
+    QColor(0xD7, 0xE8, 0xF4),  // glossBottom
     QColor(0xFF, 0xFF, 0xFF),  // hoverTop
-    QColor(0xE0, 0xE9, 0xF0),  // hoverBottom
-    QColor(0xD6, 0xE0, 0xE9),  // pressedTop
-    QColor(0xE5, 0xEC, 0xF2),  // pressedBottom
-    QColor(0xF3, 0xF7, 0xFA),  // selectedTop
-    QColor(0xDD, 0xE8, 0xEF),  // selectedBottom
-    QColor(0xF0, 0xF2, 0xF4),  // disabledSurface
-    QColor(0x2B, 0x34, 0x3E),  // rail
+    QColor(0xCD, 0xE6, 0xF5),  // hoverBottom
+    QColor(0xB9, 0xD9, 0xEE),  // pressedTop
+    QColor(0xD4, 0xE8, 0xF4),  // pressedBottom
+    QColor(0xE7, 0xF5, 0xFC),  // selectedTop
+    QColor(0xC5, 0xE7, 0xF6),  // selectedBottom
+    QColor(0xE8, 0xEE, 0xF2),  // disabledSurface
+    QColor(0x00, 0x67, 0xC0),  // rail Bloom blue (not softened)
     QColor(0xFF, 0xFF, 0xFF),  // railText
-    QColor(0xC6, 0xD0, 0xDA),  // railMuted
+    QColor(0xF3, 0xFB, 0xFF),  // railMuted, >= 4.5 on accent and rail
     QColor(0xEA, 0xF2, 0xEC),  // successSurface
     QColor(0xF9, 0xE9, 0xE5),  // dangerSurface
   };
@@ -93,7 +93,9 @@ const Tokens kTokens = [] {
   // Text, outlines, disabled ink and the map-neutral surface stay unchanged.
   colors.glossReflection = colors.surface;
   colors.glossShoulder = blendSurface(colors.glossMiddle, colors.surface, 0.5);
-  colors.accentReflection = blendSurface(colors.sky1, colors.surface, 0.08);
+  // Do not lift the accent toward white: #0078D4 + 8% white drops below 4.5:1
+  // on surface text. Keep the reflection stop equal to the softened accent.
+  colors.accentReflection = colors.sky1;
   return colors;
 }();
 

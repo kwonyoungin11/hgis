@@ -108,9 +108,11 @@ void MainWindow::startDemDownload() {
           .arg(coverage.xMinimum(), 0, 'f', 9).arg(coverage.yMinimum(), 0, 'f', 9)
           .arg(coverage.xMaximum(), 0, 'f', 9).arg(coverage.yMaximum(), 0, 'f', 9));
       if (window->m_layerTree) window->m_layerTree->setCurrentLayer(layer);
+      const QString reliefError = layer->customProperty(QStringLiteral("ka_hgis/dem_relief_error")).toString();
+      if (!reliefError.isEmpty()) window->notify(Notice::Warning, QStringLiteral("DEM 음영 표시 실패"), reliefError);
     }
     QgsProject::instance()->setDirty(true);
-    window->statusBar()->showMessage(QStringLiteral("DEM을 추가했습니다. 높이별 색 간격은 DEM 우클릭의 높이 구간에서 조절하세요."), 8000);
+    window->statusBar()->showMessage(QStringLiteral("DEM을 추가했습니다. DEM 버튼의 「DEM 표현」에서 색과 음영을 조절하세요."), 8000);
     if (!result.warnings.isEmpty()) window->notify(Notice::Warning, QStringLiteral("DEM 자료 확인"), result.warnings.join(QLatin1Char('\n')));
   });
 }

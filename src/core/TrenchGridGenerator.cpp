@@ -2,7 +2,11 @@
 
 #include <cmath>
 #include <cstring>
+#include <memory>
+#include <limits>
 #include <unordered_set>
+
+#include <QScopeGuard>
 
 #include <gdal.h>
 #include <ogr_api.h>
@@ -16,16 +20,61 @@
 #endif
 
 namespace TrenchGridGenerator {
+namespace {
+
+constexpr double kMaxWidth = 2.0;
+constexpr double kMaxLength = 20.0;
+constexpr size_t kMaxCells = 200000;
+constexpr double kGeometryTolerance = 1e-7;
+
+struct GeometryDeleter {
+  void operator()(OGRGeometry* geometry) const { OGRGeometryFactory::destroyGeometry(geometry); }
+};
+using Geometry = std::unique_ptr<OGRGeometry, GeometryDeleter>;
+using Dataset = std::unique_ptr<GDALDataset, decltype(&GDALClose)>;
+
+bool validDimensions(double width, double length) {
+  return std::isfinite(width) && width > 0.0 && width <= kMaxWidth &&
+         std::isfinite(length) && length > 0.0 && length <= kMaxLength;
+}
+
+bool validSpec(const Spec& spec) {
+  return validDimensions(spec.trenchWidth, spec.trenchLength) &&
+         std::isfinite(spec.balkWidth) && spec.balkWidth >= 0.0 &&
+         std::isfinite(spec.azimuthDeg) && std::isfinite(spec.originX) && std::isfinite(spec.originY);
+}
+
+bool validCell(const Cell& cell) {
+  if (!validDimensions(cell.width, cell.length)) return false;
+  for (const auto& point : cell.ring)
+    if (!std::isfinite(point.first) || !std::isfinite(point.second)) return false;
+  const auto& p = cell.ring;
+  const double ux = p[1].first - p[0].first, uy = p[1].second - p[0].second;
+  const double vx = p[3].first - p[0].first, vy = p[3].second - p[0].second;
+  const double width = std::hypot(ux, uy), length = std::hypot(vx, vy);
+  if (!(width > 0.0) || !(length > 0.0) ||
+      std::abs(width - cell.width) > kGeometryTolerance ||
+      std::abs(length - cell.length) > kGeometryTolerance)
+    return false;
+  // Four finite vertices must form the same closed rectangle as its attributes.
+  return std::hypot(p[4].first - p[0].first, p[4].second - p[0].second) <= kGeometryTolerance &&
+         std::hypot((p[2].first - p[1].first) - vx,
+                    (p[2].second - p[1].second) - vy) <= kGeometryTolerance &&
+         std::abs((ux / width) * (vx / length) + (uy / width) * (vy / length)) <= kGeometryTolerance;
+}
+
+}  // namespace
 
 std::vector<Cell> build(const Spec& spec) {
   std::vector<Cell> out;
-  const int rows = std::max(0, spec.rows);
-  const int cols = std::max(0, spec.cols);
-  const double w = std::abs(spec.trenchWidth);
-  const double len = std::abs(spec.trenchLength);
-  const double balk = std::max(0.0, spec.balkWidth);
-  if (rows <= 0 || cols <= 0 || !(w > 0.0) || !(len > 0.0))
+  const int rows = spec.rows;
+  const int cols = spec.cols;
+  if (!validSpec(spec) || rows <= 0 || cols <= 0 ||
+      static_cast<size_t>(rows) > kMaxCells / static_cast<size_t>(cols))
     return out;
+  const double w = spec.trenchWidth;
+  const double len = spec.trenchLength;
+  const double balk = spec.balkWidth;
 
   // Azimuth clockwise from north. Local +X = east, +Y = north at azimuth 0.
   const double a = spec.azimuthDeg * M_PI / 180.0;
@@ -56,6 +105,7 @@ std::vector<Cell> build(const Spec& spec) {
       cell.ring[2] = p2;
       cell.ring[3] = p3;
       cell.ring[4] = p0;
+      if (!validCell(cell)) return {};
       out.push_back(cell);
     }
   }
@@ -102,7 +152,7 @@ void forEachVertex(const OGRGeometry* g, F&& fn) {
 }  // namespace
 
 PickedArea pickAutoFillArea(const std::vector<SurveyPoly>& features,
-                            const std::vector<qint64>& selectedFids) {
+                            const std::vector<qint64>& selectedFids, bool useAll) {
   PickedArea out;
   std::vector<const SurveyPoly*> valid;
   valid.reserve(features.size());
@@ -126,12 +176,17 @@ PickedArea pickAutoFillArea(const std::vector<SurveyPoly>& features,
       out.usedSelection = true;
   }
   if (use.empty()) {
-    const SurveyPoly* newest = valid.front();
-    for (const SurveyPoly* f : valid) {
-      if (f->fid > newest->fid)
-        newest = f;
+    if (useAll) {
+      // 사용자가 「조사구역 전체」를 고른 경우에만 전부 합친다.
+      use = valid;
+    } else {
+      const SurveyPoly* newest = valid.front();
+      for (const SurveyPoly* f : valid) {
+        if (f->fid > newest->fid)
+          newest = f;
+      }
+      use.push_back(newest);
     }
-    use.push_back(newest);
     out.usedSelection = false;
   }
   out.usedCount = static_cast<int>(use.size());
@@ -160,20 +215,16 @@ PickedArea pickAutoFillArea(const std::vector<SurveyPoly>& features,
 
 std::vector<Cell> buildInArea(const Spec& spec, const QByteArray& areaWkb) {
   std::vector<Cell> out;
-  const double w = std::abs(spec.trenchWidth);
-  const double len = std::abs(spec.trenchLength);
-  const double balk = std::max(0.0, spec.balkWidth);
-  if (areaWkb.isEmpty() || !(w > 0.0) || !(len > 0.0))
+  if (areaWkb.isEmpty() || !validSpec(spec))
     return out;
-
-  OGRGeometry* area = nullptr;
-  OGRGeometryFactory::createFromWkb(areaWkb.constData(), nullptr, &area,
-                                    static_cast<size_t>(areaWkb.size()));
-  if (!area)
+  const double w = spec.trenchWidth;
+  const double len = spec.trenchLength;
+  const double balk = spec.balkWidth;
+  Geometry area(geomFromWkb(areaWkb));
+  if (!area || area->IsEmpty())
     return out;
   const OGRwkbGeometryType gt = wkbFlatten(area->getGeometryType());
-  if (gt != wkbPolygon && gt != wkbMultiPolygon) {
-    OGRGeometryFactory::destroyGeometry(area);
+  if ((gt != wkbPolygon && gt != wkbMultiPolygon) || !area->IsValid()) {
     return out;
   }
 
@@ -217,14 +268,18 @@ std::vector<Cell> buildInArea(const Spec& spec, const QByteArray& areaWkb) {
 
   const double stepU = w + balk;
   const double stepV = len + balk;
-  const long long nu = static_cast<long long>((uMax - uMin) / stepU) + 2;
-  const long long nv = static_cast<long long>((vMax - vMin) / stepV) + 2;
-  if (nu <= 0 || nv <= 0 || nu * nv > 200000) {
-    OGRGeometryFactory::destroyGeometry(area);
+  const double countU = (uMax - uMin) / stepU;
+  const double countV = (vMax - vMin) / stepV;
+  if (!std::isfinite(countU) || !std::isfinite(countV) || countU < 0.0 || countV < 0.0 ||
+      countU > double(kMaxCells) - 2.0 || countV > double(kMaxCells) - 2.0)
+    return out;
+  const long long nu = static_cast<long long>(countU) + 2;
+  const long long nv = static_cast<long long>(countV) + 2;
+  if (nu * nv > static_cast<long long>(kMaxCells)) {
     return out;
   }
 
-  auto collect = [&](bool centroidOk) {
+  auto collect = [&]() {
     int n = 1;
     std::vector<Cell> got;
     for (long long j = 0; j < nv; ++j) {
@@ -245,27 +300,21 @@ std::vector<Cell> buildInArea(const Spec& spec, const QByteArray& areaWkb) {
         poly.addRing(&ring);
         double keepV0 = v0;
         double keepLen = len;
-        if (centroidOk) {
-          OGRPoint mid((p0.first + p2.first) * 0.5, (p0.second + p2.second) * 0.5);
-          if (!area->Contains(&mid))
-            continue;
-        } else if (!area->Contains(&poly)) {
+        if (!area->Contains(&poly)) {
           // 경계에 걸치면 통째로 버리지 않는다. 그러면 가장자리가 비어 배치가
           // 고르지 않다. 폭 2 m는 그대로 두고 길이만 잘라 구역 안에 넣는다.
           if (!area->Intersects(&poly))
             continue;
-          OGRGeometry* inter = area->Intersection(&poly);
+          Geometry inter(area->Intersection(&poly));
           if (!inter || inter->IsEmpty()) {
-            if (inter) OGRGeometryFactory::destroyGeometry(inter);
             continue;
           }
           double loV = 1e300, hiV = -1e300;
-          forEachVertex(inter, [&](double wx, double wy) {
+          forEachVertex(inter.get(), [&](double wx, double wy) {
             const double lv = toLocal(wx, wy).second;
             loV = std::min(loV, lv);
             hiV = std::max(hiV, lv);
           });
-          OGRGeometryFactory::destroyGeometry(inter);
           loV = std::max(loV, v0);
           hiV = std::min(hiV, v0 + len);
           double cut = hiV - loV;
@@ -312,16 +361,14 @@ std::vector<Cell> buildInArea(const Spec& spec, const QByteArray& areaWkb) {
         cell.ring[2] = k2;
         cell.ring[3] = k3;
         cell.ring[4] = k0;
+        if (!validCell(cell)) continue;
         got.push_back(cell);
       }
     }
     return got;
   };
 
-  out = collect(false);
-  if (out.empty())
-    out = collect(true);
-  OGRGeometryFactory::destroyGeometry(area);
+  out = collect();
   return out;
 }
 
@@ -378,26 +425,35 @@ SlopeAspect upslopeAspect(const std::vector<ElevSample>& samples, double minSlop
 RatioFill buildForTargetRatio(const QByteArray& areaWkb, double targetPct, double width,
                               double azimuthDeg) {
   RatioFill best;
-  const double w = std::abs(width);
-  if (areaWkb.isEmpty() || !(w > 0.0) || !(targetPct > 0.0))
+  if (areaWkb.isEmpty() || !validDimensions(width, kMaxLength) ||
+      !std::isfinite(targetPct) || targetPct <= 0.0 || targetPct > 100.0 ||
+      !std::isfinite(azimuthDeg)) {
+    best.error = QStringLiteral("폭은 0 초과 2 m 이하, 목표 비율은 0 초과 100% 이하의 유효한 값이어야 합니다.");
     return best;
+  }
 
-  OGRGeometry* area = geomFromWkb(areaWkb);
-  if (!area)
+  Geometry area(geomFromWkb(areaWkb));
+  if (!area || area->IsEmpty() ||
+      (wkbFlatten(area->getGeometryType()) != wkbPolygon &&
+       wkbFlatten(area->getGeometryType()) != wkbMultiPolygon) || !area->IsValid()) {
+    best.error = QStringLiteral("유효한 조사구역 면을 찾지 못했습니다.");
     return best;
-  const double areaM2 = OGR_G_Area(OGRGeometry::ToHandle(area));
-  OGRGeometryFactory::destroyGeometry(area);
-  if (!(areaM2 > 1e-6))
+  }
+  const double areaM2 = OGR_G_Area(OGRGeometry::ToHandle(area.get()));
+  const double targetArea = areaM2 * (targetPct / 100.0);
+  if (!std::isfinite(areaM2) || !(areaM2 > 1e-6) || !(targetArea > 0.0)) {
+    best.error = QStringLiteral("조사구역 면적과 목표 면적을 계산하지 못했습니다.");
     return best;
+  }
   best.areaM2 = areaM2;
 
   Spec s;
-  s.trenchWidth = w;
+  s.trenchWidth = width;
   s.azimuthDeg = azimuthDeg;
   s.namePrefix = targetPct <= 3.5 ? QStringLiteral("Sp-") : QStringLiteral("Tr-");
 
-  double bestScore = 1e300;
-  const double lengths[] = {8.0, 10.0, 12.0, 16.0, 20.0, 24.0, 30.0, 40.0};
+  double bestArea = std::numeric_limits<double>::infinity();
+  const double lengths[] = {8.0, 10.0, 12.0, 16.0, 20.0};
   for (double len : lengths) {
     s.trenchLength = len;
     for (double balk = 2.0; balk <= 120.0; balk += 2.0) {
@@ -405,22 +461,45 @@ RatioFill buildForTargetRatio(const QByteArray& areaWkb, double targetPct, doubl
       auto cells = buildInArea(s, areaWkb);
       if (cells.empty())
         continue;
-      const double pct = totalArea(cells) / areaM2 * 100.0;
-      double score = std::abs(pct - targetPct);
-      if (pct > targetPct + 1.0)
-        score += (pct - targetPct) * 2.0;
-      if (score < bestScore) {
-        bestScore = score;
+      const double candidateArea = totalArea(cells);
+      if (candidateArea >= targetArea && candidateArea < bestArea) {
+        bestArea = candidateArea;
         best.cells = std::move(cells);
-        best.length = len;
         best.balk = balk;
-        best.ratioPct = pct;
         best.azimuthDeg = azimuthDeg;
       }
-      if (bestScore < 0.12)
-        return best;
+      if (bestArea - targetArea < std::max(1e-9, targetArea * 1e-10)) break;
     }
+    if (bestArea - targetArea < std::max(1e-9, targetArea * 1e-10)) break;
   }
+  if (best.cells.empty()) {
+    best.error = QStringLiteral("현재 구역과 방향에서 폭 %1 m·길이 20 m 이하로 목표 %2%를 배치할 수 없습니다. 기존 격자는 유지됩니다.")
+                     .arg(width).arg(targetPct);
+    return best;
+  }
+
+  // Shrinking only the length keeps each result inside its original rectangle:
+  // containment and separation survive, including holes and concave boundaries.
+  const double factor = targetArea / bestArea;
+  for (Cell& cell : best.cells) {
+    const auto original = cell.ring;
+    const double dx = (original[3].first - original[0].first) * ((1.0 - factor) * 0.5);
+    const double dy = (original[3].second - original[0].second) * ((1.0 - factor) * 0.5);
+    cell.ring[0] = {original[0].first + dx, original[0].second + dy};
+    cell.ring[1] = {original[1].first + dx, original[1].second + dy};
+    cell.ring[2] = {original[2].first - dx, original[2].second - dy};
+    cell.ring[3] = {original[3].first - dx, original[3].second - dy};
+    cell.ring[4] = cell.ring[0];
+    cell.length *= factor;
+    if (!validCell(cell)) {
+      best.cells.clear();
+      best.length = 0.0;
+      best.error = QStringLiteral("목표 면적에 맞는 유효한 시굴격자를 계산하지 못했습니다.");
+      return best;
+    }
+    best.length = std::max(best.length, cell.length);
+  }
+  best.ratioPct = totalArea(best.cells) / areaM2 * 100.0;
   return best;
 }
 
@@ -433,46 +512,84 @@ double totalArea(const std::vector<Cell>& cells) {
 
 bool writeGpkg(const QString& gpkgPath, const QString& layerName, const std::vector<Cell>& cells,
                const QString& authid, QString* errorOut) {
-  GDALAllRegister();
-  if (gpkgPath.isEmpty() || layerName.isEmpty()) {
-    if (errorOut)
-      *errorOut = QStringLiteral("GPKG 경로가 없습니다.");
+  if (errorOut) errorOut->clear();
+  const auto fail = [errorOut](const QString& message) {
+    if (errorOut) *errorOut = message;
     return false;
-  }
+  };
+  // Validate everything before opening a write connection or deleting anything.
+  if (gpkgPath.isEmpty() || layerName.isEmpty())
+    return fail(QStringLiteral("GPKG 경로와 레이어 이름이 필요합니다."));
+  if (cells.empty() || cells.size() > kMaxCells)
+    return fail(QStringLiteral("기록할 시굴격자가 없거나 개수가 너무 많습니다."));
+  for (const Cell& cell : cells)
+    if (!validCell(cell))
+      return fail(QStringLiteral("시굴격자 규격과 도형이 일치하지 않습니다. 폭은 최대 2 m, 길이는 최대 20 m입니다."));
+  OGRSpatialReference srs;
+  if (srs.SetFromUserInput(authid.toUtf8().constData()) != OGRERR_NONE)
+    return fail(QStringLiteral("시굴격자 작업 좌표계를 읽지 못했습니다."));
+  // Cell coordinates and GeoPackage layers use x/y GIS order, even when the
+  // EPSG definition declares northing before easting (5186/5187).
+  srs.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+  if (!srs.IsProjected() ||
+      std::abs(srs.GetLinearUnits() - 1.0) > 1e-9)
+    return fail(QStringLiteral("시굴격자는 미터 단위의 작업 좌표계로 저장해야 합니다."));
 
-  GDALDataset* ds = static_cast<GDALDataset*>(GDALOpenEx(
-      gpkgPath.toUtf8().constData(), GDAL_OF_VECTOR | GDAL_OF_UPDATE, nullptr, nullptr, nullptr));
-  if (!ds) {
-    if (errorOut)
-      *errorOut = QStringLiteral("GPKG를 열 수 없습니다. 먼저 새 조사를 만드세요.");
-    return false;
-  }
+  GDALAllRegister();
+  const char* allowedDrivers[] = {"GPKG", nullptr};
+  Dataset ds(static_cast<GDALDataset*>(GDALOpenEx(
+                 gpkgPath.toUtf8().constData(), GDAL_OF_VECTOR | GDAL_OF_UPDATE,
+                 allowedDrivers, nullptr, nullptr)), &GDALClose);
+  if (!ds)
+    return fail(QStringLiteral("GPKG를 열 수 없습니다. 먼저 새 조사를 만드세요."));
+  if (ds->StartTransaction() != OGRERR_NONE)
+    return fail(QStringLiteral("시굴격자 교체 작업을 시작하지 못했습니다. 기존 격자는 유지됩니다."));
+  bool transactionActive = true;
+  const auto rollback = qScopeGuard([&]() {
+    if (transactionActive && ds->RollbackTransaction() != OGRERR_NONE && errorOut)
+      *errorOut += QStringLiteral(" 기존 격자 복구 결과를 확인하지 못했습니다.");
+  });
 
   OGRLayer* lyr = ds->GetLayerByName(layerName.toUtf8().constData());
   if (!lyr) {
-    OGRSpatialReference srs;
-    srs.SetFromUserInput(authid.toUtf8().constData());
     lyr = ds->CreateLayer(layerName.toUtf8().constData(), &srs, wkbPolygon, nullptr);
     if (lyr) {
       OGRFieldDefn fName("name", OFTString);
       fName.SetWidth(64);
-      lyr->CreateField(&fName);
       OGRFieldDefn fW("width", OFTReal);
-      lyr->CreateField(&fW);
       OGRFieldDefn fL("length", OFTReal);
-      lyr->CreateField(&fL);
+      if (lyr->CreateField(&fName) != OGRERR_NONE || lyr->CreateField(&fW) != OGRERR_NONE ||
+          lyr->CreateField(&fL) != OGRERR_NONE)
+        return fail(QStringLiteral("시굴격자 속성 필드를 만들지 못했습니다."));
     }
   }
-  if (!lyr) {
-    GDALClose(ds);
-    if (errorOut)
-      *errorOut = QStringLiteral("시굴격자 레이어를 만들 수 없습니다.");
-    return false;
-  }
+  if (!lyr)
+    return fail(QStringLiteral("시굴격자 레이어를 만들 수 없습니다."));
+  if (wkbFlatten(lyr->GetGeomType()) != wkbPolygon || !lyr->GetSpatialRef() ||
+      !srs.IsSame(lyr->GetSpatialRef()))
+    return fail(QStringLiteral("기존 시굴격자의 도형 형식 또는 좌표계가 작업 좌표계와 다릅니다."));
 
   const int iName = lyr->FindFieldIndex("name", TRUE);
   const int iW = lyr->FindFieldIndex("width", TRUE);
   const int iL = lyr->FindFieldIndex("length", TRUE);
+  if (iName < 0 || iW < 0 || iL < 0 ||
+      lyr->GetLayerDefn()->GetFieldDefn(iName)->GetType() != OFTString ||
+      lyr->GetLayerDefn()->GetFieldDefn(iW)->GetType() != OFTReal ||
+      lyr->GetLayerDefn()->GetFieldDefn(iL)->GetType() != OFTReal)
+    return fail(QStringLiteral("기존 시굴격자의 속성 필드가 올바르지 않습니다."));
+
+  std::vector<GIntBig> oldFids;
+  lyr->ResetReading();
+  CPLErrorReset();
+  while (OGRFeature* raw = lyr->GetNextFeature()) {
+    std::unique_ptr<OGRFeature, decltype(&OGRFeature::DestroyFeature)> feature(raw, &OGRFeature::DestroyFeature);
+    oldFids.push_back(feature->GetFID());
+  }
+  if (CPLGetLastErrorType() >= CE_Failure)
+    return fail(QStringLiteral("기존 시굴격자를 읽지 못했습니다."));
+  for (GIntBig fid : oldFids)
+    if (lyr->DeleteFeature(fid) != OGRERR_NONE)
+      return fail(QStringLiteral("기존 시굴격자를 교체하지 못했습니다."));
 
   for (const Cell& cell : cells) {
     OGRLinearRing ring;
@@ -481,22 +598,19 @@ bool writeGpkg(const QString& gpkgPath, const QString& layerName, const std::vec
     OGRPolygon poly;
     poly.addRing(&ring);
     OGRFeature feat(lyr->GetLayerDefn());
-    feat.SetGeometry(&poly);
-    if (iName >= 0)
-      feat.SetField(iName, cell.name.toUtf8().constData());
-    if (iW >= 0)
-      feat.SetField(iW, cell.width);
-    if (iL >= 0)
-      feat.SetField(iL, cell.length);
-    if (lyr->CreateFeature(&feat) != OGRERR_NONE) {
-      GDALClose(ds);
-      if (errorOut)
-        *errorOut = QStringLiteral("트렌치를 쓰지 못했습니다: %1").arg(cell.name);
-      return false;
-    }
+    if (feat.SetGeometry(&poly) != OGRERR_NONE)
+      return fail(QStringLiteral("시굴격자 도형을 기록하지 못했습니다: %1").arg(cell.name));
+    feat.SetField(iName, cell.name.toUtf8().constData());
+    feat.SetField(iW, cell.width);
+    feat.SetField(iL, cell.length);
+    if (lyr->CreateFeature(&feat) != OGRERR_NONE)
+      return fail(QStringLiteral("트렌치를 쓰지 못했습니다: %1").arg(cell.name));
   }
-  lyr->SyncToDisk();
-  GDALClose(ds);
+  if (lyr->SyncToDisk() != OGRERR_NONE || ds->FlushCache() != CE_None)
+    return fail(QStringLiteral("시굴격자 기록을 마치지 못했습니다."));
+  if (ds->CommitTransaction() != OGRERR_NONE)
+    return fail(QStringLiteral("시굴격자 교체를 완료하지 못했습니다."));
+  transactionActive = false;
   return true;
 }
 

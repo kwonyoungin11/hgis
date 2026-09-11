@@ -1,5 +1,7 @@
 #include <cmath>
 #include <vector>
+#include <limits>
+#include <memory>
 
 #include <QtTest>
 #include <QCoreApplication>
@@ -14,6 +16,7 @@
 #include "core/CanvasGridMath.h"
 
 #include <gdal_priv.h>
+#include <ogr_api.h>
 #include <ogr_geometry.h>
 #include <ogrsf_frmts.h>
 #include <qgsfeedback.h>
@@ -25,13 +28,20 @@ private slots:
   void trench1x1Is40m2();
   void trenchTwoColsSpacedByBalk();
   void buildInAreaKeepsCellsInsideAndRatio();
-  void buildInArea_shortAreaPlacesByCentroid();
+  void buildInArea_shortAreaTrimsInside();
   void startTrenchGrid_placesOnMapWithoutApplyClick();
   void pickAutoFillArea_usesNewestNotAllUnion();
   void pickAutoFillArea_usesSelectedOnly();
   void startTrenchGrid_doesNotUnionAllSurveyAreas();
   void buildForTargetRatio_hitsTenPercent();
   void buildForTargetRatio_hitsTwoPercent();
+  void ratioFill_respectsGeometryContract_data();
+  void ratioFill_respectsGeometryContract();
+  void ratioFill_rejectsNarrowArea();
+  void trenchRejectsInvalidSpec_data();
+  void trenchRejectsInvalidSpec();
+  void writeGpkg_rejectsInvalidCellsWithoutChangingExisting();
+  void writeGpkg_rollsBackFailedReplacement();
   void upslopeAspect_pointsUphillNotAlongContour();
   void upslopeAspect_flatGroundHasNoDirection();
   void buildForTargetRatio_honoursTerrainAzimuth();
@@ -42,6 +52,7 @@ private slots:
   void demDownload_rejectsInvalidRangeWithoutChangingFiles_data();
   void demDownload_rejectsInvalidRangeWithoutChangingFiles();
   void demDownload_earlyCancellationPreservesExistingFile();
+  void demDownload_livePortable();
   void layerTreeMenu_hasLabelToggleAndTrenchRatio();
   void applySnapConfig_vertexAndSegmentNotWmsPromise();
   void trenchWholeMove_commitsOnMouseRelease();
@@ -63,6 +74,69 @@ QByteArray squareWkb(double x0, double y0, double x1, double y1) {
   QByteArray wkb(static_cast<int>(poly.WkbSize()), '\0');
   poly.exportToWkb(reinterpret_cast<unsigned char*>(wkb.data()));
   return wkb;
+}
+
+struct GeometryDeleter {
+  void operator()(OGRGeometry* geometry) const { OGRGeometryFactory::destroyGeometry(geometry); }
+};
+using Geometry = std::unique_ptr<OGRGeometry, GeometryDeleter>;
+using Dataset = std::unique_ptr<GDALDataset, decltype(&GDALClose)>;
+
+Geometry readGeometry(const QByteArray& wkb) {
+  OGRGeometry* geometry = nullptr;
+  OGRGeometryFactory::createFromWkb(wkb.constData(), nullptr, &geometry, size_t(wkb.size()));
+  return Geometry(geometry);
+}
+
+QByteArray wktWkb(const char* wkt) {
+  OGRGeometry* geometry = nullptr;
+  OGRGeometryFactory::createFromWkt(wkt, nullptr, &geometry);
+  Geometry owner(geometry);
+  if (!owner) return {};
+  QByteArray result(int(owner->WkbSize()), '\0');
+  owner->exportToWkb(wkbNDR, reinterpret_cast<unsigned char*>(result.data()));
+  return result;
+}
+
+OGRPolygon cellPolygon(const TrenchGridGenerator::Cell& cell) {
+  OGRLinearRing ring;
+  for (const auto& point : cell.ring) ring.addPoint(point.first, point.second);
+  OGRPolygon polygon;
+  polygon.addRing(&ring);
+  return polygon;
+}
+
+bool createEmptyGpkg(const QString& path) {
+  GDALAllRegister();
+  GDALDriver* driver = GetGDALDriverManager()->GetDriverByName("GPKG");
+  if (!driver) return false;
+  Dataset dataset(driver->Create(path.toUtf8().constData(), 0, 0, 0, GDT_Unknown, nullptr), &GDALClose);
+  return bool(dataset);
+}
+
+QStringList storedTrenches(const QString& path) {
+  Dataset dataset(static_cast<GDALDataset*>(GDALOpenEx(path.toUtf8().constData(), GDAL_OF_VECTOR,
+                                                     nullptr, nullptr, nullptr)), &GDALClose);
+  if (!dataset) return {QStringLiteral("open failed")};
+  OGRLayer* layer = dataset->GetLayerByName("trial_trench");
+  if (!layer) return {QStringLiteral("layer missing")};
+  QStringList result;
+  layer->ResetReading();
+  while (OGRFeature* raw = layer->GetNextFeature()) {
+    std::unique_ptr<OGRFeature, decltype(&OGRFeature::DestroyFeature)> feature(raw, &OGRFeature::DestroyFeature);
+    QByteArray wkb;
+    if (OGRGeometry* geometry = feature->GetGeometryRef()) {
+      wkb.resize(int(geometry->WkbSize()));
+      geometry->exportToWkb(wkbNDR, reinterpret_cast<unsigned char*>(wkb.data()));
+    }
+    result << QStringLiteral("%1|%2|%3|%4|%5")
+                  .arg(feature->GetFID()).arg(QString::fromUtf8(feature->GetFieldAsString("name")))
+                  .arg(feature->GetFieldAsDouble("width"), 0, 'g', 17)
+                  .arg(feature->GetFieldAsDouble("length"), 0, 'g', 17)
+                  .arg(QString::fromLatin1(wkb.toHex()));
+  }
+  result.sort();
+  return result;
 }
 }  // namespace
 
@@ -136,8 +210,8 @@ void TestDemTrench::buildInAreaKeepsCellsInsideAndRatio() {
   QVERIFY2(pct > 12.0 && pct < 13.0, qPrintable(QString::number(pct)));  // 12.6%
 }
 
-// 2×20 m 트렌치가 구역 한 변보다 길면 Contains는 0개. 중심이 구역 안이면 깔아야 한다.
-void TestDemTrench::buildInArea_shortAreaPlacesByCentroid() {
+// 짧은 구역에서는 트렌치 길이를 잘라 도형 전체가 내부에 들어가야 한다.
+void TestDemTrench::buildInArea_shortAreaTrimsInside() {
   TrenchGridGenerator::Spec s;
   s.trenchWidth = 2.0;
   s.trenchLength = 20.0;
@@ -147,10 +221,10 @@ void TestDemTrench::buildInArea_shortAreaPlacesByCentroid() {
   const auto cells = TrenchGridGenerator::buildInArea(s, area);
   QVERIFY2(!cells.empty(), "짧은 조사구역에도 시굴격자가 생겨야 한다");
   for (const auto& c : cells) {
-    const double cx = (c.ring[0].first + c.ring[2].first) * 0.5;
-    const double cy = (c.ring[0].second + c.ring[2].second) * 0.5;
-    QVERIFY2(cx >= -1e-6 && cx <= 12.0 + 1e-6 && cy >= -1e-6 && cy <= 18.0 + 1e-6,
-             "centroid must stay in the survey area");
+    for (const auto& point : c.ring)
+      QVERIFY2(point.first >= -1e-6 && point.first <= 12.0 + 1e-6 &&
+               point.second >= -1e-6 && point.second <= 18.0 + 1e-6,
+               "the entire trench must stay in the survey area");
   }
 }
 
@@ -231,7 +305,7 @@ void TestDemTrench::buildForTargetRatio_hitsTenPercent() {
     }
   }
   const double pct = TrenchGridGenerator::totalArea(plan.cells) / 10000.0 * 100.0;
-  QVERIFY2(pct >= 8.5 && pct <= 11.5, qPrintable(QStringLiteral("시굴 %1%").arg(pct)));
+  QVERIFY2(std::abs(pct - 10.0) < 1e-7, qPrintable(QStringLiteral("시굴 %1%").arg(pct)));
 }
 
 void TestDemTrench::buildForTargetRatio_hitsTwoPercent() {
@@ -241,7 +315,7 @@ void TestDemTrench::buildForTargetRatio_hitsTwoPercent() {
   for (const auto& c : plan.cells)
     QVERIFY2(std::abs(c.width - 2.0) < 1e-9, "폭은 2 m 고정");
   const double pct = TrenchGridGenerator::totalArea(plan.cells) / 10000.0 * 100.0;
-  QVERIFY2(pct >= 1.2 && pct <= 2.8, qPrintable(QStringLiteral("표본 %1%").arg(pct)));
+  QVERIFY2(std::abs(pct - 2.0) < 1e-7, qPrintable(QStringLiteral("표본 %1%").arg(pct)));
   QVERIFY2(pct < 8.0, "표본은 시굴(10%)보다 훨씬 적어야 한다");
 }
 
@@ -412,6 +486,140 @@ void TestDemTrench::tilePack_earlyCancellationPreservesExistingFile() {
   QCOMPARE(QDir(directory.path()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot).size(), 1);
 }
 
+void TestDemTrench::ratioFill_respectsGeometryContract_data() {
+  QTest::addColumn<QByteArray>("areaWkb");
+  QTest::addColumn<double>("target");
+  QTest::addColumn<double>("azimuth");
+  QTest::newRow("formerly-24m") << squareWkb(0, 0, 25, 115) << 10.0 << 0.0;
+  QTest::newRow("5186-trial") << squareWkb(200000, 550000, 200100, 550100) << 10.0 << 0.0;
+  QTest::newRow("5187-sample") << squareWkb(200000, 450000, 200100, 450100) << 2.0 << 0.0;
+  QTest::newRow("rotated") << squareWkb(200000, 450000, 200100, 450100) << 10.0 << 45.0;
+  QTest::newRow("concave") << wktWkb("POLYGON((0 0,100 0,100 30,30 30,30 100,0 100,0 0))") << 10.0 << 45.0;
+  QTest::newRow("hole") << wktWkb("POLYGON((0 0,100 0,100 100,0 100,0 0),(30 30,30 70,70 70,70 30,30 30))") << 10.0 << 0.0;
+  QTest::newRow("small-sample") << squareWkb(0, 0, 10, 10) << 2.0 << 0.0;
+}
+
+void TestDemTrench::ratioFill_respectsGeometryContract() {
+  QFETCH(QByteArray, areaWkb);
+  QFETCH(double, target);
+  QFETCH(double, azimuth);
+  const auto plan = TrenchGridGenerator::buildForTargetRatio(areaWkb, target, 2.0, azimuth);
+  QVERIFY2(!plan.cells.empty(), qPrintable(plan.error));
+  QVERIFY(plan.error.isEmpty());
+  Geometry area = readGeometry(areaWkb);
+  QVERIFY(area);
+  Geometry united;
+  double sum = 0.0, maxLength = 0.0;
+  for (const auto& cell : plan.cells) {
+    const double width = std::hypot(cell.ring[1].first - cell.ring[0].first,
+                                    cell.ring[1].second - cell.ring[0].second);
+    const double length = std::hypot(cell.ring[3].first - cell.ring[0].first,
+                                     cell.ring[3].second - cell.ring[0].second);
+    QVERIFY2(width > 0.0 && width <= 2.0 + 1e-7, "actual trench width exceeds 2m");
+    QVERIFY2(length > 0.0 && length <= 20.0 + 1e-7, "actual trench length exceeds 20m");
+    QVERIFY(std::abs(width - cell.width) < 1e-7);
+    QVERIFY(std::abs(length - cell.length) < 1e-7);
+    OGRPolygon polygon = cellPolygon(cell);
+    Geometry outside(polygon.Difference(area.get()));
+    QVERIFY(outside);
+    QVERIFY(OGR_G_Area(OGRGeometry::ToHandle(outside.get())) < 1e-7);
+    sum += polygon.get_Area();
+    maxLength = std::max(maxLength, length);
+    united.reset(united ? united->Union(&polygon) : polygon.clone());
+    QVERIFY(united);
+  }
+  const double unionArea = OGR_G_Area(OGRGeometry::ToHandle(united.get()));
+  const double targetArea = OGR_G_Area(OGRGeometry::ToHandle(area.get())) * target / 100.0;
+  QVERIFY2(std::abs(sum - unionArea) < 1e-6, "trenches must not overlap");
+  QVERIFY2(std::abs(unionArea - targetArea) < std::max(1e-6, targetArea * 1e-8),
+           qPrintable(QStringLiteral("actual %1, target %2").arg(unionArea, 0, 'g', 17).arg(targetArea, 0, 'g', 17)));
+  QVERIFY(std::abs(plan.ratioPct - target) < 1e-7);
+  QVERIFY(std::abs(plan.length - maxLength) < 1e-7);
+}
+
+void TestDemTrench::ratioFill_rejectsNarrowArea() {
+  const QByteArray area = squareWkb(0, 0, 1.5, 12);
+  TrenchGridGenerator::Spec spec;
+  spec.trenchLength = 8;
+  QVERIFY(TrenchGridGenerator::buildInArea(spec, area).empty());
+  const auto plan = TrenchGridGenerator::buildForTargetRatio(area, 10.0);
+  QVERIFY(plan.cells.empty());
+  QVERIFY(!plan.error.isEmpty());
+}
+
+void TestDemTrench::trenchRejectsInvalidSpec_data() {
+  QTest::addColumn<QString>("field");
+  QTest::addColumn<double>("value");
+  QTest::newRow("wide") << QStringLiteral("width") << 2.01;
+  QTest::newRow("long") << QStringLiteral("length") << 20.01;
+  QTest::newRow("negative-width") << QStringLiteral("width") << -2.0;
+  QTest::newRow("negative-length") << QStringLiteral("length") << -20.0;
+  QTest::newRow("nan-width") << QStringLiteral("width") << std::numeric_limits<double>::quiet_NaN();
+  QTest::newRow("infinite-length") << QStringLiteral("length") << std::numeric_limits<double>::infinity();
+  QTest::newRow("nan-origin") << QStringLiteral("origin") << std::numeric_limits<double>::quiet_NaN();
+  QTest::newRow("infinite-azimuth") << QStringLiteral("azimuth") << std::numeric_limits<double>::infinity();
+  QTest::newRow("negative-balk") << QStringLiteral("balk") << -1.0;
+}
+
+void TestDemTrench::trenchRejectsInvalidSpec() {
+  QFETCH(QString, field);
+  QFETCH(double, value);
+  TrenchGridGenerator::Spec spec;
+  if (field == QLatin1String("width")) spec.trenchWidth = value;
+  else if (field == QLatin1String("length")) spec.trenchLength = value;
+  else if (field == QLatin1String("origin")) spec.originX = value;
+  else if (field == QLatin1String("azimuth")) spec.azimuthDeg = value;
+  else if (field == QLatin1String("balk")) spec.balkWidth = value;
+  QVERIFY(TrenchGridGenerator::build(spec).empty());
+}
+
+void TestDemTrench::writeGpkg_rejectsInvalidCellsWithoutChangingExisting() {
+  QTemporaryDir temporary;
+  const QString path = temporary.filePath(QStringLiteral("survey.gpkg"));
+  QVERIFY(createEmptyGpkg(path));
+  const auto valid = TrenchGridGenerator::build(TrenchGridGenerator::Spec{});
+  QString error;
+  QVERIFY2(TrenchGridGenerator::writeGpkg(path, QStringLiteral("trial_trench"), valid, QStringLiteral("EPSG:5187"), &error), qPrintable(error));
+  const QStringList before = storedTrenches(path);
+  for (int kind = 0; kind < 4; ++kind) {
+    auto invalid = valid;
+    if (kind == 0) invalid[0].width = 3.0;
+    if (kind == 1) invalid[0].length = 21.0;
+    if (kind == 2) invalid[0].ring[0].first = std::numeric_limits<double>::quiet_NaN();
+    if (kind == 3) invalid[0].ring[2].first += 1.0;
+    QVERIFY(!TrenchGridGenerator::writeGpkg(path, QStringLiteral("trial_trench"), invalid, QStringLiteral("EPSG:5187"), &error));
+    QVERIFY(!error.isEmpty());
+    QCOMPARE(storedTrenches(path), before);
+  }
+}
+
+void TestDemTrench::writeGpkg_rollsBackFailedReplacement() {
+  QTemporaryDir temporary;
+  const QString path = temporary.filePath(QStringLiteral("survey.gpkg"));
+  QVERIFY(createEmptyGpkg(path));
+  TrenchGridGenerator::Spec spec;
+  spec.cols = 2;
+  const auto initial = TrenchGridGenerator::build(spec);
+  QString error;
+  QVERIFY2(TrenchGridGenerator::writeGpkg(path, QStringLiteral("trial_trench"), initial, QStringLiteral("EPSG:5187"), &error), qPrintable(error));
+  const QStringList before = storedTrenches(path);
+  {
+    Dataset dataset(static_cast<GDALDataset*>(GDALOpenEx(path.toUtf8().constData(), GDAL_OF_VECTOR | GDAL_OF_UPDATE,
+                                                       nullptr, nullptr, nullptr)), &GDALClose);
+    QVERIFY(dataset);
+    CPLErrorReset();
+    dataset->ExecuteSQL("CREATE TRIGGER reject_trench BEFORE INSERT ON trial_trench WHEN NEW.name = 'reject' "
+                        "BEGIN SELECT RAISE(ABORT, 'forced trench write failure'); END", nullptr, nullptr);
+    QVERIFY(CPLGetLastErrorType() < CE_Failure);
+  }
+  auto replacement = initial;
+  replacement[0].name = QStringLiteral("first-new");
+  replacement[1].name = QStringLiteral("reject");
+  QVERIFY(!TrenchGridGenerator::writeGpkg(path, QStringLiteral("trial_trench"), replacement, QStringLiteral("EPSG:5187"), &error));
+  QVERIFY(!error.isEmpty());
+  QCOMPARE(storedTrenches(path), before);
+}
+
 void TestDemTrench::demDownload_rejectsInvalidRangeWithoutChangingFiles_data() {
   QTest::addColumn<QgsRectangle>("extent");
   QTest::newRow("empty") << QgsRectangle();
@@ -457,6 +665,36 @@ void TestDemTrench::demDownload_earlyCancellationPreservesExistingFile() {
   QVERIFY(original.open(QIODevice::ReadOnly));
   QCOMPARE(original.readAll(), QByteArray("existing-dem"));
   QCOMPARE(QDir(directory.path()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot).size(), 1);
+}
+
+void TestDemTrench::demDownload_livePortable() {
+  if (!qEnvironmentVariableIsSet("KA_HGIS_LIVE_DEM_TEST"))
+    QSKIP("Explicit network/portable verification only");
+  GDALAllRegister();
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  const QString target = directory.filePath(QStringLiteral("existing.tif"));
+  QFile original(target);
+  QVERIFY(original.open(QIODevice::WriteOnly));
+  original.write("original-data");
+  original.close();
+  QgsFeedback feedback;
+  QElapsedTimer timer;
+  timer.start();
+  const auto result = DemDownloadService::prepare(QgsRectangle(126.40, 33.44, 126.42, 33.46), target, &feedback);
+  QVERIFY2(result.isReady(), qPrintable(result.error));
+  Dataset raster(static_cast<GDALDataset*>(GDALOpen(result.rasterUri.toUtf8().constData(), GA_ReadOnly)), &GDALClose);
+  QVERIFY(raster);
+  QCOMPARE(raster->GetRasterCount(), 1);
+  QCOMPARE(raster->GetRasterBand(1)->GetRasterDataType(), GDT_Float32);
+  double range[2]{};
+  QCOMPARE(raster->GetRasterBand(1)->ComputeRasterMinMax(false, range), CE_None);
+  QVERIFY(std::isfinite(range[0]) && range[1] > range[0]);
+  qInfo() << "Live DEM" << raster->GetRasterXSize() << raster->GetRasterYSize()
+          << "elevation" << range[0] << range[1] << "ms" << timer.elapsed();
+  QCOMPARE(feedback.progress(), 100.);
+  QVERIFY(original.open(QIODevice::ReadOnly));
+  QCOMPARE(original.readAll(), QByteArray("original-data"));
 }
 
 void TestDemTrench::layerTreeMenu_hasLabelToggleAndTrenchRatio() {
@@ -541,8 +779,6 @@ void TestDemTrench::clearLayerReplacesPreviousGrid() {
   QVERIFY2(TrenchGridGenerator::writeGpkg(gpkg, QStringLiteral("trial_trench"),
                                           TrenchGridGenerator::build(s),
                                           QStringLiteral("EPSG:5186"), &err),
-           qPrintable(err));
-  QVERIFY2(TrenchGridGenerator::clearLayer(gpkg, QStringLiteral("trial_trench"), &err),
            qPrintable(err));
   s.cols = 1;
   QVERIFY2(TrenchGridGenerator::writeGpkg(gpkg, QStringLiteral("trial_trench"),

@@ -60,6 +60,9 @@ public:
   // 기호 라벨을 입힌다. officialColors(기호→도폭색)가 있으면 그 색을 쓴다.
   static bool applyGeologyStyle(QgsVectorLayer* layer,
                                 const QHash<QString, QColor>& officialColors = {});
+  // 조판 범례에서 구조선·주향점(부정합·주향경사·지질경계·단층추정)을 뺀다.
+  static bool omitFromSheetLegend(const QString& label);
+  static void pruneStructureLegend(QgsVectorLayer* layer);
 
   // 지질 색 위에 음영 오버레이(2.5D). 산이 솟는 3D 렌더가 아님. 참조 지도.
   static QString reliefLayerTitle();

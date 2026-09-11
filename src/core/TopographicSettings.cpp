@@ -1,0 +1,80 @@
+#include "TopographicSettings.h"
+#include "KaPortableRuntime.h"
+#include <QCoreApplication>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QSaveFile>
+#include <QSettings>
+#include <QStandardPaths>
+#include <QTemporaryDir>
+
+namespace {
+QString personalPath() {
+  const QString directory = KaPortableRuntime::userConfigDir();
+  return directory.isEmpty() ? QString() : QDir(directory).filePath(QStringLiteral("ngii-account.ini"));
+}
+TopographicSettings::Credentials readIni(const QString& path) {
+  if (!QFileInfo(path).isFile()) return {};
+  QSettings settings(path, QSettings::IniFormat);
+  settings.setFallbacksEnabled(false);
+  settings.sync();
+  TopographicSettings::Credentials result{
+    settings.value(QStringLiteral("ngii/username")).toString(),
+    settings.value(QStringLiteral("ngii/password")).toString()};
+  return settings.status() == QSettings::NoError ? result : TopographicSettings::Credentials{};
+}
+}
+
+TopographicSettings::Credentials TopographicSettings::credentials() {
+  const QDir app(QCoreApplication::applicationDirPath());
+  return readFromFiles(personalPath(), {
+    app.filePath(QStringLiteral("config/ngii-local.ini")),
+    app.filePath(QStringLiteral("../../config/ngii-local.ini"))});
+}
+
+TopographicSettings::Credentials TopographicSettings::readFromFiles(
+    const QString& personalFile, const QStringList& fallbackFiles) {
+  // Existence, not a non-empty password, controls priority. Saving empty values
+  // disables this PC's default login instead of restoring the bundled account.
+  if (!personalFile.isEmpty() && QFileInfo::exists(personalFile)) return readIni(personalFile);
+  for (const auto& fallback : fallbackFiles)
+    if (QFileInfo::exists(fallback)) return readIni(fallback);
+  return {};
+}
+
+bool TopographicSettings::saveCredentials(const Credentials& credentials, QString* error) {
+  return saveToFile(personalPath(), credentials, error);
+}
+
+bool TopographicSettings::saveToFile(const QString& personalFile, const Credentials& credentials, QString* error) {
+  if (error) error->clear();
+  auto fail = [error](const QString& message) { if (error) *error = message; return false; };
+  if (personalFile.isEmpty()) return fail(QStringLiteral("이 PC의 사용자 설정 경로를 찾지 못했습니다."));
+  const auto directory = QFileInfo(personalFile).absolutePath();
+  if (!QDir().mkpath(directory)) return fail(QStringLiteral("계정 설정 폴더를 만들지 못했습니다. 폴더 권한을 확인하세요."));
+  QTemporaryDir staging(QDir(directory).filePath(QStringLiteral(".ngii-account-XXXXXX")));
+  if (!staging.isValid()) return fail(QStringLiteral("계정 설정을 준비하지 못했습니다. 폴더 권한을 확인하세요."));
+  const auto serialized = staging.filePath(QStringLiteral("account.ini"));
+  {
+    // Delegate INI escaping and UTF-8 handling to Qt, including passwords which
+    // contain whitespace, semicolons, quotes, backslashes or an initial '@'.
+    QSettings settings(serialized, QSettings::IniFormat);
+    settings.setFallbacksEnabled(false);
+    settings.setValue(QStringLiteral("ngii/username"), credentials.username);
+    settings.setValue(QStringLiteral("ngii/password"), credentials.password);
+    settings.sync();
+    if (settings.status() != QSettings::NoError)
+      return fail(QStringLiteral("계정 설정을 기록하지 못했습니다. 저장 공간과 폴더 권한을 확인하세요."));
+  }
+  QFile input(serialized);
+  if (!input.open(QIODevice::ReadOnly)) return fail(QStringLiteral("준비한 계정 설정을 읽지 못했습니다."));
+  const auto data = input.readAll();
+  if (input.error() != QFileDevice::NoError) return fail(QStringLiteral("준비한 계정 설정을 끝까지 읽지 못했습니다."));
+  input.close();
+  QSaveFile output(personalFile);
+  output.setDirectWriteFallback(false);
+  if (!output.open(QIODevice::WriteOnly) || output.write(data) != data.size() || !output.commit())
+    return fail(QStringLiteral("계정 설정을 저장하지 못했습니다. 이전 설정은 유지됩니다: %1").arg(output.errorString()));
+  return true;
+}

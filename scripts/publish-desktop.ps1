@@ -14,6 +14,13 @@ if ($LASTEXITCODE -ne 0) { throw 'Release verification did not pass. Portable wa
 if (Get-Process -Name ka-hgis -ErrorAction SilentlyContinue) {
   throw "HGIS is still running. Close it after saving, then publish again. No process was stopped."
 }
+. (Join-Path $PSScriptRoot 'dev-env.ps1')
+$caBundle = Join-Path $env:OSGEO4W_ROOT 'bin/curl-ca-bundle.crt'
+if (-not (Test-Path -LiteralPath $caBundle -PathType Leaf)) {
+  throw 'OSGeo4W curl-ca-bundle.crt missing. Portable was not changed.'
+}
+Copy-Item -LiteralPath $caBundle -Destination $dstDir -Force
+& (Join-Path $PSScriptRoot 'copy-webengine-runtime.ps1') -OsgeoRoot $env:OSGEO4W_ROOT -Destination $dstDir
 Copy-Item -LiteralPath $src -Destination $dst -Force
 $qssSrc = Join-Path $root "data\theme\ka-hgis.qss"
 $qssDstDir = Join-Path $dstDir "data\theme"

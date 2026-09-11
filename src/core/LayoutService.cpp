@@ -1,4 +1,6 @@
 #include "LayoutService.h"
+#include "DemColorRampLegend.h"
+#include "GeologyMapService.h"
 #include "LayerOps.h"
 
 #include <QColor>
@@ -1328,6 +1330,7 @@ namespace {
 bool omitSheetLegendLayer(QgsMapLayer* ml, const QString& fallbackName) {
   const QString name = ml ? ml->name() : fallbackName;
   if (LayoutService::sheetLegendOmitsLayerName(name)) return true;
+  if (GeologyMapService::omitFromSheetLegend(name)) return true;
   if (ml && ml->customProperty(QStringLiteral("ka_hgis/omit_sheet_legend")).toBool())
     return true;
   if (ml) {
@@ -1359,11 +1362,15 @@ bool onLinkedMap(QgsLayoutItemLegend* legend, QgsMapLayer* ml) {
 
 void LayoutService::tuneSheetLegend(QgsLayoutItemLegend* legend) {
   if (!legend) return;
+  legend->setLegendFilterByMapEnabled(true);
 
   QgsProject* proj = legend->layout() ? legend->layout()->project() : nullptr;
   if (proj) {
     for (QgsMapLayer* ml : proj->mapLayers()) {
-      if (!ml || !omitSheetLegendLayer(ml, ml->name())) continue;
+      if (!ml) continue;
+      if (auto* vl = qobject_cast<QgsVectorLayer*>(ml))
+        GeologyMapService::pruneStructureLegend(vl);
+      if (!omitSheetLegendLayer(ml, ml->name())) continue;
       ml->setCustomProperty(QStringLiteral("ka_hgis/omit_sheet_legend"), true);
       if (QgsMapLayerLegend* lg = ml->legend())
         lg->setFlag(Qgis::MapLayerLegendFlag::ExcludeByDefault, true);
@@ -1393,6 +1400,14 @@ void LayoutService::tuneSheetLegend(QgsLayoutItemLegend* legend) {
     QgsLayerTreeNode* parent = ll->parent();
     if (parent && QgsLayerTree::isGroup(parent))
       QgsLayerTree::toGroup(parent)->removeChildNode(ll);
+  }
+  for (QgsLayerTreeLayer* ll : root->findLayers()) {
+    if (ll->layer() && dynamic_cast<DemColorRampLegend*>(ll->layer()->legend())) {
+      legend->setResizeToContents(true);
+      legend->attemptResize(QgsLayoutSize(1., 1., Qgis::LayoutUnit::Millimeters));
+      legend->adjustBoxSize();
+      break;
+    }
   }
 }
 

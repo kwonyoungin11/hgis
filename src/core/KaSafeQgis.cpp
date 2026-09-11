@@ -1,4 +1,5 @@
 #include "KaSafeQgis.h"
+#include "KaPortableRuntime.h"
 
 #include <QDir>
 #include <QFile>
@@ -289,6 +290,8 @@ static QSet<QString> g_unsafeQgisProjects;
 static bool g_unsafeLoaded = false;
 
 static QString unsafeListPath() {
+  if (KaPortableRuntime::discover(KaPortableRuntime::resolvedExeDir()).looksBundled())
+    return QDir(KaPortableRuntime::userConfigDir()).filePath(QStringLiteral("unsafe-projects.txt"));
   const QByteArray localAppData = qgetenv("LOCALAPPDATA");
   const QString base = localAppData.isEmpty() ? QDir::tempPath()
                                               : QString::fromLocal8Bit(localAppData);

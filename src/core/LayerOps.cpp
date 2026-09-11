@@ -1,7 +1,11 @@
 #include "LayerOps.h"
+#include "DemPresentation.h"
+#include "DemColorRampLegend.h"
+#include <QSignalBlocker>
 #include "GeorefService.h"
 #include "SoilMapService.h"
 #include "VworldSettings.h"
+#include "KaPortableRuntime.h"
 #include <QDateTime>
 #include <QEvent>
 #include <QFile>
@@ -253,7 +257,9 @@ bool LayerOps::applyDomainDrawStyle(QgsVectorLayer* layer, const QString& layerK
   // Drawing and attribute edits also call this function. Initialize labels
   // only once so a later edit cannot reset size, content or visibility.
   if (!layer->labeling()) {
-    if (gt == Qgis::GeometryType::Polygon)
+    if (key == QLatin1String("trial_trench"))
+      applyNameAttributeLabels(layer, QStringLiteral("name"), 5.0, true);
+    else if (gt == Qgis::GeometryType::Polygon)
       applyAreaM2Labels(layer);
     else if (const QString field = detectNameField(layer); !field.isEmpty())
       applyNameAttributeLabels(layer, field, 5.0, false);
@@ -565,6 +571,10 @@ bool LayerOps::setLabelFontSize(QgsVectorLayer* layer, double fontSizePt) {
     format.setSize(fontSizePt);
     format.setSizeUnit(Qgis::RenderUnit::Points);
     settings->setFormat(format);
+    // The explicit pt choice supersedes imported size expressions, while
+    // unrelated data-defined label properties remain untouched.
+    settings->dataDefinedProperties().setProperty(QgsPalLayerSettings::Property::Size, QgsProperty());
+    settings->dataDefinedProperties().setProperty(QgsPalLayerSettings::Property::FontSizeUnit, QgsProperty());
     labeling->setSettings(settings.release(), provider); // QGIS takes ownership.
   }
   layer->setLabeling(labeling.release());
@@ -799,7 +809,12 @@ bool refreshLabelOrderCache(QgsProject* project) {
     }
 
     // 2) 덧그림(2차 패스) 대상. 두 번 그려도 화면이 같은 벡터만.
-    if (visible && labeledBelow && vl && !hidesOwn && paintsFullyOpaque(vl))
+    //    수치지형도는 회색 0.2mm 밑그림이라 라벨 위로 올릴 이유가 없다. 오히려
+    //    선 16만 개를 한 번 더 그리느라 넓은 범위로 이동할 때 화면이 수십 초
+    //    멎었다. 밑그림은 2차 패스에서 뺀다.
+    const bool isBackdrop =
+        !ml->customProperty(QStringLiteral("ka_hgis/topographic_group")).toString().isEmpty();
+    if (visible && labeledBelow && vl && !hidesOwn && !isBackdrop && paintsFullyOpaque(vl))
       bottomUp.append(QPointer<QgsMapLayer>(ml));
 
     // 3) 라벨끼리는 위 레이어가 이긴다.
@@ -3277,6 +3292,25 @@ static bool addXyzBasemap(QgsProject* project, QgsMapCanvas* canvas, const QStri
       *errorOut = QStringLiteral("Basemap 실패 (%1): layer removed after add").arg(name);
     return false;
   }
+  // 프로젝트에 있다고 화면에 보이는 게 아니다. 배경지도는 addMapLayer(.., false) 로
+  // 넣고 범례 노드를 직접 단다. 그 뒤 정렬·가지치기가 노드를 건드리므로, 여기서
+  // 노드가 실제로 살아 있는지 확인한다. 예전에는 프로젝트만 보고 "성공"이라 답해서,
+  // 레이어 패널에 아무것도 없는데 앱은 올렸다고 여겼다.
+  if (QgsLayerTree* root = project->layerTreeRoot()) {
+    QgsLayerTreeLayer* node = root->findLayer(added->id());
+    if (!node) {
+      node = root->addLayer(added);
+      if (node) {
+        node->setItemVisibilityChecked(true);
+        LayerOps::ensureSatelliteAtBottom(project);
+      }
+    }
+    if (!root->findLayer(added->id())) {
+      if (errorOut)
+        *errorOut = QStringLiteral("Basemap 실패 (%1): 레이어 목록에 넣지 못했습니다").arg(name);
+      return false;
+    }
+  }
   if (canvas) {
     const QString workAuth = project && project->crs().isValid()
                                  ? project->crs().authid()
@@ -3510,8 +3544,14 @@ static QString makeVworldWmsUri(const QString& apiKey, const QString& layers, co
       .arg(crs, layers, stylePart, encUrl);
 }
 
-// 지적 GDAL_WMS 설정 파일이 사는 곳. 임시폴더가 아니라 앱 폴더다.
+// 지적 GDAL_WMS 설정 파일이 사는 곳. 포터블은 자기 config, 개발은 앱 전용 폴더.
 static QString kaVworldCadastralXmlPath() {
+  const KaPortablePaths bundled = KaPortableRuntime::discover(KaPortableRuntime::resolvedExeDir());
+  if (bundled.looksBundled()) {
+    const QString dir = KaPortableRuntime::userConfigDir();
+    QDir().mkpath(dir);
+    return QDir(dir).filePath(QStringLiteral("vworld-cadastral.xml"));
+  }
   const QByteArray localAppData = qgetenv("LOCALAPPDATA");
   const QString base = localAppData.isEmpty() ? QDir::tempPath()
                                               : QString::fromLocal8Bit(localAppData);
@@ -4097,86 +4137,30 @@ bool LayerOps::applyDemElevationStyle(QgsRasterLayer* layer, const QgsRectangle&
 
 bool LayerOps::applyDemElevationStyle(QgsRasterLayer* layer, const QgsRectangle& statsExtent,
                                       const DemElevationStyle& style) {
-  if (!layer || !layer->isValid() || layer->bandCount() < 1) return false;
-  QgsRasterDataProvider* dp = layer->dataProvider();
-  if (!dp) return false;
-  QList<DemElevationClass> classes = style.classes;
-  double zMin = 0.0;
-  double zMax = 200.0;
-  if (classes.isEmpty()) {
-    // Sampled min/max (25000) across statsExtent or whole raster if extent is narrow/missing.
-    // Last Discrete class is +inf so high peaks above the sample stay colored.
-    QgsRasterBandStats st;
-    if (!statsExtent.isEmpty() && statsExtent.isFinite()) {
-      st = dp->bandStatistics(1, Qgis::RasterBandStatistic::Min | Qgis::RasterBandStatistic::Max,
-                              statsExtent, 25000);
-    }
-    if (!std::isfinite(st.minimumValue) || !std::isfinite(st.maximumValue) ||
-        st.maximumValue <= st.minimumValue || (st.maximumValue - st.minimumValue < 150.0)) {
-      QgsRasterBandStats wholeSt =
-          dp->bandStatistics(1, Qgis::RasterBandStatistic::Min | Qgis::RasterBandStatistic::Max,
-                             QgsRectangle(), 25000);
-      if (std::isfinite(wholeSt.minimumValue) && std::isfinite(wholeSt.maximumValue) &&
-          wholeSt.maximumValue > wholeSt.minimumValue) {
-        st = wholeSt;
-      }
-    }
-    zMin = st.minimumValue;
-    zMax = st.maximumValue;
-    if (zMin < 0.0 && zMin > -10.0) zMin = 0.0;
-    if (!std::isfinite(zMin) || !std::isfinite(zMax) || zMax <= zMin) {
-      zMin = 0.0;
-      zMax = 300.0;
-    }
-    classes = buildDemElevationClasses(zMin, zMax, style.classCount, style.stepMeters);
-  } else {
-    zMin = classes.first().lo;
-    zMax = zMin;
-    for (const DemElevationClass& c : classes) {
-      if (std::isfinite(c.lo) && c.lo < zMin) zMin = c.lo;
-      if (std::isfinite(c.hi) && c.hi > zMax) zMax = c.hi;
-      if (std::isfinite(c.lo) && c.lo > zMax) zMax = c.lo;
-    }
-    if (!(zMax > zMin)) zMax = zMin + 1.0;
-    classes.last().hi = std::numeric_limits<double>::infinity();
-  }
-  if (classes.size() < 2) return false;
+  // Legacy custom tables become continuous value/color stops; the public UI uses presets.
+  if (style.classes.isEmpty()) return DemPresentation::apply(layer,
+      statsExtent.isEmpty() ? QStringLiteral("national") : QStringLiteral("viewport"), statsExtent);
+  if (!layer || !layer->isValid() || style.classes.size() < 2) return false;
   QList<QgsColorRampShader::ColorRampItem> items;
-  for (int i = 0; i < classes.size(); ++i) {
-    const DemElevationClass& c = classes[i];
-    const bool last = (i == classes.size() - 1);
-    const double cut = last ? std::numeric_limits<double>::infinity() : c.hi;
-    QString label = c.label.trimmed();
-    if (label.isEmpty()) {
-      label = last ? QStringLiteral("%1 m 이상").arg(c.lo, 0, 'f', 0)
-                   : QStringLiteral("%1–%2 m").arg(c.lo, 0, 'f', 0).arg(c.hi, 0, 'f', 0);
-    }
-    items.append(QgsColorRampShader::ColorRampItem(cut, c.color, label));
+  double previous = -std::numeric_limits<double>::infinity();
+  for (const auto& entry : style.classes) {
+    if (!std::isfinite(entry.lo) || entry.lo <= previous || !entry.color.isValid()) return false;
+    items.append({entry.lo, entry.color, entry.label});
+    previous = entry.lo;
   }
-  auto* ramp = new QgsColorRampShader(zMin, zMax);
-  ramp->setColorRampType(Qgis::ShaderInterpolationMethod::Discrete);
-  ramp->setClassificationMode(Qgis::ShaderClassificationMethod::EqualInterval);
+  auto* ramp = new QgsColorRampShader(items.first().value, items.last().value);
+  ramp->setColorRampType(Qgis::ShaderInterpolationMethod::Linear);
   ramp->setClip(false);
   ramp->setColorRampItemList(items);
-  auto* legend = new QgsColorRampLegendNodeSettings();
-  legend->setUseContinuousLegend(false);
-  legend->setSuffix(QString());
-  ramp->setLegendSettings(legend);
-  auto* shader = new QgsRasterShader();
+  auto* shader = new QgsRasterShader(items.first().value, items.last().value);
   shader->setRasterShaderFunction(ramp);
-  auto* rend = new QgsSingleBandPseudoColorRenderer(dp, 1, shader);
-  rend->setClassificationMin(zMin);
-  rend->setClassificationMax(zMax);
-  QgsRasterMinMaxOrigin origin;
-  origin.setLimits(Qgis::RasterRangeLimit::NotSet);
-  origin.setExtent(Qgis::RasterRangeExtent::WholeRaster);
-  rend->setMinMaxOrigin(origin);
-  layer->setRenderer(rend);
-  if (QgsRasterResampleFilter* rf = layer->resampleFilter()) {
-    rf->setZoomedInResampler(new QgsBilinearRasterResampler());
-    rf->setZoomedOutResampler(new QgsBilinearRasterResampler());
-  }
-  layer->setOpacity(0.88);
+  auto* renderer = new QgsSingleBandPseudoColorRenderer(layer->dataProvider(), 1, shader);
+  renderer->setClassificationMin(items.first().value);
+  renderer->setClassificationMax(items.last().value);
+  layer->setRenderer(renderer);
+  layer->setCustomProperty(QStringLiteral("ka_hgis/dem_display_version"), 1);
+  layer->setCustomProperty(QStringLiteral("ka_hgis/dem_preset"), QStringLiteral("custom"));
+  DemColorRampLegend::install(layer);
   layer->triggerRepaint();
   return true;
 }
@@ -4247,6 +4231,7 @@ bool LayerOps::addDemElevationRaster(QgsProject* project, QgsMapCanvas* canvas, 
   }
   LayerOps::placeInLegendGroup(project, rl, QStringLiteral("참조 지도"));
   LayerOps::ensureDemRelief(project, rl);
+  DemPresentation::followCanvas(rl, canvas);
   if (canvas && !canvas->isDrawing()) {
     const QgsRectangle e = rl->extent();
     if (!rl->crs().isGeographic() && e.isFinite() && e.width() > 0 && e.width() < 20000.0 &&
@@ -4259,107 +4244,85 @@ bool LayerOps::addDemElevationRaster(QgsProject* project, QgsMapCanvas* canvas, 
 }
 
 QgsRasterLayer* LayerOps::ensureDemRelief(QgsProject* project, QgsRasterLayer* demLayer) {
-  if (!project || !demLayer) return nullptr;
-  const QString reliefTitle = QStringLiteral("지형 음영");
+  if (!project || !demLayer || !demLayer->isValid()) return nullptr;
+  if (!DemPresentation::restore(demLayer)) {
+    demLayer->setCustomProperty(QStringLiteral("ka_hgis/dem_relief_error"),
+        QStringLiteral("이 지도는 표고값 DEM이 아닙니다. 단일 밴드 표고 자료를 불러오세요."));
+    return nullptr;
+  }
+  const QString title = QStringLiteral("지형 음영");
   QgsRasterLayer* shade = nullptr;
-  for (QgsMapLayer* ml : project->mapLayers()) {
-    if (ml && ml->name() == reliefTitle && ml->isValid()) {
-      shade = qobject_cast<QgsRasterLayer*>(ml);
-      if (shade && shade->providerType() == QLatin1String("gdal") &&
-          shade->source() != demLayer->source()) {
-        // A downloaded DEM now covers a new area. The derived hillshade must
-        // follow that same file, not keep shading the previous site's raster.
-        shade->setDataSource(demLayer->source(), reliefTitle, QStringLiteral("gdal"));
-        if (shade->isValid()) {
-          shade->setCrs(demLayer->crs());
-          auto* renderer = new QgsHillshadeRenderer(shade->dataProvider(), 1, 315.0, 45.0);
-          renderer->setZFactor(shade->crs().isGeographic() ? 111120.0 : 3.0);
-          renderer->setMultiDirectional(true);
-          shade->setRenderer(renderer);
-        }
-      }
-      if (shade) break;
-    }
+  for (auto* candidate : project->mapLayersByName(title)) {
+    if (auto* raster = qobject_cast<QgsRasterLayer*>(candidate)) { shade = raster; break; }
   }
-  if (!shade) {
-    const QString src = demLayer->source();
-    const bool isLocal = demLayer->providerType().compare(QLatin1String("gdal"), Qt::CaseInsensitive) == 0 &&
-                         !src.startsWith(QLatin1String("/vsicurl"), Qt::CaseInsensitive) &&
-                         QFile::exists(src);
-    if (isLocal) {
-      auto* hs = new QgsRasterLayer(src, reliefTitle, QStringLiteral("gdal"));
-      if (hs->isValid()) {
-        if (demLayer->crs().isValid()) hs->setCrs(demLayer->crs());
-        auto* rend = new QgsHillshadeRenderer(hs->dataProvider(), 1, 315.0, 45.0);
-        rend->setZFactor(hs->crs().isGeographic() ? 111120.0 : 3.0);
-        rend->setMultiDirectional(true);
-        hs->setRenderer(rend);
-        shade = hs;
-      } else {
-        delete hs;
-      }
+  const bool enabled = demLayer->customProperty(QStringLiteral("ka_hgis/dem_relief_enabled"), true).toBool();
+  if (!enabled && !shade) return nullptr;
+  QString error;
+  const QString source = DemPresentation::reliefSource(demLayer, project->crs(), &error);
+  if (source.isEmpty()) {
+    demLayer->setCustomProperty(QStringLiteral("ka_hgis/dem_relief_error"), error);
+    if (shade) {
+      if (auto* node = project->layerTreeRoot()->findLayer(shade->id())) node->setItemVisibilityChecked(false);
     }
-    if (!shade) {
-      ensureTileNetworkIdentity();
-      const QString uri = QStringLiteral(
-          "type=xyz&url=https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/"
-          "World_Hillshade/MapServer/tile/%7Bz%7D/%7By%7D/%7Bx%7D"
-          "&zmax=16&zmin=1&crs=EPSG:3857&tilePixelRatio=1");
-      auto* rl = new QgsRasterLayer(uri, reliefTitle, QStringLiteral("wms"));
-      if (rl->isValid()) {
-        rl->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:3857")));
-        shade = rl;
-      } else {
-        delete rl;
-      }
-    }
-    const bool isGdalRaster = demLayer->providerType().compare(QStringLiteral("gdal"), Qt::CaseInsensitive) == 0;
-    if (!shade && isGdalRaster && demLayer->bandCount() >= 1 && demLayer->dataProvider()) {
-      Qgis::DataType dt = demLayer->dataProvider()->dataType(1);
-      if (dt != Qgis::DataType::ARGB32 && dt != Qgis::DataType::ARGB32_Premultiplied && dt != Qgis::DataType::UnknownDataType) {
-        auto* hs = new QgsRasterLayer(demLayer->source(), reliefTitle, demLayer->providerType());
-        if (hs->isValid()) {
-          if (demLayer->crs().isValid()) hs->setCrs(demLayer->crs());
-          auto* rend = new QgsHillshadeRenderer(hs->dataProvider(), 1, 315.0, 45.0);
-          rend->setZFactor(hs->crs().isGeographic() ? 111120.0 : 3.0);
-          rend->setMultiDirectional(true);
-          hs->setRenderer(rend);
-          shade = hs;
-        } else {
-          delete hs;
-        }
-      }
-    }
-    if (!shade) return nullptr;
-
-    shade->setBlendMode(QPainter::CompositionMode_Multiply);
-    shade->setOpacity(0.55);
-    shade->setCustomProperty(QStringLiteral("ka_hgis/omit_sheet_legend"), true);
-    LayerOps::markReferenceLayer(shade);
-    // addToLegend = false prevents adding to root then deleting, which would trigger
-    // QgsLayerTreeRegistryBridge and destroy the layer.
-    if (!project->addMapLayer(shade, false)) {
-      delete shade;
-      return nullptr;
-    }
-    QgsLayerTree* root = project->layerTreeRoot();
-    if (root) {
-      QgsLayerTreeLayer* demNode = root->findLayer(demLayer->id());
-      auto* parent = demNode ? qobject_cast<QgsLayerTreeGroup*>(demNode->parent()) : nullptr;
-      if (!parent) parent = root;
-      const int demIdx = demNode ? parent->children().indexOf(demNode) : 0;
-      parent->insertLayer(demIdx < 0 ? 0 : demIdx, shade);
-      if (QgsLayerTreeLayer* shadeNode = root->findLayer(shade->id())) {
-        shadeNode->setItemVisibilityChecked(true);
-      }
-    }
+    return nullptr;
   }
-
+  demLayer->removeCustomProperty(QStringLiteral("ka_hgis/dem_relief_error"));
+  const bool created = !shade;
+  if (!shade) shade = new QgsRasterLayer(source, title, QStringLiteral("gdal"));
+  else if (!shade->isValid() || shade->source() != source || shade->providerType() != QLatin1String("gdal"))
+    shade->setDataSource(source, title, QStringLiteral("gdal"));
+  if (!shade->isValid()) {
+    if (created) delete shade;
+    demLayer->setCustomProperty(QStringLiteral("ka_hgis/dem_relief_error"), QStringLiteral("음영 자료를 열지 못했습니다. DEM을 다시 불러오세요."));
+    return nullptr;
+  }
+  auto* renderer = new QgsHillshadeRenderer(shade->dataProvider(), 1, 315., 45.);
+  double zFactor = demLayer->customProperty(QStringLiteral("ka_hgis/dem_z_factor"), 1.).toDouble();
+  if (!std::isfinite(zFactor)) zFactor = 1.;
+  renderer->setZFactor(std::clamp(zFactor, .1, 5.)); // Horizontal and vertical units are both metres.
+  renderer->setMultiDirectional(true);
+  shade->setRenderer(renderer);
+  // Interpolate elevation samples before deriving slopes. Nearest-neighbour
+  // enlargement creates false grid-shaped ridges in otherwise smooth terrain.
+  shade->dataProvider()->setZoomedInResamplingMethod(Qgis::RasterResamplingMethod::Bilinear);
+  shade->dataProvider()->setZoomedOutResamplingMethod(Qgis::RasterResamplingMethod::Bilinear);
+  shade->setResamplingStage(Qgis::RasterResamplingStage::Provider);
   shade->setBlendMode(QPainter::CompositionMode_Multiply);
-  shade->setOpacity(0.55);
-  if (QgsLayerTree* root = project->layerTreeRoot()) {
-    if (QgsLayerTreeLayer* shadeNode = root->findLayer(shade->id()))
-      shadeNode->setItemVisibilityChecked(true);
+  double strength = demLayer->customProperty(QStringLiteral("ka_hgis/dem_relief_strength"), .30).toDouble();
+  if (!std::isfinite(strength)) strength = .30;
+  shade->setOpacity(std::clamp(strength, 0., .80));
+  shade->setCustomProperty(QStringLiteral("ka_hgis/omit_sheet_legend"), true);
+  markReferenceLayer(shade);
+  if (created && !project->addMapLayer(shade, false)) { delete shade; return nullptr; }
+  auto* root = project->layerTreeRoot();
+  auto* demNode = root->findLayer(demLayer->id());
+  auto* parent = demNode ? qobject_cast<QgsLayerTreeGroup*>(demNode->parent()) : nullptr;
+  if (!parent) parent = root;
+  auto* shadeNode = root->findLayer(shade->id());
+  if (!shadeNode) shadeNode = parent->insertLayer(demNode ? parent->children().indexOf(demNode) : 0, shade);
+  else if (demNode && (shadeNode->parent() != parent || parent->children().indexOf(shadeNode) > parent->children().indexOf(demNode))) {
+    auto* clone = shadeNode->clone();
+    // Insert the clone before removal so the registry bridge retains the datasource.
+    parent->insertChildNode(parent->children().indexOf(demNode), clone);
+    qobject_cast<QgsLayerTreeGroup*>(shadeNode->parent())->removeChildNode(shadeNode);
+    shadeNode = clone;
+  }
+  {
+    const QSignalBlocker blocker(shadeNode);
+    shadeNode->setItemVisibilityChecked(enabled && (!demNode || demNode->isVisible()));
+  }
+  if (shadeNode->property("demVisibilityOwner").toString() != demLayer->id()) {
+    delete shadeNode->findChild<QObject*>(QStringLiteral("demVisibilityObserver"), Qt::FindDirectChildrenOnly);
+    auto* observer = new QObject(shadeNode);
+    observer->setObjectName(QStringLiteral("demVisibilityObserver"));
+    shadeNode->setProperty("demVisibilityOwner", demLayer->id());
+    const QPointer<QgsRasterLayer> guardedDem(demLayer);
+    const QPointer<QgsLayerTreeLayer> guardedNode(demNode);
+    QObject::connect(shadeNode, &QgsLayerTreeNode::visibilityChanged, observer,
+        [guardedDem, guardedNode, shadeNode](QgsLayerTreeNode*) {
+      if (guardedDem && (!guardedNode || guardedNode->isVisible()))
+        guardedDem->setCustomProperty(QStringLiteral("ka_hgis/dem_relief_enabled"), shadeNode->itemVisibilityChecked());
+    });
   }
   shade->triggerRepaint();
   return shade;
@@ -4659,7 +4622,9 @@ bool LayerOps::setWorkCrs(QgsProject* project, QgsMapCanvas* canvas, const QStri
                           QString* errorOut, bool zoomKorea) {
   const QgsCoordinateReferenceSystem crs(epsgAuthId);
   if (!crs.isValid()) {
-    if (errorOut) *errorOut = QStringLiteral("Invalid CRS %1").arg(epsgAuthId);
+    if (errorOut)
+      *errorOut = QStringLiteral("작업 좌표계 %1을 확인할 수 없습니다. 폴더 전체(share\\proj)가 있는지 확인하세요.")
+                      .arg(epsgAuthId);
     return false;
   }
   QgsRectangle prev;

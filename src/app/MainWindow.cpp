@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "core/DemPresentation.h"
 #include "KaTheme.h"
 #include "KaIcons.h"
 #include "KaCaptureMapTool.h"
@@ -32,6 +33,8 @@
 #include <exception>
 #include "KaTrenchDialog.h"
 #include "KaDemClassDialog.h"
+#include "KaTopographicBrowser.h"
+#include "KaTopographicImportDialog.h"
 #include "KaSurveyAreaDialog.h"
 #include "core/RecentSurveys.h"
 #include "core/KaSafeQgis.h"
@@ -45,6 +48,11 @@
 #include "core/LayoutService.h"
 #include "core/Terrain3dLayoutService.h"
 #include "core/LayerOps.h"
+#include "KaHeritageBrowser.h"
+#include "core/HeritageImport.h"
+#include "core/HeritageIntranetSettings.h"
+#include "core/HeritageRegionResolver.h"
+#include "core/HeritageStyle.h"
 #include "core/SoilMapService.h"
 #include "core/PaleoLandformService.h"
 #include "core/GeologyMapService.h"
@@ -291,6 +299,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 }
 
 MainWindow::~MainWindow() {
+  delete m_topographicBrowser.data();
+  delete m_topographicImport.data();
   if (m_referenceDownload) m_referenceDownload->cancel();
   // QgsMapToolIdentify must release its canvas-dependent state before the
   // central widget destroys the map canvas.
@@ -322,6 +332,9 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     }
   }
   m_closingWindow = true;
+  // Cancel catalog jobs before app.exec() can wait on their event-loop locks.
+  delete m_topographicImport.data();
+  delete m_topographicBrowser.data();
   if (m_referenceDownload) m_referenceDownload->cancel();
   m_locator->cancel();
   if (m_searchProgress) { m_searchProgress->hide(); m_searchProgress->deleteLater(); m_searchProgress = nullptr; }
@@ -355,6 +368,15 @@ void MainWindow::finishOpenedProject(const QString& gpkgPath, const QString& sou
   LayerOps::ensureOtfEnabled(QgsProject::instance(), m_canvas, m_workCrs);
 
   LayerOps::restoreMissingLayerTreeNodes(QgsProject::instance());
+  auto* project = QgsProject::instance();
+  for (auto* layer : project->mapLayers()) {
+    auto* dem = qobject_cast<QgsRasterLayer*>(layer);
+    if (!dem || dem->name() != QLatin1String("DEM") || !dem->isValid() ||
+        !DemPresentation::restore(dem)) continue;
+    DemPresentation::followCanvas(dem, m_canvas);
+    const auto* node = project->layerTreeRoot()->findLayer(dem->id());
+    if (node && node->isVisible()) LayerOps::ensureDemRelief(project, dem);
+  }
   // QgsProject는 읽기 후에도 같은 트리 루트를 유지한다. 기존 모델과 연결을 보존한다.
   if (m_layerTree && m_layerTree->selectionModel())
     m_layerTree->selectionModel()->clear();
@@ -547,6 +569,8 @@ bool MainWindow::openSurveyGpkg(const QString& gpkgPath, OpenSurveyMode mode) {
   for (QgsMapLayer* ml : proj->mapLayers()) {
     if (ml && ml->name() == QLatin1String("DEM") && ml->isValid()) {
       if (auto* rl = qobject_cast<QgsRasterLayer*>(ml)) {
+        DemPresentation::restore(rl);
+        DemPresentation::followCanvas(rl, m_canvas);
         if (LayerOps::isLayerVisible(proj, QStringLiteral("DEM"))) {
           LayerOps::ensureDemRelief(proj, rl);
         }
@@ -811,6 +835,19 @@ void MainWindow::buildMenus() {
     QTimer::singleShot(0, this, [this]() { syncThematicButtons(); });
   });
   ribbon->addWidget(QStringLiteral("basemap"), m_btnTerrain);
+  auto* topographic = new QToolButton(ribbon);
+  topographic->setObjectName(QStringLiteral("btnTopographic"));
+  topographic->setIcon(KaIcons::icon(QStringLiteral("contour")));
+  topographic->setText(QStringLiteral("수치지형도"));
+  topographic->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+  topographic->setToolTip(QStringLiteral("HGIS 안에서 국토지리정보원에 로그인하고 수치지형도를 받습니다"));
+  topographic->setPopupMode(QToolButton::MenuButtonPopup);
+  auto* topographicMenu = new QMenu(topographic);
+  topographicMenu->addAction(QStringLiteral("국토지리정보원에서 내려받기…"), this, &MainWindow::openTopographicDownload);
+  topographicMenu->addAction(QStringLiteral("받아 둔 수치지형도 폴더…"), this, &MainWindow::importTopographicFolder);
+  topographic->setMenu(topographicMenu);
+  connect(topographic, &QToolButton::clicked, this, &MainWindow::openTopographicDownload);
+  ribbon->addWidget(QStringLiteral("basemap"), topographic);
   m_btnDem = new QToolButton(ribbon);
   m_btnDem->setObjectName(QStringLiteral("btnDem"));
   m_btnDem->setIcon(KaIcons::icon(QStringLiteral("dem")));
@@ -825,7 +862,7 @@ void MainWindow::buildMenus() {
                       &MainWindow::importDemElevationRaster);
   demMenu->addAction(KaIcons::icon(QStringLiteral("dem")), QStringLiteral("DEM 파일로 음영 만들기…"),
                      this, &MainWindow::runDemHillshade);
-  demMenu->addAction(KaIcons::icon(QStringLiteral("dem")), QStringLiteral("높이 구간 바꾸기…"), this,
+  demMenu->addAction(KaIcons::icon(QStringLiteral("dem")), QStringLiteral("DEM 표현…"), this,
                      &MainWindow::editDemElevationClasses);
   m_btnDem->setMenu(demMenu);
   m_btnDem->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -907,6 +944,18 @@ void MainWindow::buildMenus() {
                           && m_subToolsMode == QLatin1String("buffer"));
   });
   ribbon->addWidget(QStringLiteral("align"), btnBuffer);
+
+  // 위 버튼은 이미 올라온 레이어에 버퍼를 그린다. 이 버튼은 자료를 받아 온다. 역할이 다르다.
+  auto* btnHeritage = new QToolButton(ribbon);
+  btnHeritage->setObjectName(QStringLiteral("btnHeritageFetch"));
+  btnHeritage->setIcon(KaIcons::icon(QStringLiteral("buffer")));
+  btnHeritage->setText(QStringLiteral("주변유적\n받기"));
+  btnHeritage->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+  btnHeritage->setToolTip(QStringLiteral(
+      "조사구역이 속한 시·군의 국가유산 자료를 인트라넷에서 받아 참조 지도로 올립니다.\n"
+      "받은 자료는 조사폴더 안에만 두며 포터블·제출물에 실리지 않습니다"));
+  connect(btnHeritage, &QToolButton::clicked, this, &MainWindow::fetchNearbyHeritage);
+  ribbon->addWidget(QStringLiteral("align"), btnHeritage);
 
   addIcon(QStringLiteral("out"), QStringLiteral("pdf"), QStringLiteral("도면 만들기"),
           QStringLiteral("종이에 지도를 올려 도면을 만듭니다"), &MainWindow::openLayoutDesigner);
@@ -1003,6 +1052,7 @@ void MainWindow::buildMenus() {
     }
   });
   moreMenu->addAction(QStringLiteral("VWorld API 키"), this, &MainWindow::configureVworldKey);
+  moreMenu->addAction(QStringLiteral("수치지형도 아이디·비밀번호"), this, &MainWindow::configureTopographicAccount);
   moreMenu->addAction(QStringLiteral("정보"), this, &MainWindow::showAbout);
   more->setMenu(moreMenu);
   more->setPopupMode(QToolButton::InstantPopup);
@@ -1392,12 +1442,17 @@ void MainWindow::notifyBasemapFailure(bool timedOut) {
 void MainWindow::buildUi() {
   auto* central = new QWidget(this);
   central->setObjectName(QStringLiteral("centralRoot"));
+  central->setAttribute(Qt::WA_StyledBackground, true);
   auto* root = new QHBoxLayout(central);
   root->setContentsMargins(8, 8, 8, 8);
   root->setSpacing(8);
 
 #if KA_HGIS_HAS_QGIS
   m_canvas = new QgsMapCanvas(central);
+  connect(m_canvas, &QgsMapCanvas::messageEmitted, this,
+          [this](const QString& title, const QString& message, Qgis::MessageLevel) {
+    statusBar()->showMessage(title + QStringLiteral(": ") + message, 8000);
+  });
   m_canvas->setObjectName(QStringLiteral("mapCanvas"));
   KaTheme::excludeMapSurface(m_canvas);
   m_canvas->setCanvasColor(KaTheme::tokens().canvasNeutral);
@@ -2489,7 +2544,7 @@ void MainWindow::onViewTabCloseRequested(int index) {
     return;
   QWidget* w = m_viewTabs->widget(index);
   if (!w || (w != m_drawingStudio && w != m_sectionStudio && w != m_terrain3dStudio &&
-             w != m_terrain3dLayoutStudio))
+             w != m_terrain3dLayoutStudio && w != m_topographicBrowser.data()))
     return;
   m_viewTabs->removeTab(index);
   w->hide();
@@ -2606,6 +2661,9 @@ void MainWindow::newSurvey() {
 #if KA_HGIS_HAS_QGIS
   if (m_canvas) m_canvas->freeze(false);
   applyStartupMap();
+  // applyStartupMap의 loadBootBasemaps는 m_isOpeningSurvey가 켜진 동안 취소된다.
+  // 새 조사에서도 조사 열기와 같이 위성·지적을 지금 올린다.
+  ensureDefaultBasemaps();
   // Factory에서 검증한 빈 작업공간을 이미 저장했다. 화면 준비 중 중복 저장하지 않는다.
 #endif
   if (auto* b86 = findChild<QToolButton*>(QStringLiteral("btnCrs5186")))
@@ -2641,6 +2699,9 @@ void MainWindow::refreshLayerEmptyState() {
 // 조판이 열려 있으면 그 화면에 넘긴다. 글자 칸에 커서가 있으면 아무것도 하지 않는다.
 bool MainWindow::routeEditKeyToActiveStudio(bool isDelete) {
 #if KA_HGIS_HAS_QGIS
+  if (m_topographicBrowser && (QApplication::activeWindow() == m_topographicBrowser.data() ||
+      m_topographicBrowser->isAncestorOf(QApplication::focusWidget())))
+    return true;
   QWidget* focus = QApplication::focusWidget();
   if (qobject_cast<QLineEdit*>(focus) || qobject_cast<QAbstractSpinBox*>(focus))
     return true;  // 글자를 고치는 중이다. 도형·레이어를 지우면 안 된다.
@@ -2800,6 +2861,17 @@ void MainWindow::ensureDefaultBasemaps() {
   if (!hasCad && !key.isEmpty())
     hasCad = LayerOps::addVworldCadastralMap(proj, nullptr, key, &cadErr);
   LayerOps::ensureSatelliteAtBottom(proj);
+  // 예전에는 실패해도 사라지는 상태바 메시지뿐이라 현장 로그에 아무 흔적이 없었다.
+  // 무엇이 왜 안 올라왔는지 반드시 남긴다. 인증키 값 자체는 절대 남기지 않는다.
+  KaCrashGuard::logLine(
+      QStringLiteral("[basemap] 위성 %1 · 지적 %2 · 키 %3%4%5")
+          .arg(hasSat ? QStringLiteral("있음") : QStringLiteral("없음"),
+               hasCad ? QStringLiteral("있음") : QStringLiteral("없음"),
+               key.isEmpty() ? QStringLiteral("없음") : QStringLiteral("있음"),
+               satErr.isEmpty() ? QString()
+                                : QStringLiteral(" · 위성오류=%1").arg(satErr.left(200)),
+               cadErr.isEmpty() ? QString()
+                                : QStringLiteral(" · 지적오류=%1").arg(cadErr.left(200))));
   if (hasSat && hasCad)
     statusBar()->showMessage(QStringLiteral("위성과 지적도를 올려 두었습니다."), 5000);
   else if (hasSat && !hasCad)
@@ -2863,10 +2935,23 @@ void MainWindow::loadBootBasemaps() {
 #if KA_HGIS_HAS_QGIS
   if (!m_basemapBootPending) return;
   if (m_isOpeningSurvey) {
-    m_basemapBootPending = false;
+    // 조사를 여는 중이면 지금 올리지 않는다. 그런데 예전에는 여기서 대기 표시를
+    // 꺼 버리고 끝냈다. 시작하자마자 작업공간을 복원하는 포터블에서는 이 경합에
+    // 늘 져서 위성·지적이 영영 올라오지 않았다(현장 로그에 [boot] 배경지도 줄이
+    // 아예 없다). 표시를 유지하고 열기가 끝난 뒤 다시 시도한다.
+    if (m_basemapBootRetries < kBasemapBootRetryMax) {
+      ++m_basemapBootRetries;
+      QTimer::singleShot(300, this, &MainWindow::loadBootBasemaps);
+    } else {
+      m_basemapBootPending = false;
+      KaCrashGuard::logLine(
+          QStringLiteral("[boot] 배경지도 건너뜀 — 조사 열기가 %1초 넘게 끝나지 않았다")
+              .arg(kBasemapBootRetryMax * 0.3, 0, 'f', 1));
+    }
     return;
   }
   m_basemapBootPending = false;
+  m_basemapBootRetries = 0;
   m_isLoadingBasemaps = true;
   QElapsedTimer bm;
   bm.start();
@@ -3338,7 +3423,7 @@ namespace {
 TrenchGridGenerator::Spec g_pendingTrench;
 
 #if KA_HGIS_HAS_QGIS
-TrenchGridGenerator::PickedArea trenchFillFromSurveyLayer(QgsVectorLayer* areaVl) {
+TrenchGridGenerator::PickedArea trenchFillFromSurveyLayer(QgsVectorLayer* areaVl, bool useAll = false) {
   TrenchGridGenerator::PickedArea empty;
   if (!areaVl)
     return empty;
@@ -3355,7 +3440,7 @@ TrenchGridGenerator::PickedArea trenchFillFromSurveyLayer(QgsVectorLayer* areaVl
   selected.reserve(static_cast<size_t>(ids.size()));
   for (QgsFeatureId id : ids)
     selected.push_back(id);
-  return TrenchGridGenerator::pickAutoFillArea(feats, selected);
+  return TrenchGridGenerator::pickAutoFillArea(feats, selected, useAll);
 }
 
 QString leftoverSurveyAreaHint(const TrenchGridGenerator::PickedArea& pick) {
@@ -3388,10 +3473,12 @@ void MainWindow::startTrenchGrid() {
   // 남은 옛 조사구역을 union 하면 격자가 그 큰 구역에 깔린다.
   QByteArray areaWkb;
   double areaM2 = 0.0;
+  QString areaCrs;
   if (auto* areaVl = LayerOps::findByLayerKey(QgsProject::instance(), QStringLiteral("survey_area"))) {
     const TrenchGridGenerator::PickedArea pick = trenchFillFromSurveyLayer(areaVl);
     areaWkb = pick.wkb;
     areaM2 = pick.areaM2;
+    areaCrs = areaVl->crs().authid();
     const QString leftover = leftoverSurveyAreaHint(pick);
     if (!leftover.isEmpty())
       statusBar()->showMessage(leftover, 8000);
@@ -3410,12 +3497,11 @@ void MainWindow::startTrenchGrid() {
             &MainWindow::startTrenchGridMove);
   }
   m_trenchDlg->setArea(areaWkb, areaM2);
-  m_trenchDlg->setTerrainAspect(terrainAspectForArea(areaWkb));
+  m_trenchDlg->setTerrainAspect(terrainAspectForArea(areaWkb, areaCrs));
   m_trenchDlg->show();
   m_trenchDlg->raise();
   if (m_trenchDlg->autoFill()) {
-    if (!applyTrenchFromDialog())
-      beginTrenchOriginPick();
+    applyTrenchFromDialog();
   } else {
     beginTrenchOriginPick();
   }
@@ -3424,7 +3510,8 @@ void MainWindow::startTrenchGrid() {
 
 // 조사구역 안에서 DEM 표고를 격자로 뽑아 오르막 방위를 낸다.
 // DEM이 없거나 평지면 valid=false — 그때는 방위 칸 값을 그대로 쓴다.
-TrenchGridGenerator::SlopeAspect MainWindow::terrainAspectForArea(const QByteArray& areaWkb) {
+TrenchGridGenerator::SlopeAspect MainWindow::terrainAspectForArea(const QByteArray& areaWkb,
+                                                                 const QString& areaCrs) {
 #if KA_HGIS_HAS_QGIS
   TrenchGridGenerator::SlopeAspect none;
   if (areaWkb.isEmpty() || !m_canvas) return none;
@@ -3445,7 +3532,7 @@ TrenchGridGenerator::SlopeAspect MainWindow::terrainAspectForArea(const QByteArr
   const QgsRectangle env = area.boundingBox();
   if (env.isEmpty()) return none;
 
-  const QgsCoordinateReferenceSystem workCrs(m_workCrs);
+  const QgsCoordinateReferenceSystem workCrs(areaCrs.isEmpty() ? m_workCrs : areaCrs);
   QgsCoordinateTransform toDem(workCrs, dem->crs(), proj);
   std::vector<TrenchGridGenerator::ElevSample> samples;
   const int kSteps = 14;  // 14×14 표본이면 사면 방향은 충분히 안정적이다.
@@ -3469,6 +3556,7 @@ TrenchGridGenerator::SlopeAspect MainWindow::terrainAspectForArea(const QByteArr
   return TrenchGridGenerator::upslopeAspect(samples);
 #else
   Q_UNUSED(areaWkb);
+  Q_UNUSED(areaCrs);
   return {};
 #endif
 }
@@ -3479,9 +3567,11 @@ bool MainWindow::applyTrenchFromDialog() {
     return false;
   const TrenchGridGenerator::Spec sp = m_trenchDlg->spec();
   if (m_trenchDlg->autoFill()) {
+    QString areaCrs;
     if (auto* areaVl = LayerOps::findByLayerKey(QgsProject::instance(), QStringLiteral("survey_area"))) {
       const TrenchGridGenerator::PickedArea pick = trenchFillFromSurveyLayer(areaVl);
       m_trenchDlg->setArea(pick.wkb, pick.areaM2);
+      areaCrs = areaVl->crs().authid();
       const QString leftover = leftoverSurveyAreaHint(pick);
       if (!leftover.isEmpty())
         statusBar()->showMessage(leftover, 8000);
@@ -3492,16 +3582,20 @@ bool MainWindow::applyTrenchFromDialog() {
     if (target > 0.0) {
       const auto plan = TrenchGridGenerator::buildForTargetRatio(
           m_trenchDlg->areaWkb(), target, 2.0, sp.azimuthDeg);
+      if (plan.cells.empty()) {
+        notify(Notice::Warning, QStringLiteral("시굴격자"), plan.error);
+        return false;
+      }
       cells = plan.cells;
     } else {
       cells = TrenchGridGenerator::buildInArea(sp, m_trenchDlg->areaWkb());
     }
     if (cells.empty()) {
       notify(Notice::Warning, QStringLiteral("시굴격자"),
-             QStringLiteral("구역에 맞는 트렌치가 없습니다. 맵을 찍어 놓거나 규격을 2×10으로 바꿔 보세요."));
+             QStringLiteral("현재 규격과 방향으로 구역 안에 격자를 배치하지 못했습니다. 회전이나 규격을 바꿔 다시 적용하세요. 기존 격자는 유지됩니다."));
       return false;
     }
-    if (!applyTrenchCells(cells, m_trenchDlg->areaM2(), target))
+    if (!applyTrenchCells(cells, m_trenchDlg->areaM2(), target, areaCrs))
       return false;
     // 깔자마자 마우스로 하나씩 옮길 수 있어야 한다(회전·재배치 뒤도 같다).
     activateTrenchTool(true);
@@ -3537,7 +3631,7 @@ bool MainWindow::applyTrenchFromDialog() {
         pt.second += dy;
       }
     }
-    return applyTrenchCells(cells, m_trenchDlg->areaM2());
+    return applyTrenchCells(cells, m_trenchDlg->areaM2(), 0.0, vl->crs().authid());
   }
   beginTrenchOriginPick();
   return false;
@@ -3600,7 +3694,30 @@ void MainWindow::applyTrenchByRatio(double targetPct) {
            QStringLiteral("먼저 조사구역을 그린 뒤 그 레이어에서 우클릭하세요."));
     return;
   }
-  const TrenchGridGenerator::PickedArea pick = trenchFillFromSurveyLayer(areaVl);
+  TrenchGridGenerator::PickedArea pick = trenchFillFromSurveyLayer(areaVl);
+  // 조사구역을 여러 조각으로 그렸으면, 예전에는 마지막 조각에만 깔렸다. 그래서
+  // 사용자가 시굴격자를 쓰려고 굳이 「폴리곤 묶기」를 먼저 해야 했다. 이제 묻는다.
+  // 기본값을 전체로 바꾸지는 않는다 — 지난 조사의 구역이 남아 있으면 격자가
+  // 수백 칸으로 불어나기 때문이다(tests/test_dem_trench.cpp 에 그 이유가 있다).
+  if (!pick.usedSelection && pick.totalCount > 1) {
+    QMessageBox box(this);
+    box.setWindowTitle(QStringLiteral("시굴격자"));
+    box.setText(QStringLiteral("조사구역이 %1곳입니다. 어디에 깔까요?").arg(pick.totalCount));
+    box.setInformativeText(
+        QStringLiteral("「전체」를 고르면 %1곳을 합친 면적으로 비율을 계산해 모든 구역에 깝니다.\n"
+                       "예전 조사의 구역이 남아 있다면 「마지막 구역만」을 고르세요.")
+            .arg(pick.totalCount));
+    QPushButton* all = box.addButton(QStringLiteral("전체 %1곳").arg(pick.totalCount),
+                                     QMessageBox::AcceptRole);
+    QPushButton* last = box.addButton(QStringLiteral("마지막 구역만"), QMessageBox::RejectRole);
+    box.addButton(QStringLiteral("취소"), QMessageBox::DestructiveRole);
+    box.setDefaultButton(all);
+    box.exec();
+    if (box.clickedButton() == all)
+      pick = trenchFillFromSurveyLayer(areaVl, true);
+    else if (box.clickedButton() != last)
+      return;  // 취소
+  }
   const QString leftover = leftoverSurveyAreaHint(pick);
   if (!leftover.isEmpty())
     statusBar()->showMessage(leftover, 8000);
@@ -3612,45 +3729,58 @@ void MainWindow::applyTrenchByRatio(double targetPct) {
   const TrenchGridGenerator::RatioFill plan =
       TrenchGridGenerator::buildForTargetRatio(pick.wkb, targetPct, 2.0);
   if (plan.cells.empty()) {
-    notify(Notice::Warning, QStringLiteral("시굴격자"),
-           QStringLiteral("구역에 맞는 트렌치가 없습니다. 구역을 더 크게 그리거나 툴바 시굴격자로 규격을 바꾸세요."));
+    notify(Notice::Warning, QStringLiteral("시굴격자"), plan.error);
     return;
   }
-  applyTrenchCells(plan.cells, pick.areaM2, targetPct);
+  applyTrenchCells(plan.cells, pick.areaM2, targetPct, areaVl->crs().authid());
 #else
   Q_UNUSED(targetPct);
 #endif
 }
 
 bool MainWindow::applyTrenchCells(const std::vector<TrenchGridGenerator::Cell>& cells,
-                                  double areaM2, double targetPct) {
+                                  double areaM2, double targetPct, const QString& sourceCrs) {
 #if KA_HGIS_HAS_QGIS
   QString err;
-  // 한 조사에 격자는 하나: 이전 격자를 지우고 대체한다(겹침 방지).
-  if (!TrenchGridGenerator::clearLayer(m_surveyPath, QStringLiteral("trial_trench"), &err)) {
+  if (cells.empty() || (targetPct > 0.0 &&
+      (!(areaM2 > 0.0) || !std::isfinite(areaM2) ||
+       std::abs(TrenchGridGenerator::totalArea(cells) - areaM2 * targetPct / 100.0) >
+           std::max(1e-6, areaM2 * 1e-8)))) {
     notify(Notice::Warning, QStringLiteral("시굴격자"),
-           QStringLiteral("기존 격자를 지우지 못했습니다."), err);
+           QStringLiteral("목표 면적에 맞는 격자를 계산하지 못했습니다. 방향과 규격을 확인해 다시 적용하세요. 기존 격자는 유지됩니다."));
     return false;
   }
-  const QString auth = QgsProject::instance() && QgsProject::instance()->crs().isValid()
+  if (auto* existing = LayerOps::findByLayerKey(QgsProject::instance(), QStringLiteral("trial_trench"));
+      existing && existing->isModified()) {
+    notify(Notice::Warning, QStringLiteral("시굴격자"),
+           QStringLiteral("시굴격자에 저장하지 않은 편집이 있습니다. 먼저 저장한 뒤 다시 만드세요. 현재 편집은 그대로 유지됩니다."));
+    return false;
+  }
+  // Auto-fill cells are in the survey layer CRS, even if the canvas has since
+  // changed work CRS. Preserve that identity; QGIS transforms them for display.
+  const QString auth = !sourceCrs.isEmpty() ? sourceCrs
+                       : QgsProject::instance() && QgsProject::instance()->crs().isValid()
                            ? QgsProject::instance()->crs().authid()
                            : QStringLiteral("EPSG:5186");
   if (!TrenchGridGenerator::writeGpkg(m_surveyPath, QStringLiteral("trial_trench"), cells, auth, &err)) {
     notify(Notice::Warning, QStringLiteral("시굴격자"),
-           QStringLiteral("격자를 조사 파일에 저장하지 못했습니다."), err);
+           QStringLiteral("격자를 조사 파일에 저장하지 못했습니다. 저장 위치와 파일 사용 상태를 확인하고 다시 적용하세요."), err);
     return false;
   }
   auto* vl = ensureDomainLayerForEdit(QStringLiteral("trial_trench"), QStringLiteral("시굴격자"));
-  if (vl) {
-    vl->dataProvider()->reloadData();
-    vl->updateExtents();
-    vl->triggerRepaint();
+  if (!vl) {
+    notify(Notice::Warning, QStringLiteral("시굴격자"),
+           QStringLiteral("격자는 파일에 저장했지만 지도에 불러오지 못했습니다. 조사를 다시 열어 확인하세요."));
+    return false;
   }
+  vl->dataProvider()->reloadData();
+  vl->updateExtents();
+  vl->triggerRepaint();
   LayerOps::syncMapCanvas(QgsProject::instance(), m_canvas, false);
   const double t = TrenchGridGenerator::totalArea(cells);
   QString msg = QStringLiteral("시굴격자 %1개 · 총 %2㎡")
                     .arg(cells.size())
-                    .arg(QLocale().toString(t, 'f', 0));
+                    .arg(QLocale().toString(t, 'f', 2));
   if (areaM2 > 0.0) {
     const double pct = t / areaM2 * 100.0;
     const QString kind = (targetPct > 0.0 && targetPct < 5.0)
@@ -3668,6 +3798,7 @@ bool MainWindow::applyTrenchCells(const std::vector<TrenchGridGenerator::Cell>& 
   Q_UNUSED(cells);
   Q_UNUSED(areaM2);
   Q_UNUSED(targetPct);
+  Q_UNUSED(sourceCrs);
   return false;
 #endif
 }
@@ -5347,13 +5478,34 @@ void MainWindow::mergeFeaturePolygons() {
   auto selected = KaFeatureSelectTool::allSelectedFeatures(m_canvas);
   QgsVectorLayer* targetLayer = nullptr;
   QgsFeatureIds selectedIds;
+  QSet<QString> otherLayers;
   if (!selected.isEmpty()) {
     targetLayer = selected[0].layer.data();
     for (const auto& item : selected) {
-      if (item.layer == targetLayer) {
+      if (item.layer == targetLayer)
         selectedIds.insert(item.fid);
-      }
+      else if (item.layer)
+        otherLayers.insert(item.layer->name());
     }
+  }
+  // 예전에는 다른 레이어에서 고른 면을 조용히 버리고 첫 레이어 것만 묶은 뒤
+  // "선택한 폴리곤 N개를 묶었습니다"라고만 알렸다. 무엇이 빠졌는지 밝힌다.
+  if (!otherLayers.isEmpty()) {
+    QMessageBox::warning(
+        this, QStringLiteral("폴리곤 묶기"),
+        QStringLiteral("한 번에 한 레이어만 묶을 수 있습니다.\n"
+                       "「%1」의 면만 묶고 다음 레이어의 선택은 쓰지 않습니다: %2")
+            .arg(targetLayer ? targetLayer->name() : QStringLiteral("?"),
+                 QStringList(otherLayers.begin(), otherLayers.end()).join(QStringLiteral(", "))));
+  }
+  // 아무것도 고르지 않고 누르면 예전에는 유구면 전체가 통째로 하나가 됐다.
+  // 되돌리려면 다시 나누어야 해서 사고가 컸다. 이제는 멈추고 알려 준다.
+  if (selectedIds.size() < 2) {
+    QMessageBox::information(
+        this, QStringLiteral("폴리곤 묶기"),
+        QStringLiteral("묶을 면을 2개 이상 고른 뒤 누르세요.\n"
+                       "[도형선택]으로 면을 클릭하고, Shift를 누른 채 다른 면을 더 고릅니다."));
+    return;
   }
   if (!targetLayer) {
     targetLayer = m_layerTree ? qobject_cast<QgsVectorLayer*>(m_layerTree->currentLayer()) : nullptr;
@@ -5364,16 +5516,16 @@ void MainWindow::mergeFeaturePolygons() {
   if (!targetLayer) return;
 
   QString err;
-  const bool ok = (selectedIds.size() >= 2) ? LayerOps::mergePolygonFeatures(targetLayer, selectedIds, &err)
-                                            : LayerOps::mergePolygonFeatures(targetLayer, &err);
+  const bool ok = LayerOps::mergePolygonFeatures(targetLayer, selectedIds, &err);
   if (!ok) {
     QMessageBox::warning(this, QStringLiteral("폴리곤 묶기"), err);
     return;
   }
   if (m_canvas) m_canvas->refresh();
-  const QString msg = (selectedIds.size() >= 2)
-                          ? QStringLiteral("선택한 폴리곤 %1개를 1개로 묶었습니다 · 제출 시 feature_poly.shp 한 파일").arg(selectedIds.size())
-                          : QStringLiteral("유구면 폴리곤을 1개(멀티폴리곤)로 묶었습니다 · 제출 시 feature_poly.shp 한 파일");
+  const QString msg =
+      QStringLiteral("「%1」의 폴리곤 %2개를 1개로 묶었습니다")
+          .arg(targetLayer->name())
+          .arg(selectedIds.size());
   statusBar()->showMessage(msg, 10000);
   notify(Notice::Success, QStringLiteral("폴리곤 묶기 완료"),
          QStringLiteral("선택된 폴리곤들을 하나의 지오메트리로 합쳤습니다."),
@@ -6647,12 +6799,11 @@ void MainWindow::editDemElevationClasses() {
   }
   if (!dem) {
     QMessageBox::information(
-        this, QStringLiteral("DEM 높이 구간"),
-        QStringLiteral("먼저 DEM을 켜 주세요. 높이(m) 범례가 있는 상세 고도일 때만 "
-                       "칸 수·색·이름을 바꿀 수 있습니다."));
+        this, QStringLiteral("DEM 표현"),
+        QStringLiteral("먼저 DEM을 켜 주세요. 표고 자료를 불러오면 색 표현과 음영을 조절할 수 있습니다."));
     return;
   }
-  auto* dlg = new KaDemClassDialog(dem, this);
+  auto* dlg = new KaDemClassDialog(dem, this, m_canvas);
   dlg->setAttribute(Qt::WA_DeleteOnClose);
   dlg->show();
 #else
@@ -6687,16 +6838,17 @@ void MainWindow::toggleDemMap() {
 
     if (makeVisible) {
       LayerOps::ensureDemRelief(proj, dem);
+      DemPresentation::followCanvas(dem, m_canvas);
     }
-    if (!LayerOps::isLayerVisible(proj, QStringLiteral("지질도"))) {
-      LayerOps::toggleLayerVisibility(proj, m_canvas, QStringLiteral("지형 음영"), makeVisible);
+    if (!makeVisible && !LayerOps::isLayerVisible(proj, QStringLiteral("지질도"))) {
+      LayerOps::toggleLayerVisibility(proj, m_canvas, QStringLiteral("지형 음영"), false);
     }
     if (!m_canvas->isDrawing()) {
       LayerOps::syncMapCanvas(proj, m_canvas, false);
       m_canvas->refresh();
     }
     statusBar()->showMessage(
-        makeVisible ? QStringLiteral("정밀 DEM 입체 지형을 켰습니다. 다시 누르면 숨깁니다.")
+        makeVisible ? QStringLiteral("DEM을 켰습니다. 「DEM 표현」에서 색과 음영을 조절하세요.")
                     : QStringLiteral("DEM 지형을 숨겼습니다."),
         4000);
     return;
@@ -7290,6 +7442,7 @@ void MainWindow::rememberSurveyDir(const QString& path) {
   if (dir.isEmpty() || !QFileInfo(dir).isDir()) return;
   QSettings st = RecentSurveys::userSettings();
   st.setValue(QStringLiteral("Survey/LastDir"), dir);
+  updateTopographicDirectory(path);
 }
 
 // 캔버스가 "지금 그리는 중"이라고 잡고 있는 레이어와 축척을 남긴다. 헤드리스 렌더로는
@@ -7652,6 +7805,8 @@ void MainWindow::openProject() {
   for (QgsMapLayer* ml : QgsProject::instance()->mapLayers()) {
     if (ml && ml->name() == QLatin1String("DEM") && ml->isValid()) {
       if (auto* rl = qobject_cast<QgsRasterLayer*>(ml)) {
+        DemPresentation::restore(rl);
+        DemPresentation::followCanvas(rl, m_canvas);
         if (LayerOps::isLayerVisible(QgsProject::instance(), QStringLiteral("DEM"))) {
           LayerOps::ensureDemRelief(QgsProject::instance(), rl);
         }
@@ -8321,4 +8476,158 @@ void MainWindow::showAbout() {
           "GEOS  © GEOS contributors  ·  LGPLv2.1\n"
           "\n"
           "본 소프트웨어는 GNU GPL v2 이상으로 배포됩니다."));
+}
+
+// 조사구역이 속한 시/군의 국가유산 자료를 받아 온다.
+// 버튼 한 번으로 끝나야 하고, 묻는 것은 시/군 판정 확인 하나뿐이다.
+void MainWindow::fetchNearbyHeritage() {
+  // 막히면 조용히 끝내지 않는다. 왜 못 하는지 창으로 말한다.
+  auto stopWith = [this](const QString& why) {
+    QMessageBox::warning(this, QStringLiteral("주변유적 받기"), why);
+  };
+
+  auto* areaVl = LayerOps::findByLayerKey(QgsProject::instance(), QStringLiteral("survey_area"));
+  if (!areaVl) {
+    stopWith(QStringLiteral("조사구역 레이어가 없습니다. 조사구역을 먼저 그리세요."));
+    return;
+  }
+  const TrenchGridGenerator::PickedArea pick = trenchFillFromSurveyLayer(areaVl);
+  QgsGeometry area;
+  if (!pick.wkb.isEmpty()) area.fromWkb(pick.wkb);
+  if (area.isNull() || area.isEmpty()) {
+    stopWith(QStringLiteral("조사구역이 비어 있습니다. 조사구역을 먼저 그리세요.\n"
+                            "그린 구역으로 어느 시·군인지 판정합니다."));
+    return;
+  }
+  if (m_surveyPath.isEmpty()) {
+    stopWith(QStringLiteral("조사를 먼저 열거나 저장하세요.\n"
+                            "받은 자료는 그 조사폴더 안에만 둡니다."));
+    return;
+  }
+
+  // 창을 먼저 띄운다. 판정이 늦어도 사용자가 아무것도 못 보는 일이 없게 한다.
+  ensureHeritageBrowser();
+  m_heritageBrowser->show();
+  m_heritageBrowser->raise();
+  m_heritageBrowser->activateWindow();
+  m_heritageBrowser->showWaiting(QStringLiteral("조사구역이 속한 시·군을 찾는 중입니다…"));
+
+  if (!m_heritageResolver) {
+    m_heritageResolver = new HeritageRegionResolver(this);
+    connect(m_heritageResolver, &HeritageRegionResolver::failed, this, [this](const QString& why) {
+      if (m_heritageBrowser) m_heritageBrowser->showWaiting(why);
+      QMessageBox::warning(this, QStringLiteral("주변유적 받기"), why);
+    });
+    connect(m_heritageResolver, &HeritageRegionResolver::resolved, this,
+            [this](const HeritageRegion& region) { openHeritageBrowserFor(region); });
+  }
+  m_heritageResolver->resolve(area, areaVl->crs(), QgsProject::instance());
+}
+
+// 창과 연결을 한 번만 만든다. 판정 전에도 창을 띄우기 위해 따로 뺐다.
+void MainWindow::ensureHeritageBrowser() {
+  if (m_heritageBrowser) return;
+  m_heritageBrowser = new KaHeritageBrowser(this);
+  connect(m_heritageBrowser, &KaHeritageBrowser::failed, this, [this](const QString& why) {
+    notify(Notice::Warning, QStringLiteral("주변유적 받기"), why);
+  });
+  connect(m_heritageBrowser, &KaHeritageBrowser::stageChanged, this,
+          [this](HeritageStage, const QString& message) {
+            statusBar()->showMessage(message, 6000);
+          });
+  // 한 종류를 받을 때마다 바로 지도에 올린다. 여섯 종을 다 기다리게 하지 않는다.
+  connect(m_heritageBrowser, &KaHeritageBrowser::datasetReady, this,
+          [this](HeritageDataset dataset, const QStringList& files) {
+            importHeritageDataset(dataset, files);
+          });
+  connect(m_heritageBrowser, &KaHeritageBrowser::allFinished, this, [this]() {
+    notify(Notice::Info, QStringLiteral("주변유적 받기"),
+           QStringLiteral("주변유적 자료를 모두 올렸습니다. 「참조 지도」 그룹에 있습니다."));
+  });
+  // 서약서 동의는 영수증으로 남긴다. 조용히 지나가지 않는다.
+  connect(m_heritageBrowser, &KaHeritageBrowser::agreementAccepted, this,
+          [this](const QDateTime& when, const QString& terms) {
+            saveHeritageAgreementReceipt(when, terms);
+          });
+}
+
+// 판정 결과를 확인받고 받기를 시작한다. 시·군 경계에 걸친 조사가 흔해서 이 한 번은 묻는다.
+void MainWindow::openHeritageBrowserFor(const HeritageRegion& region) {
+  ensureHeritageBrowser();
+  const QString guess = region.display();
+  bool accepted = false;
+  const QString answer = QInputDialog::getText(
+      m_heritageBrowser, QStringLiteral("주변유적 받기"),
+      QStringLiteral("조사구역이 속한 시·군입니다. 맞으면 그대로 두고, 아니면 고치세요.\n"
+                     "(자료는 시·군 단위로만 받습니다)"),
+      QLineEdit::Normal, guess, &accepted);
+  if (!accepted) {
+    m_heritageBrowser->showWaiting(QStringLiteral("취소했습니다."));
+    return;
+  }
+
+  const QStringList parts = answer.trimmed().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+  if (parts.size() < 2) {
+    QMessageBox::warning(this, QStringLiteral("주변유적 받기"),
+                         QStringLiteral("「경상북도 안동시」처럼 시·도와 시·군을 함께 적어 주세요."));
+    return;
+  }
+  const QString sido = parts.first();
+  const QString city = parts.mid(1).join(QLatin1Char(' '));
+
+  const QString root = QDir(QFileInfo(m_surveyPath).absolutePath())
+                           .filePath(QStringLiteral("주변유적/원본"));
+  if (!QDir().mkpath(root)) {
+    QMessageBox::warning(this, QStringLiteral("주변유적 받기"),
+                         QStringLiteral("조사폴더에 주변유적 폴더를 만들지 못했습니다."));
+    return;
+  }
+
+  m_heritageBrowser->setDownloadRoot(root);
+  m_heritageBrowser->setTarget(sido, city, HeritageStyle::allDatasets());
+  m_heritageBrowser->show();
+  m_heritageBrowser->raise();
+  m_heritageBrowser->start();
+}
+
+// 받은 파일을 그 자리에서 지도에 올린다. 색·범례는 HeritageStyle 이 건다.
+void MainWindow::importHeritageDataset(HeritageDataset dataset, const QStringList& files) {
+  if (m_surveyPath.isEmpty()) return;
+  const QString archiveRoot =
+      QDir(QFileInfo(m_surveyPath).absolutePath()).filePath(QStringLiteral("주변유적/SHP"));
+  QDir().mkpath(archiveRoot);
+
+  const HeritageImport::Result result =
+      HeritageImport::loadDataset(QgsProject::instance(), dataset, files, archiveRoot);
+  for (const QString& message : result.messages)
+    statusBar()->showMessage(message, 8000);
+  if (!result.error.isEmpty()) {
+    notify(Notice::Warning, QStringLiteral("주변유적 받기"), result.error);
+    return;
+  }
+  LayerOps::applyLayerOrderToLabels(QgsProject::instance(), m_canvas);
+  if (m_canvas) m_canvas->refresh();
+  statusBar()->showMessage(QStringLiteral("%1 %2곳을 올렸습니다.")
+                               .arg(HeritageStyle::layerName(dataset))
+                               .arg(result.featureCount),
+                           8000);
+}
+
+// 서약서 동의 영수증. 언제 무엇에 동의했는지 남긴다.
+void MainWindow::saveHeritageAgreementReceipt(const QDateTime& when, const QString& terms) {
+  if (m_surveyPath.isEmpty()) return;
+  const QString dir =
+      QDir(QFileInfo(m_surveyPath).absolutePath()).filePath(QStringLiteral("주변유적/receipts"));
+  if (!QDir().mkpath(dir)) return;
+  const QString path = QDir(dir).filePath(
+      QStringLiteral("서약서-%1.txt").arg(when.toString(QStringLiteral("yyyyMMdd-HHmmss"))));
+  QFile file(path);
+  if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return;
+  QTextStream out(&file);
+  out.setEncoding(QStringConverter::Utf8);
+  out << QStringLiteral("국가유산 공간정보 원본자료 사용 서약서 동의 기록") << Qt::endl;
+  out << QStringLiteral("동의 시각: ") << when.toString(Qt::ISODate) << Qt::endl;
+  out << QStringLiteral("기관 계정: ") << HeritageIntranetSettings::describeForLog() << Qt::endl;
+  out << QStringLiteral("----") << Qt::endl;
+  out << terms << Qt::endl;
 }

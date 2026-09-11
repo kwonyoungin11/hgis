@@ -25,6 +25,7 @@
 #include <QSettings>
 #include <QUrl>
 #include <QUrlQuery>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 
 #include <qgsvectorfilewriter.h>
@@ -35,6 +36,7 @@
 #include "core/ExportService.h"
 #include "core/LayoutService.h"
 #include "core/LayerOps.h"
+#include "core/KaPortableRuntime.h"
 #include "core/WorkflowGuide.h"
 #include "core/VworldSettings.h"
 #include "core/LocationSearch.h"
@@ -142,7 +144,7 @@ private slots:
   void elevationMap_xyzOnlySkipsAbortWhilePanning();
   void demColorRelief_is3857XyzNotTerrainMap();
   void demElevationStyle_legendListsHeightMeters();
-  void demElevationStyle_discreteFinerMeterClasses();
+  void demElevationStyle_continuousLowlandStops();
   void demElevationStyle_userClassCountAndCustomItems();
   void demNgiiImg_loadsWithMeterLegend();
   void paleoLandform_candidateEmphasisAndReferenceLayer();
@@ -206,6 +208,7 @@ private slots:
   void alignPanel_showsHugeTiffViaGdalPreview();
   void alignPreview_keepsImageOrientation();
   void layerPanel_hasOneCheckAllToggle();
+  void layoutLayerPanel_hasCheckAllToggle();
   void layoutLegend_deletableAndStaysDeleted();
   void opacityRail_hasBrightnessForRasters();
   void labelsFollowLayerStackOrder();
@@ -234,6 +237,7 @@ private slots:
   void layoutNiceScaleDenominator_endsOnTen();
   void legendTitlesHideEpsgAndUseShortKorean();
   void sheetLegend_soilShowsTerrainClassesNotPictureName();
+  void sheetLegend_geologyDropsStructureKeepsLithology();
   void sheetLegend_hidesUncheckedSoilLayer();
   void sheetLegend_followsLayerCheckOnAndOff();
   void drawSubToolbarWiresEachDomainSlot();
@@ -250,6 +254,8 @@ private slots:
   void layoutWheelZoom_keepsPointUnderCursor();
   void singleInstanceGuardIsWiredIntoBoot();
   void portableExe_setsPrefixFromExeDir();
+  void portableRuntime_discoversUnicodeFolderAndKoreaCrs();
+  void portableRuntime_ignoresLeftoverAppDataKey();
   void nameAttributeLabeling_5ptAndAreaCheck();
   void intersectionSnappingAndSaveAsPreservesLayers();
   void zoomToProjectDataLayers_usesUserVectorsNotKorea();
@@ -978,7 +984,7 @@ void TestWorkflow::demRelief_drapesMultiplyOverDem() {
   QVERIFY2(shade->isValid(), "지형 음영 레이어가 유효해야 함");
   QCOMPARE(shade->name(), QStringLiteral("지형 음영"));
   QCOMPARE(shade->blendMode(), QPainter::CompositionMode_Multiply);
-  QVERIFY2(shade->opacity() >= 0.50 && shade->opacity() <= 0.60, "음영 불투명도");
+  QCOMPARE(shade->opacity(), .30); // Natural default; user strength is tested separately.
 
   // QgsProject에서 삭제되지 않고 온전히 보존되어야 한다
   QVERIFY2(proj.mapLayer(shade->id()) == shade, "지형 음영이 프로젝트에서 삭제되면 안 됨");
@@ -1507,7 +1513,7 @@ void TestWorkflow::demElevationStyle_legendListsHeightMeters() {
   QFile::remove(path);
 }
 
-void TestWorkflow::demElevationStyle_discreteFinerMeterClasses() {
+void TestWorkflow::demElevationStyle_continuousLowlandStops() {
   // 약 8칸. 5 m × 24줄은 범례가 맵을 가린다.
   QCOMPARE(LayerOps::demElevationClassStep(0.0, 18.0), 5.0);
   QCOMPARE(LayerOps::demElevationClassStep(0.0, 120.0), 15.0);
@@ -1547,14 +1553,18 @@ void TestWorkflow::demElevationStyle_discreteFinerMeterClasses() {
   QVERIFY(rend && rend->shader());
   auto* fn = dynamic_cast<QgsColorRampShader*>(rend->shader()->rasterShaderFunction());
   QVERIFY2(fn, "QgsColorRampShader");
-  QCOMPARE(fn->colorRampType(), Qgis::ShaderInterpolationMethod::Discrete);
+  QCOMPARE(fn->colorRampType(), Qgis::ShaderInterpolationMethod::Linear);
   const QList<QgsColorRampShader::ColorRampItem> items = fn->colorRampItemList();
-  QVERIFY2(items.size() >= 4 && items.size() <= 8,
-           "enough height classes, but short enough for the layer-tree legend");
-  QVERIFY2(!std::isfinite(items.last().value) && items.last().value > 0,
-           "QGIS Discrete shade() returns false (white hole) unless last class is +inf");
-  QVERIFY2(items.last().label.contains(QStringLiteral("이상")),
-           "top class reads as N m 이상");
+  QCOMPARE(items.size(), 16);
+  QCOMPARE(items.first().value, 0.);
+  QCOMPARE(items.last().value, 2000.);
+  QCOMPARE(rend->classificationMin(), 0.);
+  QCOMPARE(rend->classificationMax(), 2000.);
+  int r1, g1, b1, a1, r2, g2, b2, a2;
+  QVERIFY(fn->shade(20., &r1, &g1, &b1, &a1));
+  QVERIFY(fn->shade(21., &r2, &g2, &b2, &a2));
+  QVERIFY(QColor(r1,g1,b1) != QColor(r2,g2,b2));
+  QVERIFY(qGray(r1,g1,b1) > 100);
   int sr = 0, sg = 0, sb = 0, sa = 0;
   QVERIFY2(fn->shade(9000.0, &sr, &sg, &sb, &sa) && sa > 0,
            "peak above sampled max must still get a color");
@@ -1638,7 +1648,7 @@ void TestWorkflow::demElevationStyle_userClassCountAndCustomItems() {
   QCOMPARE(items.size(), 3);
   QCOMPARE(items[0].label, QStringLiteral("낮음"));
   QCOMPARE(items[1].color, QColor(40, 50, 60));
-  QVERIFY2(!std::isfinite(items.last().value), "applied custom list still ends with +inf");
+  QCOMPARE(items.last().value, 90.);
   int sr = 0, sg = 0, sb = 0, sa = 0;
   QVERIFY(fn->shade(120.0, &sr, &sg, &sb, &sa) && sa > 0);
   QCOMPARE(QColor(sr, sg, sb), QColor(200, 10, 10));
@@ -3533,6 +3543,35 @@ void TestWorkflow::layerPanel_hasOneCheckAllToggle() {
            "단추에 스타일이 있어야 카드 안에서 겉돌지 않는다");
 }
 
+void TestWorkflow::layoutLayerPanel_hasCheckAllToggle() {
+  QFile studio(QStringLiteral("src/app/KaDrawingStudio.cpp"));
+  QVERIFY2(studio.open(QIODevice::ReadOnly | QIODevice::Text),
+           "run from source tree (ctest WORKING_DIRECTORY)");
+  const QString app = QString::fromUtf8(studio.readAll());
+  QVERIFY2(app.contains(QLatin1String("layoutLayerCheckAllBtn")),
+           "조판 레이어 제목 줄에도 전체끄기 단추가 있어야 한다");
+  QVERIFY2(app.contains(QLatin1String("void KaDrawingStudio::toggleAllLayersChecked")),
+           "조판 전용 전체 켜기·끄기가 있어야 한다");
+  const int fn = app.indexOf(QLatin1String("void KaDrawingStudio::toggleAllLayersChecked"));
+  QVERIFY2(fn >= 0, "조판 토글 본문이 있어야 한다");
+  const QString body = app.mid(fn, 1400);
+  QVERIFY2(body.contains(QLatin1String("setItemVisibilityCheckedRecursive")),
+           "묶음 안 레이어까지 한 번에 바뀌어야 한다");
+  QVERIFY2(body.contains(QLatin1String("syncMapFromLayers")),
+           "조판은 맵 슬롯이 아니라 도면 레이어 동기화만 탄다");
+  QVERIFY2(!body.contains(QLatin1String("MainWindow::toggleAllLayersChecked")),
+           "맵 전체끄기를 조판에서 부르면 캔버스까지 건드린다");
+  QVERIFY2(app.contains(QString::fromUtf8("전체 끄기")) &&
+               app.contains(QString::fromUtf8("전체 켜기")),
+           "조판 단추 글씨가 맵과 같아야 한다");
+
+  QFile qss(QStringLiteral("data/theme/ka-hgis.qss"));
+  QVERIFY2(qss.open(QIODevice::ReadOnly | QIODevice::Text), "ka-hgis.qss");
+  QVERIFY2(QString::fromUtf8(qss.readAll())
+               .contains(QLatin1String("layoutLayerCheckAllBtn")),
+           "조판 단추에도 같은 카드 스타일이 있어야 한다");
+}
+
 void TestWorkflow::layoutLegend_deletableAndStaysDeleted() {
   // 사용자 보고: 조판에서 범례를 지울 수가 없다.
   // 원인 1 — 뷰에 도구를 하나도 걸지 않아 용지 위 항목이 선택되지 않았다.
@@ -4730,6 +4769,79 @@ void TestWorkflow::sheetLegend_soilShowsTerrainClassesNotPictureName() {
   QVERIFY2(!dump.contains(QStringLiteral("위성")), dump.toUtf8().constData());
 }
 
+void TestWorkflow::sheetLegend_geologyDropsStructureKeepsLithology() {
+  QVERIFY(GeologyMapService::omitFromSheetLegend(QStringLiteral("부정합경계")));
+  QVERIFY(GeologyMapService::omitFromSheetLegend(QStringLiteral("주향경사점")));
+  QVERIFY(GeologyMapService::omitFromSheetLegend(QStringLiteral("주향경사")));
+  QVERIFY(GeologyMapService::omitFromSheetLegend(QStringLiteral("지질경계")));
+  QVERIFY(GeologyMapService::omitFromSheetLegend(QStringLiteral("단층추정")));
+  QVERIFY(!GeologyMapService::omitFromSheetLegend(QStringLiteral("충적층")));
+  QVERIFY(!GeologyMapService::omitFromSheetLegend(QStringLiteral("백악기퇴적암")));
+  QVERIFY(!GeologyMapService::omitFromSheetLegend(QStringLiteral("단층")));
+
+  QgsProject proj;
+  proj.setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  auto* geo = new QgsVectorLayer(
+      QStringLiteral("Polygon?crs=EPSG:5186&field=class:string"),
+      QStringLiteral("추가 지질도"), QStringLiteral("memory"));
+  QVERIFY(geo->isValid());
+  QgsCategoryList cats;
+  const QStringList labels = {QStringLiteral("충적층"), QStringLiteral("백악기퇴적암"),
+                              QStringLiteral("부정합경계"), QStringLiteral("주향경사점"),
+                              QStringLiteral("지질경계"), QStringLiteral("단층추정"),
+                              QStringLiteral("단층")};
+  int i = 0;
+  for (const QString& label : labels) {
+    auto fs = QgsFillSymbol::createSimple(
+        {{QStringLiteral("color"), QColor::fromHsv((i * 40) % 360, 140, 220, 150).name(QColor::HexArgb)}});
+    cats.append(QgsRendererCategory(QVariant(label), fs.release(), label));
+    ++i;
+  }
+  geo->setRenderer(new QgsCategorizedSymbolRenderer(QStringLiteral("class"), cats));
+  QgsFeature keep(geo->fields());
+  keep.setAttribute(0, QStringLiteral("충적층"));
+  keep.setGeometry(QgsGeometry::fromWkt(QStringLiteral("POLYGON((200000 450000,200200 450000,200200 450200,200000 450200,200000 450000))")));
+  QVERIFY(geo->dataProvider()->addFeature(keep));
+  QgsFeature fault(geo->fields());
+  fault.setAttribute(0, QStringLiteral("단층"));
+  fault.setGeometry(QgsGeometry::fromWkt(QStringLiteral("POLYGON((200040 450040,200080 450040,200080 450080,200040 450080,200040 450040))")));
+  QVERIFY(geo->dataProvider()->addFeature(fault));
+  proj.addMapLayer(geo);
+  GeologyMapService::pruneStructureLegend(geo);
+
+  QVERIFY(!LayoutService::createBlankSheet(&proj, 297.0, 210.0, QStringLiteral("user_sheet"), nullptr)
+               .isEmpty());
+  auto* ly = dynamic_cast<QgsPrintLayout*>(
+      proj.layoutManager()->layoutByName(QStringLiteral("user_sheet")));
+  QVERIFY(ly);
+  auto* map = new QgsLayoutItemMap(ly);
+  map->setId(QStringLiteral("ka_map"));
+  map->attemptSetSceneRect(QRectF(20.0, 20.0, 160.0, 120.0));
+  map->setCrs(QgsCoordinateReferenceSystem(QStringLiteral("EPSG:5186")));
+  map->setKeepLayerSet(true);
+  map->setLayers({geo});
+  map->zoomToExtent(QgsRectangle(199990.0, 449990.0, 200210.0, 450210.0));
+  if (map->scene() != ly)
+    ly->addLayoutItem(map);
+
+  auto* legend = new QgsLayoutItemLegend(ly);
+  legend->setTitle(QStringLiteral("범례"));
+  legend->setLinkedMap(map);
+  legend->setResizeToContents(false);
+  legend->attemptSetSceneRect(QRectF(190.0, 20.0, 48.0, 74.0));
+  ly->addLayoutItem(legend);
+  legend->updateLegend();
+  LayoutService::tuneSheetLegend(legend);
+
+  const QString dump = LayoutService::sheetLegendLabelDump(legend);
+  QVERIFY2(dump.contains(QStringLiteral("충적층")), dump.toUtf8().constData());
+  QVERIFY2(dump.contains(QStringLiteral("단층")), dump.toUtf8().constData());
+  QVERIFY2(!dump.contains(QStringLiteral("부정합경계")), dump.toUtf8().constData());
+  QVERIFY2(!dump.contains(QStringLiteral("주향경사점")), dump.toUtf8().constData());
+  QVERIFY2(!dump.contains(QStringLiteral("지질경계")), dump.toUtf8().constData());
+  QVERIFY2(!dump.contains(QStringLiteral("단층추정")), dump.toUtf8().constData());
+}
+
 void TestWorkflow::sheetLegend_hidesUncheckedSoilLayer() {
   // 레이어 목록에서 토양도를 끄면 도면 범례에도 없어야 한다. 숨긴 레이어를 다시 끼워 넣지 않는다.
   QgsProject proj;
@@ -5033,6 +5145,14 @@ void TestWorkflow::startupLoadsSatelliteAndCadastralWithoutToolbarIcons() {
            "main toolbar must not keep 위성 icon");
   QVERIFY2(!src.contains(QLatin1String("addIcon(QStringLiteral(\"cadastral\"), QStringLiteral(\"지적\")")),
            "main toolbar must not keep 지적 icon");
+  const int newAt = src.indexOf(QLatin1String("void MainWindow::newSurvey"));
+  QVERIFY2(newAt >= 0, "newSurvey");
+  const int newEnd = src.indexOf(QLatin1String("void MainWindow::"), newAt + 10);
+  const QString newBody = src.mid(newAt, newEnd - newAt);
+  const int applyAt = newBody.indexOf(QLatin1String("applyStartupMap()"));
+  const int ensureAt = newBody.indexOf(QLatin1String("ensureDefaultBasemaps()"));
+  QVERIFY2(applyAt >= 0 && ensureAt > applyAt,
+           "새 조사는 예약만 하지 말고 위성·지적을 바로 올려야 함");
 }
 
 void TestWorkflow::layoutCoordPointHasIconAndCallout() {
@@ -5088,20 +5208,126 @@ void TestWorkflow::layoutCoordCallout_rejectsOutsideAndCanUndo() {
 }
 
 void TestWorkflow::portableExe_setsPrefixFromExeDir() {
-  QFile f(QStringLiteral("src/app/KaApplication.cpp"));
-  QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), "KaApplication.cpp");
-  const QString src = QString::fromUtf8(f.readAll());
-  QVERIFY2(src.contains(QLatin1String("applyBundledRuntime")),
+  QFile appFile(QStringLiteral("src/app/KaApplication.cpp"));
+  QVERIFY2(appFile.open(QIODevice::ReadOnly | QIODevice::Text), "KaApplication.cpp");
+  const QString appSrc = QString::fromUtf8(appFile.readAll());
+  QVERIFY2(appSrc.contains(QLatin1String("applyBundledRuntime")),
            "포터블 EXE가 자기 폴더에서 QGIS를 찾음");
+  QVERIFY2(appSrc.contains(QLatin1String("kaExeDir")), "start.bat 없이 EXE 위치");
+  QVERIFY2(appSrc.contains(QLatin1String("KaPortableRuntime::discover")), "포터블 경로 탐지");
+  QVERIFY2(appSrc.contains(QLatin1String("KaPortableRuntime::applyEnvironment")),
+           "한글 경로 Wide+UTF-8 환경");
+  QVERIFY2(appSrc.contains(QLatin1String("KaPortableRuntime::bindProjSearchPaths")),
+           "initQgis 뒤 개발PC OSGeo 경로를 덮어씀");
+  QVERIFY2(appSrc.contains(QLatin1String("koreaWorkAndWebCrsValid")),
+           "5186/5187/3857 부트 검사");
+  QVERIFY2(appSrc.contains(QLatin1String("isolateUserState")),
+           "다른 PC 이전 설치 QSettings를 묶음");
+
+  QFile rt(QStringLiteral("src/core/KaPortableRuntime.cpp"));
+  QVERIFY2(rt.open(QIODevice::ReadOnly | QIODevice::Text), "KaPortableRuntime.cpp");
+  const QString src = QString::fromUtf8(rt.readAll());
   QVERIFY2(src.contains(QLatin1String("apps/qgis-dev")), "포터블 폴더 구조");
-  QVERIFY2(src.contains(QLatin1String("kaExeDir")), "start.bat 없이 EXE 위치");
-  const int fn = src.indexOf(QLatin1String("static void applyBundledRuntime()"));
-  QVERIFY2(fn >= 0, "applyBundledRuntime");
-  const QString body = src.mid(fn, 2200);
-  QVERIFY2(body.contains(QLatin1String("QT_PLUGIN_PATH")) && body.contains(QLatin1String("toUtf8()")),
-           "한글 경로에서도 EXE만 눌러도 Qt 플러그인을 찾음");
-  QVERIFY2(!body.contains(QLatin1String("QFile::encodeName(qtPlug)")),
-           "포터블 QT_PLUGIN_PATH는 CP949 금지");
+  QVERIFY2(src.contains(QLatin1String("SetEnvironmentVariableW")), "Wide PROJ_DATA");
+  QVERIFY2(src.contains(QLatin1String("OSRSetPROJSearchPaths")), "GDAL PROJ 검색 경로");
+  QVERIFY2(src.contains(QLatin1String("CURL_CA_BUNDLE")), "다른 PC HTTPS 위성/지적");
+  QVERIFY2(src.contains(QLatin1String("QGIS_CUSTOM_CONFIG_PATH")),
+           "다른 PC QGIS 프로필을 exe/config로");
+  QVERIFY2(!src.contains(QLatin1String("QFile::encodeName")), "포터블 경로는 CP949 금지");
+}
+
+void TestWorkflow::portableRuntime_discoversUnicodeFolderAndKoreaCrs() {
+  QTemporaryDir tmp;
+  QVERIFY(tmp.isValid());
+  const QString root = tmp.path() + QStringLiteral("/복사본/ka-hgis-portable");
+  QVERIFY(QDir().mkpath(root + QStringLiteral("/apps/qgis-dev")));
+  QVERIFY(QDir().mkpath(root + QStringLiteral("/share/proj")));
+  {
+    QFile db(root + QStringLiteral("/share/proj/proj.db"));
+    QVERIFY(db.open(QIODevice::WriteOnly));
+    db.write("proj");
+  }
+  const KaPortablePaths paths = KaPortableRuntime::discover(root);
+  QVERIFY2(paths.looksBundled(), "apps/qgis-dev 있으면 포터블");
+
+  // 한글 경로에 그대로 두면 QGIS 가 provider·srs.db 를 못 읽어 위성·지적이 빈다.
+  // QGIS 는 prefix/plugin 경로를 좁은 문자열(로컬 코드페이지)로 쓰기 때문이다.
+  // 그래서 discover() 는 ASCII 정션(C:/Users/Public/ka-hgis/rt-<해시>)으로 갈아 끼운다.
+  auto pureAscii = [](const QString& text) {
+    for (const QChar c : text)
+      if (c.unicode() > 127) return false;
+    return true;
+  };
+  QVERIFY2(pureAscii(paths.projData), qPrintable(paths.projData));
+  QVERIFY2(pureAscii(paths.qgisPrefix), qPrintable(paths.qgisPrefix));
+  QVERIFY2(pureAscii(paths.exeDir), qPrintable(paths.exeDir));
+
+  // 갈아 끼운 경로가 같은 파일을 가리켜야 한다. 이름만 바꾸고 내용을 잃으면 안 된다.
+  QFile aliased(QDir(paths.projData).filePath(QStringLiteral("proj.db")));
+  QVERIFY2(aliased.exists(), qPrintable(aliased.fileName()));
+  QVERIFY(aliased.open(QIODevice::ReadOnly));
+  QCOMPARE(aliased.readAll(), QByteArray("proj"));
+  aliased.close();
+
+  // ASCII 경로는 건드리지 않는다. 쓸데없는 정션을 만들지 않는다.
+  const QString asciiRoot = tmp.path() + QStringLiteral("/plain/ka-hgis-portable");
+  QVERIFY(QDir().mkpath(asciiRoot + QStringLiteral("/apps/qgis-dev")));
+  QVERIFY(QDir().mkpath(asciiRoot + QStringLiteral("/share/proj")));
+  {
+    QFile db(asciiRoot + QStringLiteral("/share/proj/proj.db"));
+    QVERIFY(db.open(QIODevice::WriteOnly));
+    db.write("proj");
+  }
+  const KaPortablePaths plain = KaPortableRuntime::discover(asciiRoot);
+  QCOMPARE(QDir(plain.projData).absolutePath(),
+           QDir(asciiRoot + QStringLiteral("/share/proj")).absolutePath());
+
+  QString projDir;
+  const QByteArray osgeo = qgetenv("OSGEO4W_ROOT");
+  if (!osgeo.isEmpty()) {
+    const QString fromOsgeo = QString::fromLocal8Bit(osgeo) + QStringLiteral("/share/proj");
+    if (QFile::exists(fromOsgeo + QStringLiteral("/proj.db")))
+      projDir = fromOsgeo;
+  }
+  if (projDir.isEmpty() && QFile::exists(QStringLiteral("L:/ka-hgis-portable/share/proj/proj.db")))
+    projDir = QStringLiteral("L:/ka-hgis-portable/share/proj");
+  QVERIFY2(!projDir.isEmpty(), "테스트 PC에 proj.db가 있어야 함");
+  QVERIFY2(KaPortableRuntime::bindProjSearchPaths(projDir), "PROJ 검색 경로");
+  QVERIFY2(KaPortableRuntime::koreaWorkAndWebCrsValid(),
+           "작업 5186/5187과 웹 3857 변환이 다른 PC와 같아야 함");
+}
+
+void TestWorkflow::portableRuntime_ignoresLeftoverAppDataKey() {
+  QTemporaryDir tmp;
+  QVERIFY(tmp.isValid());
+  const QString root = tmp.path() + QStringLiteral("/ka-hgis-portable");
+  QVERIFY(QDir().mkpath(root + QStringLiteral("/apps/qgis-dev")));
+  QVERIFY(QDir().mkpath(root + QStringLiteral("/config")));
+  {
+    QFile secrets(root + QStringLiteral("/config/secrets.ini"));
+    QVERIFY(secrets.open(QIODevice::WriteOnly | QIODevice::Text));
+    secrets.write("[VWorld]\nApiKey=portable-folder-key\n");
+  }
+  const QString leftoverDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+  QVERIFY(QDir().mkpath(leftoverDir));
+  const QString leftoverIni = QDir(leftoverDir).filePath(QStringLiteral("ka-hgis-vworld.ini"));
+  {
+    QSettings leftover(leftoverIni, QSettings::IniFormat);
+    leftover.setValue(QStringLiteral("VWorld/ApiKey"), QStringLiteral("leftover-appdata-key"));
+    leftover.sync();
+  }
+  const QByteArray oldEnv = qgetenv("VWORLD_API_KEY");
+  const bool hadEnv = qEnvironmentVariableIsSet("VWORLD_API_KEY");
+  qunsetenv("VWORLD_API_KEY");
+  KaPortableRuntime::setExeDirOverride(root);
+  QCOMPARE(QDir(KaPortableRuntime::userConfigDir()).absolutePath(),
+           QDir(root + QStringLiteral("/config")).absolutePath());
+  QCOMPARE(VworldSettings::loadApiKey(), QStringLiteral("portable-folder-key"));
+  KaPortableRuntime::setExeDirOverride(QString());
+  if (hadEnv)
+    qputenv("VWORLD_API_KEY", oldEnv);
+  else
+    qunsetenv("VWORLD_API_KEY");
 }
 
 void TestWorkflow::singleInstanceGuardIsWiredIntoBoot() {
@@ -5122,6 +5348,10 @@ void TestWorkflow::singleInstanceGuardIsWiredIntoBoot() {
   const QString around = runBody.mid(std::max(0, callAt - 200), 260);
   QVERIFY2(around.contains(QLatin1String("smokeQuit")),
            "smoke/QA runs must bypass the guard");
+  QVERIFY2(src.contains(QLatin1String("ka-hgis-single-instance-")),
+           "포터블과 예전 설치본이 같은 뮤텍스를 쓰면 안 됨");
+  QVERIFY2(src.contains(QLatin1String("QueryFullProcessImageNameW")),
+           "같은 exe 경로만 앞으로 올림");
 }
 
 void TestWorkflow::layoutWheelZoom_keepsPointUnderCursor() {

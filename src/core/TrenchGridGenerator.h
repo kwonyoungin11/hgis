@@ -9,7 +9,8 @@
 // Rotated excavation trench rectangles in work CRS (5186/5187). GPKG via OGR.
 //
 // 시굴조사 도메인: 트렌치는 조사구역 폴리곤 전체를 일정 간격으로 덮고,
-// 총 굴착 면적이 구역 면적의 규정 비율(시굴 10%, 표본 2%) 이내여야 한다.
+// 총 굴착 면적은 목표 비율(시굴 10%, 표본 2%)이며 개별 폭은 최대 2 m,
+// 길이는 최대 20 m다. 경계에서는 더 짧아질 수 있다.
 namespace TrenchGridGenerator {
 
 struct Spec {
@@ -51,12 +52,17 @@ struct PickedArea {
 
 // Auto-fill must not union leftover survey polygons. Selected fids (if any
 // match) are combined; otherwise only the highest fid (last drawn) is used.
+//
+// 조사구역을 여러 조각으로 그린 경우에는 사용자가 전체를 쓰겠다고 밝힐 수 있다.
+// 그때만 useAll 로 전부 합친다. 기본값은 예전대로 「마지막 것만」이라, 지난
+// 조사의 구역이 남아 있어도 격자가 수백 칸으로 불어나지 않는다.
 PickedArea pickAutoFillArea(const std::vector<SurveyPoly>& features,
-                            const std::vector<qint64>& selectedFids);
+                            const std::vector<qint64>& selectedFids,
+                            bool useAll = false);
 
 // Fills the survey-area polygon (WKB) with trenches: a rotated regular grid
-// anchored at the polygon envelope centre. Prefer cells fully inside; if none
-// fit (trench longer than the area), keep cells whose centroid is inside.
+// anchored at the polygon envelope centre. Only complete rectangles inside
+// the polygon are retained; boundary cells may be shortened.
 // rows/cols/origin of the spec are ignored.
 std::vector<Cell> buildInArea(const Spec& spec, const QByteArray& areaWkb);
 
@@ -78,15 +84,17 @@ struct SlopeAspect {
 // 경사가 minSlopePct보다 완만하면 방향에 의미가 없어 valid=false.
 SlopeAspect upslopeAspect(const std::vector<ElevSample>& samples, double minSlopePct = 0.5);
 
-// Width stays 2 m. Length and balk are searched so total trench area / survey
-// area ≈ targetPct (시굴 10, 표본 2). Cells stay inside the picked polygon.
+// Width defaults to 2 m (maximum 2). Search lengths <= 20 m and balks, then
+// shorten each cell about its centre to match targetPct (시굴 10, 표본 2).
+// Cells stay inside the picked polygon and do not overlap.
 struct RatioFill {
   std::vector<Cell> cells;
-  double length = 20.0;
+  double length = 0.0;  // longest actual cell, including ratio adjustment
   double balk = 10.0;
   double ratioPct = 0.0;
   double areaM2 = 0.0;
   double azimuthDeg = 0.0;
+  QString error;  // nonempty when no valid plan can be made
 };
 RatioFill buildForTargetRatio(const QByteArray& areaWkb, double targetPct, double width = 2.0,
                               double azimuthDeg = 0.0);
@@ -94,6 +102,8 @@ RatioFill buildForTargetRatio(const QByteArray& areaWkb, double targetPct, doubl
 // Sum of trench areas (w × len per cell, square metres).
 double totalArea(const std::vector<Cell>& cells);
 
+// Validate cells, then replace the layer contents in one dataset transaction.
+// Empty/invalid input and write failures preserve the existing layer contents.
 bool writeGpkg(const QString& gpkgPath, const QString& layerName, const std::vector<Cell>& cells,
                const QString& authid, QString* errorOut);
 

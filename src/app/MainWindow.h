@@ -27,6 +27,8 @@ class QEvent;
 class KaAboveLabelsOverlay;
 class KaLayerOpacityRail;
 class KaReferenceDownloadJob;
+class KaTopographicBrowser;
+class KaTopographicImportDialog;
 class QgsFeedback;
 struct PreparedReferenceMap;
 class QProgressDialog;
@@ -43,6 +45,7 @@ class KaBeginnerRibbon;
 #include <qgsfeature.h>
 class QgsMapCanvas;
 class QgsLayerTreeView;
+enum class HeritageDataset;  // core/HeritageStyle.h
 class QgsMapLayer;
 class QgsVectorLayer;
 class QgsRasterLayer;
@@ -164,6 +167,9 @@ private slots:
   void startSelectTool();
   void startMeasureTool();
   void toggleTerrainMap();
+  void openTopographicDownload();
+  void importTopographicFolder();
+  void showTopographicFiles(const QString& folder);
   void toggleDemMap();
   void importDemElevationRaster();
   void runDemHillshade();
@@ -171,10 +177,10 @@ private slots:
   void startPaleoLandform();
   void startTrenchGrid();
   void placeTrenchGridAt(const QgsPointXY& origin);
-  // Replaces the previous grid (clearLayer) and reports the excavation ratio
+  // Atomically replaces the previous grid and reports the excavation ratio
   // against the survey area when known. areaM2 <= 0 skips the ratio line.
   bool applyTrenchCells(const std::vector<TrenchGridGenerator::Cell>& cells, double areaM2,
-                       double targetPct = 0.0);
+                       double targetPct = 0.0, const QString& sourceCrs = {});
   void applyTrenchByRatio(double targetPct);
   // 속성 창의 「적용」: 자동 채움이면 구역 재배치, 아니면 기존 격자 중심을
   // 유지한 채 회전·간격만 바꿔 재배치. 격자가 없으면 원점 클릭으로 넘어간다.
@@ -202,6 +208,8 @@ private slots:
   void showAbout();
 
   void configureVworldKey();
+  void configureTopographicAccount();
+  void updateTopographicDirectory(const QString& surveyPath);
   void rebuildLayouts();
   void onFileBrowserActivated(QListWidgetItem* item);
   void exportReportLayout();
@@ -219,6 +227,13 @@ private slots:
   void refreshMapCanvasNow();
   void showSubToolsDraw();
   void showSubToolsBuffer();
+  // 조사구역이 속한 시/군의 국가유산 자료를 인트라넷에서 받아 참조 레이어로 올린다.
+  // 묻는 것은 시/군 판정 확인 하나뿐이다.
+  void fetchNearbyHeritage();
+  void ensureHeritageBrowser();
+  void openHeritageBrowserFor(const struct HeritageRegion& region);
+  void importHeritageDataset(HeritageDataset dataset, const QStringList& files);
+  void saveHeritageAgreementReceipt(const QDateTime& when, const QString& terms);
   void showSubToolsBasemap();
   void showSubToolsSubmit();
   void hideSubTools();
@@ -273,7 +288,8 @@ private:
   // 끄면 아이콘도 꺼져야 한다(범례가 진실).
   void syncThematicButtons();
   // 조사구역 안 DEM 표고로 오르막 방위를 낸다(트렌치 장축 = 등고선 직교).
-  TrenchGridGenerator::SlopeAspect terrainAspectForArea(const QByteArray& areaWkb);
+  TrenchGridGenerator::SlopeAspect terrainAspectForArea(const QByteArray& areaWkb,
+                                                       const QString& areaCrs);
   void applyStartupMap();
   void ensureStartupViewReady();
   void scheduleMapDisplayRefresh();
@@ -359,6 +375,8 @@ private:
   LocationSearch* m_locator = nullptr;
   AdminBoundaryService* m_adminBoundary = nullptr;
   QString m_surveyPath;
+  class HeritageRegionResolver* m_heritageResolver = nullptr;
+  QPointer<class KaHeritageBrowser> m_heritageBrowser;
   QString m_workCrs = QStringLiteral("EPSG:5187");
 #if KA_HGIS_HAS_QGIS
   void healTileLayer(QgsRasterLayer* layer);
@@ -442,6 +460,9 @@ private:
   // 복원되지 않은 작업공간은 덮어쓰지 않는다. 수동 저장도 새 사본으로 안내한다.
   bool m_workspaceRestoreSuppressesAutosave = false;
   bool m_basemapBootPending = false;
+  // 조사 열기가 끝나기를 기다리며 다시 시도한 횟수. 0.3초 × 40 = 12초까지.
+  int m_basemapBootRetries = 0;
+  static constexpr int kBasemapBootRetryMax = 40;
   bool m_restoreLastSurveyEnabled = false;
   bool m_isLoadingBasemaps = false;
   bool m_isOpeningSurvey = false;
@@ -449,6 +470,8 @@ private:
   bool m_canZoomPrevious = false;
   bool m_canZoomNext = false;
   QPointer<KaReferenceDownloadJob> m_referenceDownload;
+  QPointer<KaTopographicBrowser> m_topographicBrowser;
+  QPointer<KaTopographicImportDialog> m_topographicImport;
   quint64 m_surveyGeneration = 0;
   bool m_surveySessionReady = false;
   bool m_mapScreenBound = false;

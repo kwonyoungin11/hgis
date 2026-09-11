@@ -18,8 +18,13 @@ else { throw "OSGEO4W_ROOT not found on this build PC." }
 
 $qgis = Join-Path $OSGEO "apps\qgis-dev"
 if (-not (Test-Path $qgis)) { throw "qgis-dev missing under $OSGEO" }
+$caBundle = Join-Path $OSGEO "bin\curl-ca-bundle.crt"
+if (-not (Test-Path -LiteralPath $caBundle -PathType Leaf)) {
+  throw "OSGeo4W curl-ca-bundle.crt missing. HTTPS downloads require this runtime file."
+}
 
 Write-Host "Portable out: $out"
+& (Join-Path $PSScriptRoot 'copy-webengine-runtime.ps1') -OsgeoRoot $OSGEO -Destination $out -CheckOnly
 Write-Host "Runtime from: $OSGEO"
 if (Test-Path $out) {
   Get-ChildItem $out -Force | Where-Object { $_.Name -notin @('data') } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
@@ -44,6 +49,8 @@ function Copy-Dlls([string]$src, [string]$dst) {
 }
 
 Copy-Item $exe $out -Force
+# libcurl needs its trust store as well as DLLs on a standalone machine.
+Copy-Item -LiteralPath $caBundle -Destination $out -Force
 # PDB가 있으면 함께 배포 — 크래시 로그(KaCrashGuard)가 함수명·줄번호까지 심볼화한다.
 $pdb = Join-Path $root "build\Release\ka-hgis.pdb"
 if (Test-Path $pdb) { Copy-Item $pdb $out -Force }
@@ -65,6 +72,7 @@ Invoke-Robo $qgis (Join-Path $out "apps\qgis-dev") @("python", "grass", "include
 # 여기서 받는 것은 DLL이 아닌 것들 — Qt 플러그인, GDAL 데이터, PROJ 데이터.
 Write-Host "Copying Qt6 plugins..."
 Invoke-Robo (Join-Path $OSGEO "apps\Qt6\plugins") (Join-Path $out "apps\Qt6\plugins")
+& (Join-Path $PSScriptRoot 'copy-webengine-runtime.ps1') -OsgeoRoot $OSGEO -Destination $out
 
 Write-Host "Copying GDAL data..."
 if (Test-Path (Join-Path $OSGEO "apps\gdal-dev\share")) {
@@ -72,6 +80,11 @@ if (Test-Path (Join-Path $OSGEO "apps\gdal-dev\share")) {
 }
 if (Test-Path (Join-Path $OSGEO "share\proj")) {
   Invoke-Robo (Join-Path $OSGEO "share\proj") (Join-Path $out "share\proj")
+}
+# proj.dll 옆에도 두어 검색 경로가 깨져도 EPSG:5186/3857을 읽게 한다.
+foreach ($projFile in @("proj.db", "proj.ini")) {
+  $src = Join-Path $out "share\proj\$projFile"
+  if (Test-Path -LiteralPath $src) { Copy-Item -LiteralPath $src -Destination $out -Force }
 }
 
 $qgisBin = Join-Path $qgis "bin"
@@ -137,6 +150,8 @@ $gdal = Join-Path $here "apps\gdal-dev\share\gdal"
 if (Test-Path $gdal) { $env:GDAL_DATA = $gdal }
 $proj = Join-Path $here "share\proj"
 if (Test-Path $proj) { $env:PROJ_DATA = $proj; $env:PROJ_LIB = $proj }
+$ca = Join-Path $here "curl-ca-bundle.crt"
+if (Test-Path $ca) { $env:CURL_CA_BUNDLE = $ca; $env:SSL_CERT_FILE = $ca }
 $exe = Join-Path $here "ka-hgis.exe"
 if (-not (Test-Path $exe)) { throw "ka-hgis.exe missing in $here" }
 & $exe @args
@@ -159,6 +174,8 @@ set "QGIS_PLUGIN_PATH=%~dp0apps\qgis-dev\plugins"
 set "GDAL_DATA=%~dp0apps\gdal-dev\share\gdal"
 set "PROJ_DATA=%~dp0share\proj"
 set "PROJ_LIB=%~dp0share\proj"
+set "CURL_CA_BUNDLE=%~dp0curl-ca-bundle.crt"
+set "SSL_CERT_FILE=%~dp0curl-ca-bundle.crt"
 start "" "%~dp0ka-hgis.exe"
 "@ -Encoding ASCII
 
@@ -166,11 +183,13 @@ $readmeKo = @"
 필드고고학GIS  포터블 (Windows 10/11 64비트)
 
 이 폴더 전체를 USB에 두면, QGIS/OSGeo4W를 설치하지 않은 다른 PC에서도 실행됩니다.
-Visual Studio 설치도 필요 없습니다.
+Visual Studio 설치도 필요 없습니다. 모니터 크기·배율은 앱이 맞춥니다.
 
 실행:
   ka-hgis.exe   ← 이것을 더블클릭 (다른 PC·USB·한글 경로에서도)
   start.bat     ← 예전 방식. 없어도 EXE만으로 됩니다.
+
+폴더 전체를 그대로 복사하세요. EXE만 옮기면 좌표계를 못 읽어 위성·지적이 안 뜹니다.
 
 주의:
   - apps, bin, share 폴더를 지우면 실행되지 않습니다.
@@ -215,6 +234,32 @@ function Copy-VworldKeyToPortable([string]$portableRoot) {
 }
 
 Copy-VworldKeyToPortable $out
+
+# 수치지형도(국토정보플랫폼) 계정을 포터블에 실어 보낸다. VWorld 키와 같은 방식이다.
+# 앱은 config 폴더의 ngii-local.ini 를 대체 파일로 이미 읽는다(TopographicSettings).
+# 소스나 실행 파일에 박지 않는다 — git 에 들어가지 않고, 계정이 바뀌면 이 파일만
+# 고치면 되며 재빌드가 필요 없다. 값은 화면에 찍지 않는다.
+function Copy-NgiiAccountToPortable([string]$portableRoot) {
+  $dstDir = Join-Path $portableRoot "config"
+  New-Item -ItemType Directory -Force -Path $dstDir | Out-Null
+  $dst = Join-Path $dstDir "ngii-local.ini"
+  $cands = @(
+    (Join-Path (Join-Path $env:APPDATA "ka-hgis") "ngii-account.ini"),
+    (Join-Path (Join-Path $env:LOCALAPPDATA "ka-hgis") "ngii-account.ini"),
+    (Join-Path (Join-Path (Join-Path $env:APPDATA "ka-hgis") "ka-hgis") "ngii-account.ini"),
+    (Join-Path (Join-Path (Join-Path $env:LOCALAPPDATA "ka-hgis") "ka-hgis") "ngii-account.ini")
+  )
+  $src = $null
+  foreach ($p in $cands) { if (Test-Path -LiteralPath $p) { $src = $p; break } }
+  if (-not $src) {
+    Write-Host "NGII account: not found on this PC (other PC will need 더보기 -> 계정 설정)"
+    return
+  }
+  Copy-Item -LiteralPath $src -Destination $dst -Force
+  Write-Host "NGII account: copied into portable config/ngii-local.ini (values not printed)"
+}
+
+Copy-NgiiAccountToPortable $out
 
 Write-Host "Portable folder ready: $out"
 Get-ChildItem $out | Select-Object Name, Mode, @{n='MB';e={ if ($_.PSIsContainer) { '' } else { [math]::Round($_.Length/1MB,1) } }}

@@ -1,157 +1,90 @@
 #include "KaDemClassDialog.h"
-
-#include <QAbstractItemView>
-#include <QColorDialog>
+#include "core/DemPresentation.h"
+#include "core/LayerOps.h"
+#include <QCheckBox>
 #include <QComboBox>
-#include <QHBoxLayout>
-#include <QHeaderView>
+#include <QDialogButtonBox>
+#include <QDoubleSpinBox>
+#include <QFormLayout>
 #include <QLabel>
 #include <QPushButton>
 #include <QSpinBox>
-#include <QTableWidget>
-#include <QVBoxLayout>
-#include <cmath>
-#include <limits>
-
+#include <qgscoordinatetransform.h>
+#include <qgsmapcanvas.h>
+#include <qgsproject.h>
 #include <qgsrasterlayer.h>
-#include <qgsrectangle.h>
-#include <qgssinglebandpseudocolorrenderer.h>
 
-KaDemClassDialog::KaDemClassDialog(QgsRasterLayer* layer, QWidget* parent)
-    : QDialog(parent), m_layer(layer) {
-  setWindowTitle(QStringLiteral("DEM 높이 구간"));
+KaDemClassDialog::KaDemClassDialog(QgsRasterLayer* layer, QWidget* parent, QgsMapCanvas* canvas)
+    : QDialog(parent), m_layer(layer), m_canvas(canvas) {
+  setWindowTitle(QStringLiteral("DEM 표현"));
   setModal(false);
-  setMinimumWidth(520);
-
-  auto* root = new QVBoxLayout(this);
-  auto* hint = new QLabel(
-      QStringLiteral("칸 수·간격·색·이름을 여러 줄 한꺼번에 바꿀 수 있습니다. "
-                     "맨 위 칸은 항상 ‘이상’이라 봉우리가 빠지지 않습니다."),
-      this);
+  setMinimumWidth(380);
+  auto* form = new QFormLayout(this);
+  auto* hint = new QLabel(QStringLiteral("표고에 따라 색이 부드럽게 이어집니다. 색띠의 눈금은 선택한 표현과 함께 바뀝니다."), this);
   hint->setWordWrap(true);
-  hint->setStyleSheet(QStringLiteral("color:#6E757D;"));
-  root->addWidget(hint);
-
-  auto* top = new QHBoxLayout();
-  top->addWidget(new QLabel(QStringLiteral("칸 수"), this));
-  m_count = new QSpinBox(this);
-  m_count->setRange(2, 12);
-  m_count->setValue(6);
-  top->addWidget(m_count);
-  top->addWidget(new QLabel(QStringLiteral("간격"), this));
-  m_step = new QComboBox(this);
-  m_step->addItem(QStringLiteral("자동"), 0.0);
-  for (double s : {1.0, 2.0, 5.0, 10.0, 15.0, 20.0, 25.0, 50.0, 100.0, 200.0})
-    m_step->addItem(QStringLiteral("%1 m").arg(s, 0, 'f', 0), s);
-  top->addWidget(m_step);
-  auto* rebuild = new QPushButton(QStringLiteral("다시 나누기"), this);
-  top->addWidget(rebuild);
-  top->addStretch(1);
-  root->addLayout(top);
-
-  m_table = new QTableWidget(0, 4, this);
-  m_table->setHorizontalHeaderLabels(
-      {QStringLiteral("하한(m)"), QStringLiteral("상한(m)"), QStringLiteral("색"),
-       QStringLiteral("이름")});
-  m_table->horizontalHeader()->setStretchLastSection(true);
-  m_table->verticalHeader()->setVisible(false);
-  m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
-  m_table->setSelectionMode(QAbstractItemView::ExtendedSelection);
-  root->addWidget(m_table, 1);
-
-  auto* btns = new QHBoxLayout();
-  auto* apply = new QPushButton(QStringLiteral("적용"), this);
-  apply->setDefault(true);
-  auto* close = new QPushButton(QStringLiteral("닫기"), this);
-  btns->addStretch(1);
-  btns->addWidget(apply);
-  btns->addWidget(close);
-  root->addLayout(btns);
-
-  connect(rebuild, &QPushButton::clicked, this, &KaDemClassDialog::rebuildRows);
-  connect(apply, &QPushButton::clicked, this, &KaDemClassDialog::applyClasses);
-  connect(close, &QPushButton::clicked, this, &QDialog::close);
-  connect(m_table, &QTableWidget::cellClicked, this, [this](int row, int col) {
-    if (col == 2) pickColor(row);
-  });
-
-  QList<LayerOps::DemElevationClass> classes = LayerOps::readDemElevationClasses(m_layer);
-  if (classes.size() < 2) rebuildRows();
-  else {
-    m_count->setValue(classes.size());
-    fillTable(classes);
-  }
+  form->addRow(hint);
+  m_preset = new QComboBox(this);
+  m_preset->setObjectName(QStringLiteral("demPreset"));
+  m_preset->addItem(QStringLiteral("전국 표준 (0–2000m)"), QStringLiteral("national"));
+  m_preset->addItem(QStringLiteral("저지대 강조"), QStringLiteral("lowland"));
+  m_preset->addItem(QStringLiteral("현재 화면 맞춤"), QStringLiteral("viewport"));
+  const int selected = layer ? m_preset->findData(layer->customProperty(QStringLiteral("ka_hgis/dem_preset"), QStringLiteral("national"))) : 0;
+  m_preset->setCurrentIndex(qMax(0, selected));
+  form->addRow(QStringLiteral("색 표현"), m_preset);
+  m_relief = new QCheckBox(QStringLiteral("지형 음영 합성"), this);
+  m_relief->setObjectName(QStringLiteral("demReliefEnabled"));
+  m_relief->setChecked(!layer || layer->customProperty(QStringLiteral("ka_hgis/dem_relief_enabled"), true).toBool());
+  form->addRow(m_relief);
+  m_exaggeration = new QDoubleSpinBox(this);
+  m_exaggeration->setObjectName(QStringLiteral("demExaggeration"));
+  m_exaggeration->setRange(.1, 5.);
+  m_exaggeration->setSingleStep(.1);
+  m_exaggeration->setSuffix(QStringLiteral(" 배"));
+  m_exaggeration->setValue(layer ? layer->customProperty(QStringLiteral("ka_hgis/dem_z_factor"), 1.).toDouble() : 1.);
+  form->addRow(QStringLiteral("수직과장"), m_exaggeration);
+  m_strength = new QSpinBox(this);
+  m_strength->setObjectName(QStringLiteral("demReliefStrength"));
+  m_strength->setRange(0, 80);
+  m_strength->setSuffix(QStringLiteral(" %"));
+  m_strength->setValue(layer ? qRound(layer->customProperty(QStringLiteral("ka_hgis/dem_relief_strength"), .30).toDouble() * 100.) : 30);
+  form->addRow(QStringLiteral("음영 세기"), m_strength);
+  m_status = new QLabel(this);
+  m_status->setWordWrap(true);
+  form->addRow(m_status);
+  auto* buttons = new QDialogButtonBox(QDialogButtonBox::Apply | QDialogButtonBox::Close, this);
+  buttons->button(QDialogButtonBox::Apply)->setText(QStringLiteral("적용"));
+  buttons->button(QDialogButtonBox::Close)->setText(QStringLiteral("닫기"));
+  connect(buttons->button(QDialogButtonBox::Apply), &QPushButton::clicked, this, &KaDemClassDialog::applyStyle);
+  connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::close);
+  form->addRow(buttons);
+  if (layer) connect(layer, &QObject::destroyed, this, &QDialog::reject);
+  DemPresentation::followCanvas(layer, canvas);
 }
 
-void KaDemClassDialog::fillTable(const QList<LayerOps::DemElevationClass>& classes) {
-  m_table->setRowCount(classes.size());
-  for (int i = 0; i < classes.size(); ++i) {
-    const LayerOps::DemElevationClass& c = classes[i];
-    auto* lo = new QTableWidgetItem(QString::number(c.lo, 'f', 0));
-    auto* hi = new QTableWidgetItem(std::isfinite(c.hi) ? QString::number(c.hi, 'f', 0)
-                                                        : QStringLiteral("이상"));
-    auto* color = new QTableWidgetItem();
-    color->setBackground(c.color);
-    color->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
-    color->setToolTip(QStringLiteral("클릭하면 색을 바꿉니다"));
-    auto* lab = new QTableWidgetItem(c.label);
-    if (i == classes.size() - 1) {
-      hi->setFlags(hi->flags() & ~Qt::ItemIsEditable);
-      hi->setToolTip(QStringLiteral("마지막 칸은 열린 구간입니다"));
+void KaDemClassDialog::applyStyle() {
+  if (!m_layer) return;
+  const QString preset = m_preset->currentData().toString();
+  QgsRectangle extent;
+  if (preset == QLatin1String("viewport")) {
+    if (!m_canvas) { m_status->setText(QStringLiteral("지도 화면에서 DEM 표현을 다시 열어 주세요.")); return; }
+    try {
+      const QgsCoordinateTransform transform(m_canvas->mapSettings().destinationCrs(), m_layer->crs(), m_canvas->mapSettings().transformContext());
+      extent = transform.transformBoundingBox(m_canvas->extent());
+    } catch (const QgsCsException&) {
+      m_status->setText(QStringLiteral("화면 좌표를 변환하지 못했습니다. 작업 좌표계를 확인하세요.")); return;
     }
-    m_table->setItem(i, 0, lo);
-    m_table->setItem(i, 1, hi);
-    m_table->setItem(i, 2, color);
-    m_table->setItem(i, 3, lab);
   }
-}
-
-QList<LayerOps::DemElevationClass> KaDemClassDialog::classesFromTable() const {
-  QList<LayerOps::DemElevationClass> out;
-  const int n = m_table->rowCount();
-  for (int i = 0; i < n; ++i) {
-    LayerOps::DemElevationClass c;
-    const QTableWidgetItem* lo = m_table->item(i, 0);
-    const QTableWidgetItem* hi = m_table->item(i, 1);
-    const QTableWidgetItem* col = m_table->item(i, 2);
-    const QTableWidgetItem* lab = m_table->item(i, 3);
-    c.lo = lo ? lo->text().toDouble() : 0.0;
-    const QString hs = hi ? hi->text().trimmed() : QString();
-    c.hi = (i == n - 1 || hs == QStringLiteral("이상"))
-               ? std::numeric_limits<double>::infinity()
-               : hs.toDouble();
-    c.color = col ? col->background().color() : QColor(128, 128, 128);
-    c.label = lab ? lab->text() : QString();
-    out.append(c);
+  if (!DemPresentation::apply(m_layer, preset, extent)) {
+    m_status->setText(QStringLiteral("이 화면에서 표고값을 읽지 못했습니다. DEM이 있는 곳으로 이동한 뒤 적용하세요.")); return;
   }
-  return out;
-}
-
-void KaDemClassDialog::rebuildRows() {
-  if (!m_layer) return;
-  double zMin = 0.0;
-  double zMax = 200.0;
-  if (auto* rend = dynamic_cast<QgsSingleBandPseudoColorRenderer*>(m_layer->renderer())) {
-    if (std::isfinite(rend->classificationMin())) zMin = rend->classificationMin();
-    if (std::isfinite(rend->classificationMax()) && rend->classificationMax() > zMin)
-      zMax = rend->classificationMax();
-  }
-  const auto classes = LayerOps::buildDemElevationClasses(
-      zMin, zMax, m_count->value(), m_step->currentData().toDouble());
-  m_count->setValue(classes.size());
-  fillTable(classes);
-}
-
-void KaDemClassDialog::applyClasses() {
-  if (!m_layer) return;
-  LayerOps::DemElevationStyle style;
-  style.classes = classesFromTable();
-  LayerOps::applyDemElevationStyle(m_layer, QgsRectangle(), style);
-}
-
-void KaDemClassDialog::pickColor(int row) {
-  QTableWidgetItem* it = m_table->item(row, 2);
-  if (!it) return;
-  const QColor c = QColorDialog::getColor(it->background().color(), this, QStringLiteral("구간 색"));
-  if (c.isValid()) it->setBackground(c);
+  m_layer->setCustomProperty(QStringLiteral("ka_hgis/dem_relief_enabled"), m_relief->isChecked());
+  m_layer->setCustomProperty(QStringLiteral("ka_hgis/dem_z_factor"), m_exaggeration->value());
+  m_layer->setCustomProperty(QStringLiteral("ka_hgis/dem_relief_strength"), m_strength->value() / 100.);
+  auto* project = QgsProject::instance();
+  auto* shade = LayerOps::ensureDemRelief(project, m_layer);
+  if (m_canvas) LayerOps::syncMapCanvas(project, m_canvas, false);
+  project->setDirty(true);
+  m_status->setText(m_relief->isChecked() && !shade
+      ? m_layer->customProperty(QStringLiteral("ka_hgis/dem_relief_error")).toString()
+      : QStringLiteral("적용했습니다. 색띠로 표고를 확인하세요. 음영은 지형 방향에 따라 밝기를 바꿉니다."));
 }

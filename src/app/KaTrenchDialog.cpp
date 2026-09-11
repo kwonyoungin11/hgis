@@ -30,8 +30,8 @@ KaTrenchDialog::KaTrenchDialog(QWidget* parent) : QDialog(parent) {
   m_kind->addItem(QStringLiteral("직접 지정 — 규격·둑을 내가 정함"),
                   static_cast<int>(SurveyKind::Manual));
   m_kind->setToolTip(QStringLiteral(
-      "시굴 10%·표본 2%는 매장유산 조사의 기준 비율입니다. 폭은 2 m로 고정하고 "
-      "길이와 둑 간격을 맞춰 구역 전체에 고르게 깝니다."));
+      "시굴은 조사구역의 10%, 표본은 2%로 배치합니다. 폭 2 m·길이 20 m 이내에서 "
+      "길이와 둑 간격을 맞추며, 모든 격자가 구역 안에 들어갑니다."));
   form->addRow(QStringLiteral("조사 종류"), m_kind);
 
   m_terrain = new QCheckBox(QStringLiteral("지형 사면 방향으로 넣기(등고선 직교)"), this);
@@ -218,7 +218,7 @@ void KaTrenchDialog::refreshPlan() {
         TrenchGridGenerator::buildForTargetRatio(m_areaWkb, targetPct(), 2.0, az);
     if (plan.cells.empty()) {
       m_ratio->setStyleSheet(QStringLiteral("color:#A33A2E;font-weight:700;"));
-      m_ratio->setText(QStringLiteral("이 구역에 2 m 트렌치가 들어가지 않습니다. 구역을 더 크게 그리거나 「직접 지정」으로 바꾸세요."));
+      m_ratio->setText(plan.error);
       return;
     }
     {
@@ -227,13 +227,13 @@ void KaTrenchDialog::refreshPlan() {
     }
     m_ratio->setStyleSheet(QStringLiteral("color:#2E7D4F;font-weight:700;"));
     m_ratio->setText(
-        QStringLiteral("%1 · 트렌치 %2개 · 2 × %3 m · 둑 %4 m · 총 %5㎡ · 비율 %6% (목표 %7%) · 방위 %8°")
+        QStringLiteral("%1 · 트렌치 %2개 · 폭 2 m · 최대 길이 %3 m · 둑 %4 m · 총 %5㎡ · 비율 %6% (목표 %7%) · 방위 %8°")
             .arg(surveyKind() == SurveyKind::Trial ? QStringLiteral("시굴조사")
                                                    : QStringLiteral("표본조사"))
             .arg(plan.cells.size())
-            .arg(QLocale().toString(plan.length, 'f', 0))
+            .arg(QLocale().toString(plan.length, 'f', 2))
             .arg(QLocale().toString(plan.balk, 'f', 0))
-            .arg(QLocale().toString(TrenchGridGenerator::totalArea(plan.cells), 'f', 0))
+            .arg(QLocale().toString(TrenchGridGenerator::totalArea(plan.cells), 'f', 2))
             .arg(QLocale().toString(plan.ratioPct, 'f', 1))
             .arg(QLocale().toString(targetPct(), 'f', 0))
             .arg(QLocale().toString(az, 'f', 0)));

@@ -14,7 +14,7 @@ You are the Sequential Thinking Agent (STA). You do not answer in one shot. You 
 - `grep_search` → Grep
 - `find_by_name` → Glob
 - `read_url_content` → WebFetch or Exa `web_fetch_exa`
-- `sequentialthinking` MCP → call if the tool exists; if missing, keep a Markdown scratchpad (dual mode)
+- `sequentialthinking` MCP (Grok 4.6): `GetDynamicTools` namespace `sequential-thinking` or `user-sequential-thinking`, then `CallDynamicTool` `sequentialthinking`. If missing, Markdown scratchpad (dual mode). Parent must not call this MCP.
 - `send_message` does not exist. Mid-run visibility is the background transcript under `~/.cursor/subagents/`. Do not invent a parent chat API.
 - Never edit product source. Read-only. Do not commit.
 

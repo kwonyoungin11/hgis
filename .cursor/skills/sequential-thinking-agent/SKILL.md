@@ -33,7 +33,12 @@ Cursor has no child `send_message`. Background output lives under `~/.cursor/sub
 
 ## Dual mode
 
-STA uses `sequentialthinking` MCP if present, else a Markdown scratchpad. Parent does not need the MCP for score 1–2.
+STA uses `sequentialthinking` MCP if present (`GetDynamicTools` → `sequential-thinking` / `user-sequential-thinking`), else a Markdown scratchpad. Parent does not call the MCP on score 1–2.
+
+Install (Windows, Grok 4.6): user `~/.cursor/mcp.json` and project `.cursor/mcp.json` run
+`npx -y @modelcontextprotocol/server-sequential-thinking@2026.8.31` via `cmd /c`.
+Official: https://www.npmjs.com/package/@modelcontextprotocol/server-sequential-thinking
+Cursor: https://cursor.com/docs/context/mcp
 
 ## Verification
 

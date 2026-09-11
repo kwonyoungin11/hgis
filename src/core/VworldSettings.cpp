@@ -1,9 +1,10 @@
 #include "VworldSettings.h"
+#include "KaPortableRuntime.h"
 #include <QSettings>
 #include <QByteArray>
-#include <QStandardPaths>
 #include <QDir>
 #include <QFile>
+#include <QStringList>
 #include <QCoreApplication>
 
 static QString orgName() { return QStringLiteral("ka-hgis"); }
@@ -11,33 +12,44 @@ static QString appName() { return QStringLiteral("ka-hgis"); }
 static QString ssotKey() { return QStringLiteral("VWorld/ApiKey"); }
 static QString legacyKey() { return QStringLiteral("vworld/apiKey"); }
 
+static bool isPortableBundle() {
+  return KaPortableRuntime::discover(KaPortableRuntime::resolvedExeDir()).looksBundled();
+}
+
+static QString readKeyFromIni(const QString& path) {
+  if (path.isEmpty() || !QFile::exists(path))
+    return {};
+  QSettings ini(path, QSettings::IniFormat);
+  QString k = ini.value(ssotKey()).toString().trimmed();
+  if (k.isEmpty())
+    k = ini.value(legacyKey()).toString().trimmed();
+  if (k.isEmpty())
+    k = ini.value(QStringLiteral("apiKey")).toString().trimmed();
+  return k;
+}
+
+static QString portableSecretsPath() {
+  return QDir(KaPortableRuntime::userConfigDir()).filePath(QStringLiteral("secrets.ini"));
+}
+
 static QString readRepoSecretsIni() {
   const QStringList cands = {
-    QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../config/secrets.ini")),
-    QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../../config/secrets.ini")),
-    QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("config/secrets.ini")),
-    QDir::current().filePath(QStringLiteral("config/secrets.ini")),
-    QStringLiteral("D:/qgis/config/secrets.ini"),
+      QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../config/secrets.ini")),
+      QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../../config/secrets.ini")),
+      QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("config/secrets.ini")),
+      QDir::current().filePath(QStringLiteral("config/secrets.ini")),
   };
   for (const QString& p : cands) {
-    if (!QFile::exists(p)) continue;
-    QSettings ini(p, QSettings::IniFormat);
-    QString k = ini.value(QStringLiteral("VWorld/ApiKey")).toString().trimmed();
-    if (k.isEmpty()) k = ini.value(QStringLiteral("vworld/apiKey")).toString().trimmed();
-    if (k.isEmpty()) k = ini.value(QStringLiteral("apiKey")).toString().trimmed();
-    if (!k.isEmpty()) return k;
+    const QString k = readKeyFromIni(p);
+    if (!k.isEmpty())
+      return k;
   }
   return {};
 }
 
 static QSettings makeSettings() {
-  const QString base = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
-  if (!base.isEmpty()) {
-    QDir().mkpath(base);
-    const QString ini = QDir(base).filePath(QStringLiteral("ka-hgis-vworld.ini"));
-    return QSettings(ini, QSettings::IniFormat);
-  }
-  return QSettings(QSettings::IniFormat, QSettings::UserScope, orgName(), appName());
+  const QString ini = QDir(KaPortableRuntime::userConfigDir()).filePath(QStringLiteral("ka-hgis-vworld.ini"));
+  return QSettings(ini, QSettings::IniFormat);
 }
 
 static void writeKey(QSettings& settings, const QString& key) {
@@ -49,12 +61,26 @@ static void writeKey(QSettings& settings, const QString& key) {
 }
 
 QString VworldSettings::loadApiKey() {
+  if (isPortableBundle()) {
+    QSettings settings = makeSettings();
+    QString key = settings.value(ssotKey()).toString().trimmed();
+    if (key.isEmpty())
+      key = settings.value(legacyKey()).toString().trimmed();
+    if (key.isEmpty())
+      key = readKeyFromIni(portableSecretsPath());
+    if (key.isEmpty()) {
+      const QByteArray env = qgetenv("VWORLD_API_KEY");
+      if (!env.isEmpty())
+        key = QString::fromUtf8(env).trimmed();
+    }
+    return key;
+  }
+
   QSettings settings = makeSettings();
   QString key = settings.value(ssotKey()).toString().trimmed();
   if (!key.isEmpty())
     return key;
 
-  // Migrate older NativeFormat org/app installs
   {
     QSettings native(orgName(), appName());
     key = native.value(ssotKey()).toString().trimmed();
@@ -94,6 +120,11 @@ void VworldSettings::saveApiKey(const QString& key) {
   const QString k = key.trimmed();
   QSettings settings = makeSettings();
   writeKey(settings, k);
+  if (isPortableBundle()) {
+    QSettings secrets(portableSecretsPath(), QSettings::IniFormat);
+    writeKey(secrets, k);
+    return;
+  }
 
   QSettings native(orgName(), appName());
   writeKey(native, k);

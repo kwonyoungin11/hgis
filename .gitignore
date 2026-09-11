@@ -69,22 +69,40 @@ symbology-style.db
 *.ipdb
 *.iobj
 
-# Portable folder: keep launchers/docs; do not commit OSGeo/Qt/QGIS DLLs.
-!dist/
-!dist/**/
-!dist/**/*.exe
-!dist/**/*.bat
-!dist/**/*.ps1
-!dist/**/*.txt
-!dist/**/*.json
-!dist/**/*.yaml
-!dist/**/*.md
-dist/**/*.pdb
-dist/**/*.ilk
-dist/**/*.dll
-dist/ka-hgis-portable/apps/
-dist/ka-hgis-portable/bin/
-dist/ka-hgis-portable/share/
+# Generated portable output stays local; maintain sources in scripts/data/docs.
+/dist/
+
+# Local field/reference datasets are not application source.
+/안동시/
+*.mbtiles
+*.tif
+*.tiff
+*.hgt
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.qix
+# Deliberate, small fixtures may still be versioned with their source/license.
+!samples/**/*.tif
+!samples/**/*.tiff
+!samples/**/*.hgt
+!samples/**/*.shp
+!samples/**/*.shx
+!samples/**/*.dbf
+!samples/**/*.prj
+!samples/**/*.cpg
+!samples/**/*.qix
+!tests/fixtures/**/*.tif
+!tests/fixtures/**/*.tiff
+!tests/fixtures/**/*.hgt
+!tests/fixtures/**/*.shp
+!tests/fixtures/**/*.shx
+!tests/fixtures/**/*.dbf
+!tests/fixtures/**/*.prj
+!tests/fixtures/**/*.cpg
+!tests/fixtures/**/*.qix
 
 # Python / misc
 __pycache__/
@@ -99,6 +117,7 @@ venv/
 !samples/**/*.gpkg
 
 config/secrets.ini
+config/ngii-local.ini
 **/secrets.ini
 
 
