@@ -107,5 +107,7 @@ private:
   bool m_scriptInFlight = false;
   bool m_pageReady = false;  // loadFinished 전에는 스크립트를 돌리지 않는다
   bool m_frameChecked = false;  // 이 화면에서 프레임 탈출을 이미 봤는가
+  bool m_openedFrameSrc = false;  // iframe src 를 탭으로 연 적
+  QString m_lastCppProbe;         // 프레임 url/name/hint. 비밀번호 없음
   quint64 m_generation = 0;
 };

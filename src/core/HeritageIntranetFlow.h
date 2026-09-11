@@ -87,6 +87,8 @@ public:
   // 미확인 단계에서 멈췄을 때, 다음에 어떤 선택자를 써야 하는지 사람이 보고 정하게 하려는 것이다.
   // 추측으로 채우지 않기 위한 장치다. 값(입력 내용)은 담지 않는다.
   static QString pageOutlineScript();
+  // 자식 document 에 들어가지 않고 iframe/frame 의 name·id·src 만 읽는다.
+  static QString frameInventoryScript();
 
   // JS 문자열 리터럴로 안전하게 감싼다. 따옴표·역슬래시·줄바꿈·유니코드를 모두 처리한다.
   static QString jsString(const QString& value);

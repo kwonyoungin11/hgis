@@ -1,5 +1,9 @@
 # ka-hgis Handoff — product SSOT (v0.3.0)
 
+## 2026-09-11 주변유적 받기 — 시·군에서 검색이 안 넘어감
+
+국가유산 인트라넷 「주변유적 받기」는 로그인·서약까지 간다. 시·군 단계는 다운로드 폼(`codedeta`)이 아니라 지도 문서(`bjdcd`, 튜토리얼)를 읽는다. iframe `src`를 같은 호스트 탭으로 여는 우회와 fail outline(`cpp`/`html`)을 넣었다. 산 검색 건수 감소는 미증명. 전국 받기는 금지. 이어받기 프롬프트: `docs/superpowers/plans/2026-09-11-heritage-next-ai-prompt.md`.
+
 ## 2026-09-10 포터블은 다른 PC 이전 설치를 무시
 
 포터블은 VWorld 키·최근 조사·창 배치·지적 XML·타일 캐시·QGIS 프로필을 **exe/config·exe/cache**만 쓴다. 소스에 API 키를 넣지 않는다. 키는 폴더 `config/secrets.ini`(이 PC에서 복사). 다른 PC AppData/레지스트리의 빈 키·옛 최근목록은 무시. 위성·지적은 홈이 아니라 **새 조사/조사 열기** 뒤 범례에 올라간다. 커밋 없음.

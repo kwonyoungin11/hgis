@@ -448,9 +448,14 @@ QString HeritageIntranetFlow::pageOutlineScript() {
       "onclick:(a[i].getAttribute('onclick')||'').slice(0,80)});}"
       "var body=document.body?document.body.innerText:'';"
       "var m=body.match(/검색결과[^0-9]*([0-9,]+)/);"
+      "var ifs=[];var fr=document.querySelectorAll('iframe,frame');"
+      "for(var i=0;i<fr.length&&i<12;i++){"
+      "ifs.push({name:fr[i].name||'',id:fr[i].id||'',"
+      "src:(fr[i].getAttribute('src')||'').slice(0,160)});}"
       "return JSON.stringify({"
       "url:W.location.href,title:document.title,"
       "frames:window.frames.length,"
+      "htmlFrames:ifs,"
       "codedeta:!!document.querySelector('select[name*=codedeta],select[id*=codedeta]'),"
       "hasShowAgree:!!fn('showAgreePopup'),"
       "hasSearchFn:!!fn('searchGisChaRirList'),"
@@ -461,4 +466,18 @@ QString HeritageIntranetFlow::pageOutlineScript() {
       "menu:menu,"
       "checkboxes:document.querySelectorAll('input[type=checkbox]').length,"
       "rows:document.querySelectorAll('table tbody tr').length});"));
+}
+
+QString HeritageIntranetFlow::frameInventoryScript() {
+  // 자식 document 는 읽지 않는다. 태그에 적힌 name·id·src 만.
+  return QStringLiteral(
+      "(function(){"
+      "try{"
+      "var fr=document.querySelectorAll('iframe,frame');"
+      "var list=[];"
+      "for(var i=0;i<fr.length&&i<16;i++){"
+      "list.push({name:fr[i].name||'',id:fr[i].id||'',"
+      "src:(fr[i].getAttribute('src')||'').slice(0,200)});}"
+      "return JSON.stringify({htmlFrames:fr.length,jsFrames:window.frames.length,list:list});"
+      "}catch(e){return 'error:'+String(e);}})()");
 }

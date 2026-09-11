@@ -1,5 +1,14 @@
 # NOW — Grok resume (2026-08-22)
 
+## 지금 (2026-09-11 주변유적 프레임)
+
+사용자: 시군 다음진행 안 됨 → 자동화 → 똑같ㄷ아 → 깃푸시 → 인수인계 프롬프트 + 다시 푸시 + 끝나면 PC 종료.
+한 일: `frameInventory` + C++ 프레임 hint + iframe src 탭 오픈(`n<=1` 제거) + outline `cpp`/`html` + waitTicks 먼저 + inFlight 세대 정리.
+다음 AI: `docs/superpowers/plans/2026-09-11-heritage-next-ai-prompt.md` 를 그대로 붙인다.
+금지(다음 세션): 사용자가 말하기 전 커밋·푸시·포터블. 전국 받기. codedeta 별칭. 계정 값 출력.
+필드: 옛 주변유적 창·exe 모두 닫고 새 Release. outline에 `cppFrames`가 있어야 새 빌드.
+미증명: 산 검색 건수가 8300에서 줄어드는지 (G4).
+
 ## 지금 (2026-09-10 포터블 격리 · VWorld)
 
 사용자: 키 하드코딩, 다른PC 레이어에 위성·지적 없음, 이전 설치 정보가 남음.

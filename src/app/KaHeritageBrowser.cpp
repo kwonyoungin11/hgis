@@ -5,10 +5,13 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QHBoxLayout>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QUrl>
 #include <QLabel>
 #include <QPlainTextEdit>
+#include <QPointer>
 #include <QPushButton>
 #include <QTimer>
 #include <QUuid>
@@ -22,6 +25,7 @@
 #include <QWebEngineView>
 
 #include <memory>
+#include <optional>
 
 namespace {
 constexpr int kPollMs = 700;
@@ -79,6 +83,40 @@ QVector<QWebEngineFrame> allFrames(QTabWidget* tabs) {
     collectFrames(view->page()->mainFrame(), &frames);
   }
   return frames;
+}
+
+QVector<QWebEnginePage*> allPages(QTabWidget* tabs) {
+  QVector<QWebEnginePage*> pages;
+  if (!tabs) return pages;
+  for (int i = 0; i < tabs->count(); ++i) {
+    auto* view = qobject_cast<QWebEngineView*>(tabs->widget(i));
+    if (view && view->page()) pages.push_back(view->page());
+  }
+  return pages;
+}
+
+void appendUnique(QVector<QWebEngineFrame>* frames, const QWebEngineFrame& frame) {
+  if (!frames || !frame.isValid()) return;
+  if (frames->contains(frame)) return;
+  frames->push_back(frame);
+}
+
+void mergeNamedFrames(QWebEnginePage* page, const QJsonArray& list, QVector<QWebEngineFrame>* frames) {
+  if (!page || !frames) return;
+  for (const QJsonValue& value : list) {
+    const QJsonObject row = value.toObject();
+    const QStringList keys = {row.value(QStringLiteral("name")).toString(),
+                              row.value(QStringLiteral("id")).toString()};
+    for (const QString& key : keys) {
+      if (key.trimmed().isEmpty()) continue;
+      const std::optional<QWebEngineFrame> found = page->findFrameByName(key);
+      if (found && found->isValid()) appendUnique(frames, *found);
+    }
+  }
+}
+
+bool isHeritageHost(const QUrl& url) {
+  return url.host().endsWith(QStringLiteral("gis-heritage.go.kr"));
 }
 
 QString safeName(const QString& suggested) {
@@ -194,6 +232,8 @@ void KaHeritageBrowser::start() {
 
   ++m_generation;
   m_scriptInFlight = false;
+  m_openedFrameSrc = false;
+  m_lastCppProbe.clear();
   m_running = true;
   m_datasetIndex = 0;
   m_lastOutline.clear();
@@ -223,11 +263,7 @@ void KaHeritageBrowser::runOnPreferredDocument(const QString& script,
                                                const std::function<void(const QString&)>& then,
                                                bool manageFlight, bool requireForm) {
   const quint64 generation = m_generation;
-  QVector<QWebEngineFrame> frames;
-  for (const QWebEngineFrame& frame : allFrames(m_tabs)) {
-    if (frame.isValid()) frames.push_back(frame);
-  }
-  const int n = frames.size();
+  const QVector<QWebEnginePage*> pages = allPages(m_tabs);
 
   auto finishEmpty = [this, then, manageFlight]() {
     if (manageFlight) m_scriptInFlight = false;
@@ -253,43 +289,138 @@ void KaHeritageBrowser::runOnPreferredDocument(const QString& script,
     page->runJavaScript(script, done);
   };
 
-  if (n == 0) {
-    if (requireForm) {
-      finishEmpty();
+  auto openSrcs = [this](QWebEnginePage* page, const QJsonArray& list) -> int {
+    if (m_openedFrameSrc || !page) return 0;
+    int opened = 0;
+    const QUrl base = page->url();
+    for (const QJsonValue& value : list) {
+      const QString src = value.toObject().value(QLatin1String("src")).toString().trimmed();
+      if (src.isEmpty() || src.startsWith(QLatin1String("javascript:"), Qt::CaseInsensitive))
+        continue;
+      const QUrl url = base.resolved(QUrl(src));
+      if (!url.isValid() || !isHeritageHost(url) || url == base) continue;
+      bool have = false;
+      for (int i = 0; i < m_tabs->count(); ++i) {
+        auto* view = qobject_cast<QWebEngineView*>(m_tabs->widget(i));
+        if (view && view->url() == url) {
+          have = true;
+          break;
+        }
+      }
+      if (have) continue;
+      m_openedFrameSrc = true;
+      m_pageReady = false;
+      addPage()->load(url);
+      ++opened;
+      m_detailLabel->setText(QStringLiteral("다운로드 화면 프레임으로 들어갑니다…"));
+    }
+    return opened;
+  };
+
+  auto hintFrames = [this, generation, invoke, finishEmpty, openSrcs, manageFlight, requireForm,
+                     then](QVector<QWebEngineFrame> frames, int jsFrames, QWebEnginePage* srcPage,
+                           const QJsonArray& srcList) {
+    QVector<QWebEngineFrame> valid;
+    for (const QWebEngineFrame& frame : frames) {
+      if (frame.isValid()) valid.push_back(frame);
+    }
+    const int n = valid.size();
+    if (n == 0) {
+      if (requireForm) {
+        finishEmpty();
+        return;
+      }
+      invoke(QWebEngineFrame());
       return;
     }
-    invoke(QWebEngineFrame());
+    auto pending = std::make_shared<int>(n);
+    auto form = std::make_shared<QWebEngineFrame>();
+    auto bestAt = std::make_shared<int>(n);
+    auto probe = std::make_shared<QJsonArray>();
+    for (int i = 0; i < n; ++i) {
+      QWebEngineFrame copy = valid.at(i);
+      copy.runJavaScript(
+          HeritageIntranetFlow::formHintScript(),
+          [this, generation, pending, form, bestAt, copy, invoke, finishEmpty, openSrcs,
+           manageFlight, requireForm, then, i, n, jsFrames, srcPage, srcList,
+           probe](const QVariant& value) {
+            if (generation != m_generation) {
+              if (--(*pending) == 0 && manageFlight) m_scriptInFlight = false;
+              return;
+            }
+            const QString hint = value.toString();
+            QJsonObject row;
+            row.insert(QStringLiteral("url"), copy.url().toString());
+            row.insert(QStringLiteral("name"), copy.name());
+            row.insert(QStringLiteral("htmlName"), copy.htmlName());
+            row.insert(QStringLiteral("hint"), hint);
+            row.insert(QStringLiteral("main"), copy.isMainFrame());
+            probe->append(row);
+            if (hint == QLatin1String("codedeta") && copy.isValid() && i < *bestAt) {
+              *form = copy;
+              *bestAt = i;
+            }
+            if (--(*pending) != 0) return;
+            QJsonObject wrap;
+            wrap.insert(QStringLiteral("cppFrames"), n);
+            wrap.insert(QStringLiteral("jsFrames"), jsFrames);
+            wrap.insert(QStringLiteral("cpp"), *probe);
+            wrap.insert(QStringLiteral("html"), srcList);
+            m_lastCppProbe = QString::fromUtf8(QJsonDocument(wrap).toJson(QJsonDocument::Compact));
+            if (*bestAt < n) {
+              invoke(*form);
+              return;
+            }
+            // children()가 지도 iframe만 주고 다운로드 iframe은 빼도 src 태그는 남는다.
+            // n<=1 일 때만 열면 그 경우 시·군에서 영영 not-found 다.
+            if (requireForm && openSrcs(srcPage, srcList) > 0) {
+              finishEmpty();
+              return;
+            }
+            if (requireForm) {
+              finishEmpty();
+              return;
+            }
+            invoke(QWebEngineFrame());
+          });
+    }
+  };
+
+  auto frames = std::make_shared<QVector<QWebEngineFrame>>();
+  for (const QWebEngineFrame& frame : allFrames(m_tabs)) appendUnique(frames.get(), frame);
+
+  if (pages.isEmpty()) {
+    hintFrames(*frames, 0, nullptr, {});
     return;
   }
 
-  auto pending = std::make_shared<int>(n);
-  auto form = std::make_shared<QWebEngineFrame>();
-  auto bestAt = std::make_shared<int>(n);
-  for (int i = 0; i < n; ++i) {
-    QWebEngineFrame copy = frames.at(i);
-    copy.runJavaScript(
-        HeritageIntranetFlow::formHintScript(),
-        [this, generation, pending, form, bestAt, copy, invoke, manageFlight, requireForm, then, i,
-         n](const QVariant& value) {
+  auto pending = std::make_shared<int>(pages.size());
+  auto jsMax = std::make_shared<int>(0);
+  auto srcPage = std::make_shared<QPointer<QWebEnginePage>>(pages.last());
+  auto srcList = std::make_shared<QJsonArray>();
+  for (QWebEnginePage* page : pages) {
+    QWebEngineFrame main = page->mainFrame();
+    if (!main.isValid()) {
+      if (--(*pending) == 0) hintFrames(*frames, *jsMax, srcPage->data(), *srcList);
+      continue;
+    }
+    main.runJavaScript(
+        HeritageIntranetFlow::frameInventoryScript(),
+        [this, generation, pending, frames, jsMax, srcPage, srcList, page, hintFrames,
+         manageFlight](const QVariant& value) {
           if (generation != m_generation) {
-            --(*pending);
+            if (--(*pending) == 0 && manageFlight) m_scriptInFlight = false;
             return;
           }
-          if (value.toString() == QLatin1String("codedeta") && copy.isValid() && i < *bestAt) {
-            *form = copy;
-            *bestAt = i;
+          const QJsonObject info = QJsonDocument::fromJson(value.toString().toUtf8()).object();
+          *jsMax = qMax(*jsMax, info.value(QStringLiteral("jsFrames")).toInt());
+          const QJsonArray list = info.value(QStringLiteral("list")).toArray();
+          mergeNamedFrames(page, list, frames.get());
+          if (list.size() > srcList->size()) {
+            *srcList = list;
+            *srcPage = page;
           }
-          if (--(*pending) != 0) return;
-          if (*bestAt < n) {
-            invoke(*form);
-            return;
-          }
-          if (requireForm) {
-            if (manageFlight) m_scriptInFlight = false;
-            if (then) then(QStringLiteral("not-found"));
-            return;
-          }
-          invoke(QWebEngineFrame());
+          if (--(*pending) == 0) hintFrames(*frames, *jsMax, srcPage->data(), *srcList);
         });
   }
 }
@@ -299,7 +430,20 @@ void KaHeritageBrowser::captureOutline(const std::function<void()>& then) {
       HeritageIntranetFlow::pageOutlineScript(),
       [this, then](const QString& value) {
         m_lastOutline = value;
-        const QJsonDocument doc = QJsonDocument::fromJson(m_lastOutline.toUtf8());
+        QJsonDocument doc = QJsonDocument::fromJson(m_lastOutline.toUtf8());
+        if (doc.isObject() && !m_lastCppProbe.isEmpty()) {
+          const QJsonDocument probe = QJsonDocument::fromJson(m_lastCppProbe.toUtf8());
+          if (probe.isObject()) {
+            QJsonObject object = doc.object();
+            const QJsonObject extra = probe.object();
+            object.insert(QStringLiteral("cppFrames"), extra.value(QStringLiteral("cppFrames")));
+            object.insert(QStringLiteral("jsFrames"), extra.value(QStringLiteral("jsFrames")));
+            object.insert(QStringLiteral("cpp"), extra.value(QStringLiteral("cpp")));
+            object.insert(QStringLiteral("html"), extra.value(QStringLiteral("html")));
+            doc.setObject(object);
+            m_lastOutline = QString::fromUtf8(doc.toJson(QJsonDocument::Compact));
+          }
+        }
         m_outline->setPlainText(doc.isNull() ? m_lastOutline
                                              : QString::fromUtf8(doc.toJson(QJsonDocument::Indented)));
         if (then) then();
@@ -322,8 +466,13 @@ HeritageStage KaHeritageBrowser::nextStage(HeritageStage stage) const {
 }
 
 void KaHeritageBrowser::runStage() {
-  if (!m_running || m_scriptInFlight) return;
-  if (!m_pageReady) return;  // 페이지가 다 뜨기 전에 스크립트를 돌리면 아무것도 못 찾는다
+  if (!m_running) return;
+  if (++m_waitTicks > kMaxWaitTicks) {
+    fail(QStringLiteral("「%1」 단계에서 화면이 예상과 달라 멈췄습니다. 아래 내용을 보고 알려 주세요.")
+             .arg(HeritageIntranetFlow::stageName(m_stage)));
+    return;
+  }
+  if (m_scriptInFlight || !m_pageReady) return;
 
   // frameset 위에서는 어떤 요소도 못 찾는다. 안쪽 프레임 주소로 직접 들어간다.
   // **페이지가 새로 뜰 때 한 번만** 본다. 매 번 돌리면 단계 스크립트가 영영 돌지 못한다.
@@ -340,11 +489,6 @@ void KaHeritageBrowser::runStage() {
       m_detailLabel->setText(QStringLiteral("화면 안쪽으로 들어갑니다…"));
       view->load(url);
     });
-    return;
-  }
-  if (++m_waitTicks > kMaxWaitTicks) {
-    fail(QStringLiteral("「%1」 단계에서 화면이 예상과 달라 멈췄습니다. 아래 내용을 보고 알려 주세요.")
-             .arg(HeritageIntranetFlow::stageName(m_stage)));
     return;
   }
 

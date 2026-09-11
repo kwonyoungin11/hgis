@@ -205,6 +205,14 @@ private slots:
     QVERIFY(!down.contains(QStringLiteral("new Function")));
   }
 
+  void frameInventoryReadsIframeTagsWithoutEnteringThem() {
+    const QString js = HeritageIntranetFlow::frameInventoryScript();
+    QVERIFY(js.contains(QStringLiteral("iframe,frame")));
+    QVERIFY(js.contains(QStringLiteral("jsFrames")));
+    QVERIFY(js.contains(QStringLiteral("htmlFrames")));
+    QVERIFY(!js.contains(QStringLiteral("codedeta")));
+  }
+
   void wrapWalksNestedFrames() {
     const QString js = HeritageIntranetFlow::pageOutlineScript();
     QVERIFY(js.contains(QStringLiteral("codedeta")));

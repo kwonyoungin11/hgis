@@ -37,8 +37,10 @@ D:\hgis 프로젝트다. C++20 / Qt6 / QGIS(OSGeo4W) 로 만든 고고학 현장
 
 ## 1. 지금 상태 한 줄
 
-로그인 → 튜토리얼 닫기 → 다운로드 화면 → 서약서 → 탭 선택 → **시/도·시/군/구 선택까지 성공**.
-**검색이 안 걸려서** 결과가 전국 8,300건 그대로다. 그 원인(프레임)을 방금 고쳤고 **아직 검증하지 못했다.**
+로그인·서약·자료종류까지는 간다. **시·군 단계의 스크립트는 지도 document를 읽어 codedeta가 없다.**
+화면에는 다운로드 폼과 검색결과 8,300이 보이지만 outline은 `main.do` 튜토리얼/지도다.
+C++가 iframe `src`를 탭으로 여는 진단·우회를 넣었다. **산 검색 감소는 아직 미증명.**
+다음 AI 붙여넣기: `docs/superpowers/plans/2026-09-11-heritage-next-ai-prompt.md`
 
 ---
 
@@ -116,23 +118,26 @@ DOM 순서는 지도 패널이 먼저다. **첫 옵션 글자만 보고 고르�
 
 ---
 
-## 3. 방금 고쳤고 **아직 검증 못 한 것** ← 여기서부터 시작하라
+## 3. 방금 고쳤고 **아직 산 검증 못 한 것** ← 여기서부터 시작하라
 
-**증상**: 화면에는 「제주특별자치도 / 제주시 / 검색결과 8,300건」이 보이는데,
-스크립트가 읽은 화면 요약에는 그 select 들이 **없고** `total` 도 비어 있었다.
+**증상 (2026-09-11 11:15·11:37 증거)**: 웹뷰는 다운로드 폼+8,300건.
+아래 JSON은 `codedeta:false`, selects는 `bjdcd*`, buttons는 튜토리얼나가기/이전/다음.
 
-**원인**: 다운로드 패널은 **안쪽 프레임**에 있다. `QWebEnginePage::runJavaScript` 는 최상위 창에서만 돈다.
-그래서 `searchGisChaRirList` 도 `codedetaCd0` 도 보이지 않았다.
+**원인**: `QWebEnginePage::runJavaScript` 는 메인만. `children()` 이 다운로드 iframe을
+안 주면 hint가 메인을 보고 `requireForm` 이 `not-found`. outline은 `requireForm=false`라 계속 지도.
 
-**조치**: `HeritageIntranetFlow.cpp` 의 `wrap()` 이 이제 모든 스크립트를
-**다운로드 패널이 있는 창**에서 돌린다. 고르는 순서는
-① `searchGisChaRirList` 가 있는 창 → ② `codedeta` select 가 있는 창 → ③ `showAgreePopup` 이 있는 창 → ④ 최상위.
-`W` 가 고른 창이고 `document` 를 그 창 것으로 가려 두어 기존 스크립트가 그대로 돈다.
-사이트 함수는 `W.searchGisChaRirList(...)` 처럼 `W.` 를 붙여 부른다.
+**조치 (워킹트리 / 이 커밋)**:
+- `frameInventoryScript` — 태그 src/name/id만. 자식 document 금지
+- `runOnPreferredDocument` — 프레임별 hint, `cpp`/`html` 프로브
+- codedeta 없으면 같은 호스트 iframe `src`를 탭으로 연다 (`m_openedFrameSrc`)
+- `n<=1` 조건은 제거함. 지도 iframe만 `children()`에 있어도 src 탭을 연다
+- `runStage` 매 poll `++m_waitTicks` 먼저
+- 검색은 `W.searchGisChaRirList.call` 만. 전국 가드 유지
 
-**해야 할 일**: 앱을 띄워 「주변유적 받기」를 누르고
-**검색결과가 8,300건에서 줄어드는지** 확인하라. 줄면 프레임 문제가 풀린 것이다.
-안 줄면 안전장치가 「시·군 조건이 걸리지 않았습니다」로 막는다(전국을 받지 않게 한 것이다. 풀지 마라).
+**해야 할 일**: 옛 창을 모두 닫고 새 exe로 다시 받기.
+outline에 `cppFrames`/`cpp[].hint`/`html[].src` 가 보여야 새 빌드다.
+검색 건수가 줄거나 「시·군 조건이 걸리지 않았습니다」면 3장 판정 가능.
+선택자 추측·`bjdcd`를 폼으로 인정하는 것은 금지.
 
 ---
 
