@@ -18,6 +18,8 @@ $gdal = Join-Path $here "apps\gdal-dev\share\gdal"
 if (Test-Path $gdal) { $env:GDAL_DATA = $gdal }
 $proj = Join-Path $here "share\proj"
 if (Test-Path $proj) { $env:PROJ_DATA = $proj; $env:PROJ_LIB = $proj }
+$ca = Join-Path $here "curl-ca-bundle.crt"
+if (Test-Path $ca) { $env:CURL_CA_BUNDLE = $ca; $env:SSL_CERT_FILE = $ca }
 $exe = Join-Path $here "ka-hgis.exe"
 if (-not (Test-Path $exe)) { throw "ka-hgis.exe missing in $here" }
 & $exe @args

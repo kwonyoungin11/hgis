@@ -89,6 +89,8 @@ add_library(ka_core STATIC
   src/core/HeritageIntranetSettings.cpp
   src/core/HeritageIntranetFlow.cpp
   src/core/HeritageImport.cpp
+  src/core/HeritageFormParser.cpp
+  src/core/HeritageHttpClient.cpp
   src/core/WorkflowGuide.cpp
   src/core/VworldSettings.cpp
   src/core/GeorefService.cpp
@@ -124,6 +126,8 @@ add_library(ka_core STATIC
   src/core/HeritageIntranetSettings.h
   src/core/HeritageIntranetFlow.h
   src/core/HeritageImport.h
+  src/core/HeritageFormParser.h
+  src/core/HeritageHttpClient.h
   src/core/WorkflowGuide.h
   src/core/VworldSettings.h
   src/core/GeorefService.h
@@ -430,6 +434,10 @@ if(KA_HGIS_BUILD_TESTS)
   target_include_directories(ka_region_locator_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/generated)
   add_test(NAME region_locator_popup COMMAND ka_region_locator_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+  add_executable(ka_heritage_form_tests tests/test_heritage_form.cpp)
+  target_link_libraries(ka_heritage_form_tests PRIVATE ka_core Qt6::Test Qt6::Network)
+  set_target_properties(ka_heritage_form_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  add_test(NAME heritage_form COMMAND ka_heritage_form_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   add_executable(ka_heritage_style_tests tests/test_heritage_style.cpp)
   target_link_libraries(ka_heritage_style_tests PRIVATE ka_core Qt6::Test)
   set_target_properties(ka_heritage_style_tests PROPERTIES WIN32_EXECUTABLE FALSE)
@@ -599,6 +607,7 @@ if(KA_HGIS_BUILD_TESTS)
     set_tests_properties(topographic_import PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 90)
     set_tests_properties(heritage_flow PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(heritage_style PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
+    set_tests_properties(heritage_form PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(heritage_region PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PROJ_LIB=${OSGEO4W_ROOT}/share/proj;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(webengine_smoke PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen;QTWEBENGINEPROCESS_PATH=${OSGEO4W_ROOT}/apps/Qt6/bin/QtWebEngineProcess.exe;QTWEBENGINE_RESOURCES_PATH=${OSGEO4W_ROOT}/apps/Qt6/resources;QTWEBENGINE_LOCALES_PATH=${OSGEO4W_ROOT}/apps/Qt6/translations/qtwebengine_locales" TIMEOUT 120)
     set_tests_properties(topographic_browser PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen;QTWEBENGINEPROCESS_PATH=${OSGEO4W_ROOT}/apps/Qt6/bin/QtWebEngineProcess.exe;QTWEBENGINE_RESOURCES_PATH=${OSGEO4W_ROOT}/apps/Qt6/resources;QTWEBENGINE_LOCALES_PATH=${OSGEO4W_ROOT}/apps/Qt6/translations/qtwebengine_locales" TIMEOUT 150)

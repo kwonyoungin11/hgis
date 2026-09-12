@@ -1,11 +1,13 @@
 ﻿필드고고학GIS  포터블 (Windows 10/11 64비트)
 
 이 폴더 전체를 USB에 두면, QGIS/OSGeo4W를 설치하지 않은 다른 PC에서도 실행됩니다.
-Visual Studio 설치도 필요 없습니다.
+Visual Studio 설치도 필요 없습니다. 모니터 크기·배율은 앱이 맞춥니다.
 
 실행:
   ka-hgis.exe   ← 이것을 더블클릭 (다른 PC·USB·한글 경로에서도)
   start.bat     ← 예전 방식. 없어도 EXE만으로 됩니다.
+
+폴더 전체를 그대로 복사하세요. EXE만 옮기면 좌표계를 못 읽어 위성·지적이 안 뜹니다.
 
 주의:
   - apps, bin, share 폴더를 지우면 실행되지 않습니다.

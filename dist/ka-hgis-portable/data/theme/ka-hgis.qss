@@ -1,4 +1,4 @@
-/* ka-hgis chrome — cool gray, charcoal and restrained blue-teal soft gloss.
+/* ka-hgis chrome — Windows 11 Bloom / Fluent mica (cyan glow, accent #0078D4).
    Color and size SSOT: KaTheme tokens; resolve before applying this raw sheet.
    Keep GIS surfaces excluded; no bare QWidget/QGraphicsView/QFrame fills. */
 
@@ -10,7 +10,7 @@ QgsMapCanvas, QWidget#mapCanvas, QgsLayoutView, QWidget#layoutView {
 
 /* ---- Window face ---- */
 QMainWindow, QDialog, QMessageBox, QInputDialog, QColorDialog, QDialogButtonBox {
-  background: @desk@;
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 @selectedTop@, stop:0.42 @surface@, stop:1 @selectedBottom@);
   color: @ink@;
   font-family: "Malgun Gothic", "Segoe UI";
   font-size: 13px;
@@ -26,19 +26,19 @@ QLabel#recentEmptyHint {
   font-family: "Malgun Gothic", "Segoe UI";
 }
 QWidget#startRail {
-  background: @rail@;
-  color: @railText@;
-  font-family: "Malgun Gothic", "Segoe UI";
-}
-QLabel#startRailHome {
-  font-size: 16px;
-  font-weight: 800;
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 @accent@, stop:0.45 @accentHover@, stop:1 @rail@);
   color: @railText@;
   font-family: "Malgun Gothic", "Segoe UI";
 }
 QWidget#startRail QLabel {
-  font-size: 12px;
+  font-size: 13px;
   color: @railMuted@;
+  font-family: "Malgun Gothic", "Segoe UI";
+}
+QWidget#startRail QLabel#startRailHome {
+  font-size: 16px;
+  font-weight: 800;
+  color: @railText@;
   font-family: "Malgun Gothic", "Segoe UI";
 }
 QPushButton#startNewBtn, QPushButton#startOpenBtn {
@@ -181,6 +181,7 @@ QToolBar#mainToolbar::separator {
   margin: 10px 8px;
 }
 QToolBar#mainToolbar, QToolBar#studioToolbar {
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 @selectedTop@, stop:0.45 @glossReflection@, stop:1 @hoverBottom@);
   border-bottom: 1px solid @border@;
 }
 QToolBar#studioToolbar QToolButton {
@@ -341,7 +342,7 @@ QToolBar#studioToolRail QToolButton {
   font-size: 12px;
   color: @inkMuted@;
 }
-QToolButton#layerCheckAllBtn {
+QToolButton#layerCheckAllBtn, QToolButton#layoutLayerCheckAllBtn {
   background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.42 @glossShoulder@, stop:0.48 @glossMiddle@, stop:1 @glossBottom@);
   border: 1px solid @border@;
   border-radius: 8px;
@@ -350,12 +351,12 @@ QToolButton#layerCheckAllBtn {
   font-size: 12px;
   font-weight: 600;
 }
-QToolButton#layerCheckAllBtn:enabled:hover {
+QToolButton#layerCheckAllBtn:enabled:hover, QToolButton#layoutLayerCheckAllBtn:enabled:hover {
   border-color: @accent@;
   color: @accentDeep@;
 }
-QToolButton#layerCheckAllBtn:enabled:pressed { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @pressedTop@, stop:1 @pressedBottom@); }
-QToolButton#layerCheckAllBtn:disabled { color: @inkDisabled@; border-color: @border@; }
+QToolButton#layerCheckAllBtn:enabled:pressed, QToolButton#layoutLayerCheckAllBtn:enabled:pressed { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @pressedTop@, stop:1 @pressedBottom@); }
+QToolButton#layerCheckAllBtn:disabled, QToolButton#layoutLayerCheckAllBtn:disabled { color: @inkDisabled@; border-color: @border@; }
 QLabel#subToolbarCaption { color: @inkMuted@; font-weight: 600; padding: 0 8px; background: transparent; }
 
 /* ---- Fields ---- */
@@ -422,7 +423,7 @@ QComboBox QAbstractItemView, QColorDialog QAbstractSpinBox {
 
 /* ---- Trees / layer list ---- */
 QTreeView, QgsLayerTreeView, QListWidget, QTableWidget, QTableView {
-  background: @desk@;
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @surface@, stop:1 @selectedTop@);
   color: @ink@;
   border: 1px solid @border@;
   border-radius: 8px;
@@ -445,7 +446,7 @@ QTableWidget::item:hover, QTableView::item:hover {
   background: @pressedBottom@;
 }
 QHeaderView::section {
-  background: @desk@;
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @surface@, stop:1 @selectedTop@);
   color: @inkMuted@;
   border: 1px solid @border@;
   padding: 6px 8px;
@@ -473,10 +474,10 @@ QFrame#studioLeftCol {
   border-radius: 0px;
   border: none;
   border-right: 1px solid @border@;
-  background: @desk@;
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @selectedTop@, stop:1 @hoverBottom@);
 }
 QWidget#terrain3dPanel {
-  background: @desk@;
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @selectedTop@, stop:1 @hoverBottom@);
   border-right: 1px solid @border@;
 }
 QFrame#studioBottomBar {
@@ -487,7 +488,7 @@ QFrame#studioBottomBar {
 }
 QFrame#mapCard { background: @surface@; }
 QWidget#sampleStrip {
-  background: @surface@;
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 @selectedTop@, stop:0.5 @surface@, stop:1 @hoverBottom@);
   border: none;
   border-bottom: 1px solid @border@;
 }
@@ -552,7 +553,7 @@ QLabel#emptyState {
   font-weight: 500;
   padding: 24px 16px;
   min-height: 88px;
-  background: @surface@;
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 @surface@, stop:1 @selectedTop@);
   border: 1px dashed @border@;
   border-radius: 8px;
 }
@@ -563,9 +564,13 @@ QTabWidget::pane { border: none; }
    그 위에 얹히는 본문 판을 둥글게 깎는다. 배경만 바뀌며 배치는 그대로다. */
 QTabWidget#viewTabs::pane { border: none; margin: 0 8px 8px 8px; }
 QWidget#centralRoot, QWidget#startPage {
-  background: @desk@;
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:0.55, stop:0 @hoverBottom@, stop:0.4 @surface@, stop:1 @selectedBottom@);
   border: 1px solid @border@;
   border-radius: 14px;
+}
+QWidget#startMain {
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:0.55, stop:0 @hoverBottom@, stop:0.4 @surface@, stop:1 @selectedBottom@);
+  border: none;
 }
 QTabBar { background: transparent; font-weight: 600; }
 QTabBar::tab {
@@ -675,7 +680,7 @@ QFrame#studioFilesPanel QToolButton:enabled:pressed {
 
 QDockWidget { border: 1px solid @border@; color: @ink@; titlebar-close-icon: none; }
 QDockWidget::title {
-  background: @desk@;
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 @selectedTop@, stop:1 @hoverBottom@);
   color: @ink@;
   padding: 8px;
   border-bottom: 1px solid @border@;
@@ -716,7 +721,7 @@ QCheckBox::indicator:unchecked, QTreeView::indicator:unchecked, QgsLayerTreeView
 }
 
 QMenu {
-  background: @surface@;
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @surface@, stop:1 @selectedTop@);
   color: @ink@;
   border: 1px solid @border@;
   padding: 6px;
@@ -728,7 +733,7 @@ QMenu::item:selected { background: @selectedBottom@; color: @ink@; }
 QMenu::item:disabled { color: @inkDisabled@; }
 
 QStatusBar {
-  background: @desk@;
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 @selectedTop@, stop:0.5 @surface@, stop:1 @hoverBottom@);
   color: @inkMuted@;
   font-weight: 600;
   border-top: 1px solid @border@;
@@ -737,7 +742,7 @@ QStatusBar QLabel { color: @inkMuted@; }
 
 /* ---- Status bar instrument panel ---- */
 QStatusBar#kaStatusBar {
-  background: @desk@;
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 @selectedTop@, stop:0.5 @surface@, stop:1 @hoverBottom@);
   color: @inkMuted@;
   min-height: 34px;
   padding: 0 6px;
@@ -806,7 +811,7 @@ QToolTip {
   font-size: 13px;
 }
 
-QScrollBar:vertical, QScrollBar:horizontal { background: @desk@; border: none; }
+QScrollBar:vertical, QScrollBar:horizontal { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 @selectedTop@, stop:1 @hoverBottom@); border: none; }
 QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
   background: @edgeDark@;
   border: none;
@@ -833,7 +838,7 @@ QPushButton.primary:disabled, QPushButton#startNewBtn:disabled,
 QPushButton#startOpenBtn:disabled, QPushButton#scaleApply:disabled,
 QToolButton:disabled, QToolButton#btnPrimary:disabled,
 QToolButton.sampleTile:disabled, QToolButton#scaleChip:disabled,
-QToolButton#layerCheckAllBtn:disabled, QToolButton#crsButton:disabled,
+QToolButton#layerCheckAllBtn:disabled, QToolButton#layoutLayerCheckAllBtn:disabled, QToolButton#crsButton:disabled,
 QToolButton#renderToggle:disabled,
 QWidget#beginnerRibbon QToolButton:disabled,
 QToolBar#mainToolbar QToolButton:disabled,
@@ -880,6 +885,7 @@ QToolButton.sampleTile:enabled:checked:pressed,
 QToolButton#scaleChip:enabled:pressed,
 QToolButton#scaleChip:enabled:checked:pressed,
 QToolButton#layerCheckAllBtn:enabled:pressed,
+QToolButton#layoutLayerCheckAllBtn:enabled:pressed,
 QToolButton#crsButton:enabled:pressed,
 QToolButton#renderToggle:enabled:pressed,
 QToolButton#renderToggle:enabled:checked:pressed,

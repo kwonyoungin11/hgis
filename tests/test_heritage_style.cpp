@@ -166,6 +166,21 @@ private slots:
     QVERIFY(HeritageImport::chooseNameField(d.get()).isEmpty());
   }
 
+  void oneZipCanCarryManyShapefiles() {
+    // 지정유산 ZIP 하나에 6종이 들어온다(2026-09-12 실제 파일).
+    // 색은 종류(지정유산) 하나로 통일하되, 레이어 이름은 파일 이름을 살려야 구분된다.
+    const QStringList inZip = {QStringLiteral("국가지정유산"), QStringLiteral("시도지정유산"),
+                               QStringLiteral("국가등록문화유산"), QStringLiteral("시도등록문화유산"),
+                               QStringLiteral("국가지정유산보호구역"),
+                               QStringLiteral("시도지정유산보호구역")};
+    for (const QString& name : inZip) {
+      // 이 이름들은 종류 이름과 다르다. fromLayerName 이 종류로 오인하면 안 된다.
+      QVERIFY2(!HeritageStyle::fromLayerName(name).has_value() ||
+                   HeritageStyle::fromLayerName(name).value() == HeritageDataset::DesignatedHeritage,
+               qPrintable(name));
+    }
+  }
+
   void referenceGroupKeepsHeritageOutOfSurveyData() {
     QCOMPARE(HeritageImport::referenceGroupName(), QStringLiteral("참조 지도"));
   }

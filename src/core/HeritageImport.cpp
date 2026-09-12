@@ -93,7 +93,14 @@ HeritageImport::Result HeritageImport::loadDataset(QgsProject* project, Heritage
   QList<QgsVectorLayer*> loaded;
   for (const QString& shp : shapefiles) {
     const QString encoding = LayerOps::prepareShapefileEncoding(shp);
-    auto* layer = new QgsVectorLayer(shp, datasetName, QStringLiteral("ogr"));
+    // 한 ZIP 에 여러 SHP 가 들어온다(예: 지정유산 →
+    // 국가지정유산 · 시도지정유산 · 국가등록문화유산 · 시도등록문화유산 ·
+    // 국가지정유산보호구역 · 시도지정유산보호구역, 2026-09-12 실제 파일로 확인).
+    // 전부 한 이름으로 올리면 레이어창에서 구분이 안 된다.
+    // **이름은 파일 이름 그대로, 색과 범례는 그 종류의 것**을 쓴다.
+    const QString baseName = QFileInfo(shp).completeBaseName();
+    const QString layerName = baseName.isEmpty() ? datasetName : baseName;
+    auto* layer = new QgsVectorLayer(shp, layerName, QStringLiteral("ogr"));
     if (!layer->isValid()) {
       out.messages << QStringLiteral("%1 을(를) 열지 못했습니다.").arg(QFileInfo(shp).fileName());
       delete layer;
@@ -105,7 +112,7 @@ HeritageImport::Result HeritageImport::loadDataset(QgsProject* project, Heritage
     const QString nameField = chooseNameField(layer);
     if (nameField.isEmpty()) {
       out.messages << QStringLiteral("%1: 유적명 컬럼을 찾지 못해 범례에 이름을 넣지 못했습니다.")
-                          .arg(datasetName);
+                          .arg(layerName);
     }
     const HeritageStyleResult styled = HeritageStyle::apply(layer, dataset, nameField);
     if (!styled.message.isEmpty()) out.messages << styled.message;

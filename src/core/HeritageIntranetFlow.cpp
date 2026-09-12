@@ -156,30 +156,43 @@ QString HeritageIntranetFlow::dismissTutorialScript() {
       "var exit=findInner('튜토리얼나가기');"
       "var again=findInner('다시보지않기');"
       "if(!exit&&!again)return 'none';"
-      "if(again){try{again.click();}catch(e){}"
+      // 「다시 보지 않기」는 **체크상자만** 건드린다. 감싼 요소를 누르면 그 안의 「다음」이 눌려
+      // 튜토리얼이 1/5 → 5/5 로 넘어가 버린다(2026-09-12 화면으로 확인).
+      "if(again){"
       "var box=again.querySelector('input[type=checkbox]')||"
       "(again.parentElement?again.parentElement.querySelector('input[type=checkbox]'):null);"
-      "if(box&&!box.checked){box.checked=true;"
-      "box.dispatchEvent(new Event('change',{bubbles:true}));}}"
+      "if(box&&!box.checked){try{box.click();}catch(e){}"
+      "if(!box.checked){box.checked=true;"
+      "box.dispatchEvent(new Event('change',{bubbles:true}));}}}"
       "if(exit){exit.click();return 'closed';}"
       "return 'closed';"));
 }
 
+// 요청 기록으로 확인한 다운로드 화면 주소. 경로를 지어내지 않는다.
+QString HeritageIntranetFlow::downloadPagePath() {
+  return QStringLiteral("/user/data/heritageDownload.do?pageMenuId=DAT010010");
+}
+
+QString HeritageIntranetFlow::downloadListPath() {
+  return QStringLiteral("/user/data/heritageDownloadList.do");
+}
+
+QString HeritageIntranetFlow::downloadFilesAllPath() {
+  return QStringLiteral("/user/data/heritageDownload/downloadFilesAll.do");
+}
+
 QString HeritageIntranetFlow::openDownloadPageScript() {
-  // 확인함(2026-09-11 DOM): 「국가유산자료 다운로드」 링크는 javascript:showAgreePopup(); 이다.
-  // 메뉴를 펼쳐 누르는 것보다 함수를 직접 부르는 편이 확실하다. 화면이 ajax 로 바뀌어도 흔들리지 않는다.
+  // 확인함(2026-09-12): 「국가유산자료 다운로드」는 javascript:showAgreePopup(); 이다.
+  //
+  // **그 주소를 최상위로 직접 열면 안 된다.** heritageDownload.do 는 조각 HTML 이라
+  // 통째로 열면 jQuery 도 tabContentAjax 도 없는 반쪽 페이지가 된다(그래서 no-fn 이 계속 났다).
+  // 사이트가 제 방식대로 조각을 삽입해야 그 안의 함수들이 생긴다.
   return wrap(QStringLiteral(
-      "function squash(t){return (t||'').replace(/\\s+/g,'');}"
-      "var open=fn('showAgreePopup');"
-      "if(open){open();return 'opened';}"
-      "var want='국가유산자료다운로드';"
-      "var nodes=document.querySelectorAll('a,button,li');"
-      "for(var i=0;i<nodes.length;i++){"
-      "if(squash(nodes[i].innerText)!==want)continue;"
-      "var href=nodes[i].getAttribute?nodes[i].getAttribute('href'):null;"
-      "if(href&&href.toLowerCase().indexOf('javascript')===0){"
-      "try{(new Function(href.slice(href.indexOf(':')+1))).call(nodes[i]);return 'opened';}catch(e){}}"
-      "try{nodes[i].click();return 'opened';}catch(e){}}"
+      "var c=cands();"
+      "for(var i=0;i<c.length;i++){"
+      "try{if(typeof c[i].tabContentAjax==='function')return 'opened';}catch(e){}}"
+      "for(var i=0;i<c.length;i++){"
+      "try{if(typeof c[i].showAgreePopup==='function'){c[i].showAgreePopup();return 'opened';}}catch(e){}}"
       "return 'not-found';"));
 }
 
@@ -261,7 +274,7 @@ QString HeritageIntranetFlow::selectRegionScript(const QString& sido, const QStr
                   "if(key(all[i]).indexOf('codedeta')>=0&&firstOption(all[i]).indexOf('시도선택')>=0){sidoAt=i;break;}}"
                   "if(sidoAt<0){for(var i=0;i<all.length;i++){"
                   "if(key(all[i]).indexOf('bjdcd')>=0)continue;"
-                  "if(firstOption(all[i]).indexOf('시도선택')>=0){sidoAt=i;break;}}}"
+                  "var f=firstOption(all[i]);""if(f.indexOf('시도선택')>=0||f.indexOf('시·도선택')>=0||f.indexOf('시/도선택')>=0){sidoAt=i;break;}}}"
                   "if(sidoAt<0)return 'not-found';"
                   "var sidoSel=all[sidoAt];"
                   // 시/군/구는 같은 폼 안에서 시/도 바로 뒤에 오는 select 다.
@@ -314,35 +327,45 @@ QString HeritageIntranetFlow::formHintScript() {
 }
 
 QString HeritageIntranetFlow::searchScript() {
-  // 확인함(2026-09-11 DOM): 선택다운로드 = searchGisChaRirList('', 'excel'),
-  // 전체다운로드 = searchGisChaRirList('', 'excel', 'all').
-  // 검색은 같은 함수를 형식 없이 부르는 것이다.
+  // **페이지를 옮기지 않는다.** (검사 noScriptMayNavigateThePage 가 지킨다)
   //
-  // 부모 메뉴의 searchGisChaRirList 는 지도 document 를 본다. 그 함수를
-  // 집어 오면 시·군이 검색에 안 실린다. 이 창에 codedeta 가 있을 때만
-  // 이 창의 함수(또는 폼 안 「검색」)를 쓴다.
+  // 왜 계속 「검색을 못 찾았다」였나:
+  // codedeta 칸에서 위로 올라가다 select 가 2개인 첫 상자에서 멈췄는데,
+  // 화면상 「검색」 버튼은 그 상자 **바깥 옆**에 있다. 그래서 영영 못 찾았다.
+  //
+  // 사이트 JS 가 폼 이름을 알려 준다: $("#searchForm").serialize()
+  // 그러니 범위는 #searchForm 이다. 그게 없으면
+  // **codedeta 칸과 「검색」 버튼을 함께 품은 가장 가까운 조상**까지 올라간다.
+  // 왼쪽 지도 패널의 「검색」을 누르면 조건이 안 걸린 채 전국이 검색되므로 범위는 반드시 좁힌다.
   return wrap(QStringLiteral(
       "function squash(t){return (t||'').replace(/\\s+/g,'');}"
-      "if(!document.querySelector('select[name*=codedeta],select[id*=codedeta]'))"
-      "return 'not-found';"
-      "if(typeof W.searchGisChaRirList==='function'){"
-      "W.searchGisChaRirList.call(W,'');return 'searching';}"
-      "function key(sel){return ((sel.id||'')+' '+(sel.name||'')).toLowerCase();}"
-      "var anchor=null;var all=document.querySelectorAll('select');"
-      "for(var i=0;i<all.length;i++){"
-      "if(key(all[i]).indexOf('codedeta')>=0){anchor=all[i];break;}}"
-      "var scope=null;"
-      "if(anchor){scope=anchor.form;"
-      "if(!scope){var p=anchor;"
-      "for(var d=0;d<6&&p;d++){p=p.parentElement;"
-      "if(p&&p.querySelectorAll('select').length>=2){scope=p;break;}}}}"
-      "function press(root){"
+      "function key(e){return ((e.id||'')+' '+(e.name||'')).toLowerCase();}"
+      "function findSearch(root){"
+      "if(!root||!root.querySelectorAll)return null;"
       "var n=root.querySelectorAll('button,input[type=button],input[type=submit],a');"
       "for(var i=0;i<n.length;i++){"
-      "if(squash(n[i].innerText||n[i].value)!=='검색')continue;"
-      "n[i].click();return true;}"
-      "return false;}"
-      "if(scope&&press(scope))return 'searching';"
+      "if(squash(n[i].innerText||n[i].value)==='검색')return n[i];}"
+      "return null;}"
+      "var c=cands();"
+      "for(var w=0;w<c.length;w++){"
+      "var doc;try{doc=c[w].document;}catch(e){continue;}"
+      "var anchor=null;var sels=doc.querySelectorAll('select');"
+      "for(var i=0;i<sels.length;i++){"
+      "if(key(sels[i]).indexOf('codedeta')>=0){anchor=sels[i];break;}}"
+      "if(!anchor)continue;"
+      // ① 사이트가 부르는 이름 그대로
+      "var scope=doc.getElementById('searchForm');"
+      "var btn=scope?findSearch(scope):null;"
+      // ② 없으면 codedeta 와 「검색」을 함께 품은 가장 가까운 조상까지 올라간다
+      "if(!btn){var p=anchor;"
+      "for(var d=0;d<10&&p;d++){p=p.parentElement;if(!p)break;"
+      "var found=findSearch(p);"
+      "if(found){btn=found;break;}}}"
+      "if(btn){btn.click();return 'searching';}}"
+      // ③ 그래도 없으면 사이트 검색 함수를 그 함수가 있는 창에서 부른다
+      "for(var i=0;i<c.length;i++){"
+      "try{if(typeof c[i].searchGisChaRirList==='function'){"
+      "c[i].searchGisChaRirList('');return 'searching';}}catch(e){}}"
       "return 'not-found';"));
 }
 
@@ -364,26 +387,37 @@ QString HeritageIntranetFlow::resultPageInfoScript() {
 }
 
 QString HeritageIntranetFlow::downloadAllScript() {
-  // 확인함(2026-09-11 DOM):
-  //   전체다운로드 = searchGisChaRirList('', 'excel', 'all')
-  //   선택다운로드 = searchGisChaRirList('', 'excel')
-  // 버튼을 찾아 누르는 것보다 함수를 직접 부르는 편이 확실하다.
-  // 요청이 어떤 형태든(폼 POST·전송 페이지) 브라우저가 받게 두고, 우리는 내려받기를 잡는다.
+  // 사이트가 제 방식대로 주소를 만들게 둔다. 우리가 만들면 searchParams 인코딩이 어긋나
+  // 서버가 0바이트를 준다(2026-09-12 두 번 확인).
+  //
+  // 그 함수는 $("#searchForm")·$("#codedetaCd0")·$("#mode") 를 읽으므로
+  // **그 요소들이 있는 창에서** 불러야 한다. 다른 창에서 부르면 null.value 로 터진다.
+  //
+  // 지역이 비면 전국을 받게 되므로 부르기 전에 막는다.
   return wrap(QStringLiteral(
       "function squash(t){return (t||'').replace(/\\s+/g,'');}"
-      "if(!document.querySelector('select[name*=codedeta],select[id*=codedeta]'))"
-      "return 'not-found';"
-      "if(typeof W.searchGisChaRirList==='function'){"
-      "W.searchGisChaRirList.call(W,'','excel','all');return 'all';}"
-      "function press(text){var n=document.querySelectorAll('button,input[type=button],input[type=submit],a');"
+      "var c=cands();var host=null;var doc=null;"
+      "for(var w=0;w<c.length;w++){"
+      "var d;try{d=c[w].document;}catch(e){continue;}"
+      "if(d.getElementById('searchForm')||d.getElementById('codedetaCd0')){host=c[w];doc=d;break;}}"
+      "if(!host)return 'not-found';"
+      "function regionSel(kind){var all=doc.querySelectorAll('select');"
+      "for(var i=0;i<all.length;i++){"
+      "var k=((all[i].id||'')+' '+(all[i].name||'')).toLowerCase();"
+      "if(k.indexOf('bjdcd')>=0)continue;"
+      "if(k.indexOf(kind)>=0)return all[i];}"
+      "return null;}"
+      "var sido=doc.getElementById('codedetaCd0')||regionSel('codedeta');"
+      "var sgg=doc.getElementById('codeCdSg0')||regionSel('codecdsg');"
+      "if(!sido||!sido.value)return 'no-region';"
+      "if(sgg&&!sgg.value)return 'no-region';"
+      "try{if(typeof host.searchGisChaRirList==='function'){"
+      "host.searchGisChaRirList('','excel','all');return 'all';}}catch(e){"
+      "return 'error:'+String(e);}"
+      "var n=doc.querySelectorAll('button,input[type=button],input[type=submit],a');"
       "for(var i=0;i<n.length;i++){"
-      "if(squash(n[i].innerText||n[i].value)!==text)continue;"
-      "n[i].click();return true;}return false;}"
-      "if(press('전체다운로드'))return 'all';"
-      "var boxes=document.querySelectorAll('table tbody input[type=checkbox]');"
-      "if(boxes.length===0)return 'not-found';"
-      "for(var i=0;i<boxes.length;i++){if(!boxes[i].checked){boxes[i].click();}}"
-      "return press('선택다운로드')?'selected':'not-found';"));
+      "if(squash(n[i].innerText||n[i].value)==='전체다운로드'){n[i].click();return 'all';}}"
+      "return 'not-found';"));
 }
 
 QString HeritageIntranetFlow::goToPageScript(int pageNumber) {
@@ -453,7 +487,8 @@ QString HeritageIntranetFlow::pageOutlineScript() {
       "ifs.push({name:fr[i].name||'',id:fr[i].id||'',"
       "src:(fr[i].getAttribute('src')||'').slice(0,160)});}"
       "return JSON.stringify({"
-      "url:W.location.href,title:document.title,"
+      // 주소는 읽기만 한다. 대입하지 않는다(페이지를 옮기지 않는다).
+      "url:String(W.location.href),title:document.title,"
       "frames:window.frames.length,"
       "htmlFrames:ifs,"
       "codedeta:!!document.querySelector('select[name*=codedeta],select[id*=codedeta]'),"
@@ -480,4 +515,132 @@ QString HeritageIntranetFlow::frameInventoryScript() {
       "src:(fr[i].getAttribute('src')||'').slice(0,200)});}"
       "return JSON.stringify({htmlFrames:fr.length,jsFrames:window.frames.length,list:list});"
       "}catch(e){return 'error:'+String(e);}})()");
+}
+
+QString HeritageIntranetFlow::redactRequestLine(const QString& method, const QUrl& url) {
+  const QString path = url.toString(QUrl::RemoveQuery);
+  const QString lower = path.toLower();
+  // 로그인 계열은 주소도 질의도 남기지 않는다. 비밀번호가 실려 간다.
+  if (lower.contains(QLatin1String("security_check")) || lower.contains(QLatin1String("login")) ||
+      lower.contains(QLatin1String("checknet")))
+    return method + QStringLiteral(" <로그인 요청 — 내용을 남기지 않음>");
+  QString line = method + QLatin1Char(' ') + path;
+  const QString query = url.query();
+  if (!query.isEmpty()) line += QLatin1Char('?') + query.left(400);
+  return line;
+}
+
+QString HeritageIntranetFlow::loadListScript(const QString& params) {
+  // 사이트 자신의 전송 통로를 쓴다. 서버가 기대하는 맥락(헤더·세션·화면 상태)이 그대로 붙는다.
+  // tabContentAjax 가 어느 창에 있는지는 화면마다 다르다. **함수가 있는 창을 찾아 그 창에서** 부른다.
+  // 함수만 꺼내 부르면 그 안의 $("#tabContentDiv") 가 엉뚱한 문서를 가리킨다.
+  return wrap(QStringLiteral("var c=cands();var host=null;"
+                             "for(var i=0;i<c.length;i++){"
+                             "try{if(typeof c[i].tabContentAjax==='function'){host=c[i];break;}}catch(e){}}"
+                             "if(!host)return 'no-fn';"
+                             "host.tabContentAjax(%1,%2);"
+                             "return 'sent';")
+                  .arg(jsString(downloadListPath()), jsString(params)));
+}
+
+QString HeritageIntranetFlow::tabContentHtmlScript() {
+  // 결과는 tabContentAjax 를 가진 창의 #tabContentDiv 에 들어간다. 그 창에서 읽는다.
+  return wrap(QStringLiteral("var c=cands();"
+                             "for(var i=0;i<c.length;i++){"
+                             "try{var d=c[i].document.getElementById('tabContentDiv');"
+                             "if(d&&d.innerHTML&&d.innerHTML.length>200)return d.innerHTML;}catch(e){}}"
+                             "return '';"));
+}
+
+QString HeritageIntranetFlow::buildDownloadUrlScript(const QString& tabCode) {
+  // 성공한 요청(2026-09-12 요청 기록)에서 확인한 모양:
+  //   /user/data/heritageDownload/downloadFilesAll.do?_csrf=..&dataSt=L&pageIndex=1&mode=S
+  //   &cphNm=&jjgb=&specSubCd=&cphHoNmStart=&cphHoNmEnd=
+  //   &codedetaCd=500000%2CADDR500000&codeCdSg=ADD1501100&SaveHtNm=
+  //   &codeCd=ADDR500000&tab=S&searchParams=...
+  //
+  // 즉 #searchForm 을 직렬화하고 codeCd·tab 을 붙인 것이다. 사이트 함수를 부르지 않고
+  // 우리가 만든다 — 그 함수는 화면 상태에 따라 null.value 로 터진다.
+  // searchParams 는 화면에 보여 줄 요약일 뿐이라 비워도 자료는 같다.
+  return wrap(QStringLiteral(
+                  "function enc(v){return encodeURIComponent(v==null?'':v);}"
+                  "var c=cands();var doc=null;"
+                  "for(var w=0;w<c.length;w++){"
+                  "var d;try{d=c[w].document;}catch(e){continue;}"
+                  "if(d.getElementById('searchForm')||d.getElementById('codedetaCd0')){doc=d;break;}}"
+                  "if(!doc)return 'not-found';"
+                  "var form=doc.getElementById('searchForm');"
+                  "var parts=[];"
+                  "function add(n,v){if(n)parts.push(enc(n)+'='+enc(v));}"
+                  "var scope=form||doc;"
+                  "var els=scope.querySelectorAll('input,select,textarea');"
+                  "for(var i=0;i<els.length;i++){var e=els[i];"
+                  "if(!e.name)continue;"
+                  "var t=(e.type||'').toLowerCase();"
+                  "if(t==='submit'||t==='button')continue;"
+                  "if((t==='checkbox'||t==='radio')&&!e.checked)continue;"
+                  "add(e.name,e.value);}"
+                  // **지역값이 비면 전국을 받게 된다. 그때는 주소를 만들지 않는다.**
+                  // 2026-09-12: 탭을 바꾼 뒤 지역이 비었는데도 받아서 전국 5,545건을 요청했다.
+                  "function regionSel(kind){"
+                  "var all=doc.querySelectorAll('select');"
+                  "for(var i=0;i<all.length;i++){"
+                  "var k=((all[i].id||'')+' '+(all[i].name||'')).toLowerCase();"
+                  "if(k.indexOf('bjdcd')>=0)continue;"
+                  "if(k.indexOf(kind)>=0)return all[i];}"
+                  "return null;}"
+                  "var sido=doc.getElementById('codedetaCd0')||regionSel('codedeta');"
+                  "var sgg=doc.getElementById('codeCdSg0')||regionSel('codecdsg');"
+                  "if(!sido||!sido.value)return 'no-region';"
+                  "if(sgg&&!sgg.value)return 'no-region';"
+                  "var codeCd='';"
+                  "if(sido&&sido.value){var p=String(sido.value).split(',');"
+                  "codeCd=p.length>1?p[1]:'';}"
+                  "add('codeCd',codeCd);"
+                  "var modeEl=doc.getElementById('mode');"
+                  "var tab=(modeEl&&modeEl.value)?modeEl.value:%1;"
+                  "add('tab',tab);"
+                  "if(!modeEl)add('mode',tab);"
+                  // searchParams 를 비우면 서버가 파일을 주지 않는다(2026-09-12 A/B 확인:
+                  // 성공한 요청에는 "지역: 제주특별자치도 제주시 / " 가 들어 있었고,
+                  // 비운 요청은 빈 화면만 왔다).
+                  // 사이트의 makeSearchParams() 를 그 창에서 부르고, 없으면 같은 모양으로 만든다.
+                  "var sp='';"
+                  "try{var W2=null;for(var k=0;k<c.length;k++){"
+                  "try{if(c[k].document===doc){W2=c[k];break;}}catch(e){}}"
+                  "if(W2&&typeof W2.makeSearchParams==='function')sp=String(W2.makeSearchParams());}"
+                  "catch(e){sp='';}"
+                  "if(!sp){"
+                  "function picked(id){var e=doc.getElementById(id);"
+                  "if(!e||e.selectedIndex<0||!e.options.length)return '';"
+                  "return (e.options[e.selectedIndex].text||'').trim();}"
+                  "var a=picked('codedetaCd0');var b=picked('codeCdSg0');"
+                  "if(a)sp='지역:'+a+(b?' '+b:'')+' / ';}"
+                  // **여기서 또 인코딩하면 안 된다.** makeSearchParams() 는 이미 인코딩된
+                  // 문자열을 준다(2026-09-12: %2525EC… 로 세 번 인코딩되어 서버가 0바이트를 줬다).
+                  // 사이트도 이 값만은 그대로 붙인다(url += "&searchParams=" + makeSearchParams()).
+                  "if(sp.indexOf('%')>=0)parts.push('searchParams='+sp);"
+                  "else add('searchParams',sp);"
+                  // 절대 주소로 돌려준다. C++ 이 QUrl 로 다시 붙이면 %가 %25 로 또 인코딩된다.
+                  "var origin='';try{origin=String(W.location.origin);}catch(e){origin='';}"
+                  "return origin+%2+'?'+parts.join('&');")
+                  .arg(jsString(tabCode), jsString(downloadFilesAllPath())));
+}
+
+QString HeritageIntranetFlow::verifyRegionScript() {
+  // 탭을 바꾸면 폼이 ajax 로 다시 그려지고 시/군 목록은 spcaCdtSiGunGu.do 가 따로 채운다.
+  // 그래서 「골랐다」를 한 번 보고 믿으면 안 된다(2026-09-12: 1초 만에 selected 를 받았지만
+  // 실제로는 값이 비어 전국을 요청했다). 지금 값이 남아 있는지 다시 본다.
+  // 반환: "ok:<시도값>|<시군구값>" 또는 "empty"
+  return wrap(QStringLiteral(
+      "function pickSel(kind){var all=document.querySelectorAll('select');"
+      "for(var i=0;i<all.length;i++){"
+      "var k=((all[i].id||'')+' '+(all[i].name||'')).toLowerCase();"
+      "if(k.indexOf('bjdcd')>=0)continue;"
+      "if(k.indexOf(kind)>=0)return all[i];}"
+      "return null;}"
+      "var a=pickSel('codedeta');var b=pickSel('codecdsg');"
+      "if(!a||!a.value)return 'empty';"
+      "if(b&&!b.value)return 'empty';"
+      "return 'ok:'+a.value+'|'+(b?b.value:'');"));
 }

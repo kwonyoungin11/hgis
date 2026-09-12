@@ -55,12 +55,33 @@ public:
   // 반환: 안쪽 프레임의 URL, 또는 frameset 이 아니면 빈 문자열.
   static QString frameEscapeScript();
 
+  // 사이트가 보낸 요청 한 줄을 기록용으로 다듬는다.
+  // 로그인 요청에는 아이디·비밀번호가 실려 가므로 **주소와 질의를 통째로 지운다.**
+  // 나머지는 주소와 질의를 남긴다 — 검색·다운로드의 진짜 엔드포인트를 알아내야 하기 때문이다.
+  static QString redactRequestLine(const QString& method, const QUrl& url);
+
   // --- 미확인 단계 (실제 화면을 보고 채운다) ---
   //
   // 각 스크립트는 성공 시 그 뜻을 담은 문자열을, 못 찾으면 "not-found" 를 돌려준다.
   // 못 찾았는데 다음 단계로 넘어가지 않는다.
 
   static QString dismissTutorialScript();
+  // 요청 기록으로 확인한 다운로드 화면 주소(2026-09-12). 경로를 지어내지 않는다.
+  static QString downloadPagePath();
+  // 사이트 JS 에서 그대로 읽은 주소(2026-09-12, receipts 에 남은 응답):
+  //   tabContentAjax("/user/data/heritageDownloadList.do", params)  ← 목록·검색
+  //   "/user/data/heritageDownload/downloadFilesAll.do?" + params   ← 전체다운로드
+  // 검색 폼(#searchForm)은 껍데기가 아니라 이 목록 조각 안에 있다.
+  static QString downloadListPath();
+  static QString downloadFilesAllPath();
+
+  // 서버가 우리 쪽 직접 POST 는 404 로 막는다(2026-09-12 확인). 그래서 요청은 브라우저가 보내게 한다.
+  // 사이트 자신의 tabContentAjax 로 목록을 불러 #tabContentDiv 에 넣게 하고,
+  // 그 HTML 을 꺼내 C++(HeritageFormParser)이 해석한다.
+  // 화면에서 버튼을 찾아 누르지 않는다 — 파라미터는 우리가 만든다.
+  static QString loadListScript(const QString& params);
+  // #tabContentDiv 의 HTML. 아직 없으면 빈 문자열.
+  static QString tabContentHtmlScript();
   static QString openDownloadPageScript();
   // 다운로드 화면(또는 그 앞의 서약서 팝업)에 도착했는가. 눌렀다고 도착한 것으로 치지 않는다.
   // 반환: "ready" | "not-yet"
@@ -68,6 +89,9 @@ public:
   static QString agreeTermsScript();
   static QString selectDatasetScript(HeritageDataset dataset);
   static QString selectRegionScript(const QString& sido, const QString& city);
+  // 고른 시/군 값이 지금도 폼에 남아 있는가. 「골랐다」를 한 번 보고 믿지 않기 위한 것이다.
+  // 반환: "ok:<시도>|<시군구>" 또는 "empty"
+  static QString verifyRegionScript();
   static QString searchScript();
   // 이 프레임이 다운로드 폼인가. wrap() 없이 각 QWebEngineFrame 에서 돌린다.
   // 반환: "codedeta" | "other" | "error"
@@ -80,6 +104,11 @@ public:
   // 결과를 전부 받는다. 「전체다운로드」가 있으면 그것을, 없으면 모든 행을 체크하고 「선택다운로드」를 누른다.
   // 반환: "all" | "selected" | "not-found"
   static QString downloadAllScript();
+  // 사이트의 전체다운로드 함수는 화면 상태에 따라 null.value 로 터진다(2026-09-12 반복 확인).
+  // 그래서 **주소를 우리가 만든다.** 성공한 요청(요청 기록)에서 확인한 모양 그대로다:
+  //   /user/data/heritageDownload/downloadFilesAll.do?<searchForm 직렬화>&codeCd=..&tab=..
+  // 반환: 완성된 URL, 또는 "not-found".
+  static QString buildDownloadUrlScript(const QString& tabCode);
   // 한 페이지씩 받아야 할 때 다음 쪽으로 넘긴다. 반환: "moved" | "last-page" | "not-found"
   static QString goToPageScript(int pageNumber);
 

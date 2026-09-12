@@ -1,12 +1,15 @@
 #pragma once
 
 #include <QDateTime>
+#include <QNetworkCookie>
 #include <QDialog>
 #include <QPointer>
 #include <QString>
 #include <QStringList>
 #include <QVector>
 
+#include "core/HeritageFormParser.h"
+#include "core/HeritageHttpClient.h"
 #include "core/HeritageIntranetFlow.h"
 #include "core/HeritageStyle.h"
 
@@ -62,6 +65,13 @@ signals:
 private:
   void setStage(HeritageStage stage, const QString& message);
   void fail(const QString& message);
+  // 사이트가 보낸 요청을 조사폴더 receipts/ 에 남긴다. 남긴 경로를 돌려준다.
+  QString saveRequestLog();
+  // 진단 기록. 단계·스크립트 결과·내려받기·실패를 그때그때 파일에 남긴다.
+  // 화면을 주고받지 않고 이 파일만 보면 어디서 왜 막혔는지 알 수 있다.
+  // **비밀번호는 절대 넣지 않는다** — 스크립트 본문은 기록하지 않고 결과만 남긴다.
+  void logLine(const QString& text);
+  QString m_logPath;
   void runStage();
   void runScript(const QString& script, const std::function<void(const QString&)>& then,
                  bool requireForm = false);
@@ -79,7 +89,20 @@ private:
   QWebEnginePage* activePage() const;
 
   QWebEngineProfile* m_profile = nullptr;
+  class HeritageRequestLog* m_requestLog = nullptr;  // 사이트가 보낸 요청 기록
+  // 로그인만 브라우저로 하고, 검색·다운로드는 HTTP 로 직접 한다.
+  // 화면을 흉내 내지 않으므로 프레임·ajax 변화에 흔들리지 않는다.
+  HeritageHttpClient* m_http = nullptr;
+  QList<QNetworkCookie> m_cookies;
+  bool m_httpStarted = false;
+  bool m_listRequested = false;
+  bool m_listSent = false;
+  bool m_agreementRecorded = false;
+  // 브라우저가 받아 온 목록 HTML 에서 읽은 검색 폼.
+  HeritageForm m_form;
   QTabWidget* m_tabs = nullptr;
+  // 작업 화면(첫 탭). 내려받기용 탭은 준비 상태를 건드리지 않는다.
+  QWebEngineView* m_mainView = nullptr;
   QLabel* m_stageLabel = nullptr;
   QLabel* m_detailLabel = nullptr;
   QPlainTextEdit* m_outline = nullptr;
@@ -95,6 +118,9 @@ private:
   QString m_lastOutline;
   QString m_lastAlert;  // 사이트가 마지막으로 띄운 알림 글
   int m_waitTicks = 0;
+  // 단계가 바뀐 뒤 화면이 자리잡을 때까지 쉬는 횟수(폴링 1회 = 0.7초).
+  // 사이트가 ajax 로 폼을 다시 그리므로 바로 다음 동작을 하면 빈 값을 잡는다.
+  int m_settle = 0;
   // 받는 중인 파일 수. 0이 되고 조금 더 조용하면 그 종류를 마친 것으로 본다.
   int m_pendingDownloads = 0;
   int m_idleTicks = 0;

@@ -86,9 +86,10 @@ private slots:
   }
 
   void everyStepReportsNotFoundInsteadOfPretending() {
+    // openDownloadPageScript 는 찾는 단계가 아니라 **가는** 단계다.
+    // 도착 확인은 downloadPageProbeScript 가 따로 한다(아래 검사).
     const QStringList scripts = {
         HeritageIntranetFlow::dismissTutorialScript(),
-        HeritageIntranetFlow::openDownloadPageScript(),
         HeritageIntranetFlow::agreeTermsScript(),
         HeritageIntranetFlow::selectRegionScript(QStringLiteral("경상북도"), QStringLiteral("안동시")),
         HeritageIntranetFlow::searchScript(),
@@ -127,6 +128,167 @@ private slots:
     QVERIFY(!js.contains(QStringLiteral("emd")));
     QVERIFY(!js.contains(QStringLiteral("sels[2]")));
     QVERIFY(!js.contains(QStringLiteral("sels[3]")));
+  }
+
+  void downloadPageIsOpenedByItsRealUrlAndArrivalIsChecked() {
+    // 주소는 요청 기록에서 나온 그대로. 지어내지 않는다.
+    QCOMPARE(HeritageIntranetFlow::downloadPagePath(),
+             QStringLiteral("/user/data/heritageDownload.do?pageMenuId=DAT010010"));
+    QCOMPARE(HeritageIntranetFlow::downloadListPath(),
+             QStringLiteral("/user/data/heritageDownloadList.do"));
+
+    const QString open = HeritageIntranetFlow::openDownloadPageScript();
+    // 조각을 최상위로 직접 열면 jQuery·tabContentAjax 가 없는 반쪽 페이지가 된다.
+    // 사이트가 제 방식대로 삽입하게 둔다.
+    QVERIFY(!open.contains(QStringLiteral("form.submit")));
+    QVERIFY(!open.contains(QStringLiteral("window.top")));
+    QVERIFY(open.contains(QStringLiteral("showAgreePopup")));
+    QVERIFY(open.contains(QStringLiteral("tabContentAjax")));
+    QVERIFY(open.contains(QStringLiteral("not-found")));
+
+    // 목록은 사이트 자신의 전송 통로로 부른다.
+    const QString load = HeritageIntranetFlow::loadListScript(QStringLiteral("a=1"));
+    QVERIFY(load.contains(HeritageIntranetFlow::downloadListPath()));
+    QVERIFY(load.contains(QStringLiteral("host.tabContentAjax")));
+    QVERIFY(load.contains(QStringLiteral("no-fn")));
+
+    const QString probe = HeritageIntranetFlow::downloadPageProbeScript();
+    QVERIFY(probe.contains(QStringLiteral("'ready'")));
+    QVERIFY(probe.contains(QStringLiteral("'not-yet'")));
+  }
+
+
+  void searchSubmitsTheFormItselfNotOnlyASiteFunction() {
+    // 사이트 함수만 부르면 요청이 아예 안 나가는 화면이 있었다(20번 막힌 지점).
+    // 폼을 직접 제출하는 길이 반드시 있어야 한다.
+    const QString js = HeritageIntranetFlow::searchScript();
+    // 페이지를 옮기는 방식은 금지다. 사이트 함수를 그 창에서 부르고, 없으면 그렇다고 말한다.
+    QVERIFY(!js.contains(QStringLiteral("form.submit")));
+    QVERIFY(js.contains(QStringLiteral("searchGisChaRirList")));
+    QVERIFY(js.contains(QStringLiteral("not-found")));
+  }
+
+  void downloadLetsTheSiteBuildTheUrl() {
+    // 주소를 우리가 만들면 searchParams 인코딩이 어긋나 서버가 0바이트를 준다(2026-09-12 두 번).
+    // 사이트가 제 방식대로 만들게 두고, 우리는 지역이 비었는지만 막는다.
+    const QString js = HeritageIntranetFlow::downloadAllScript();
+    QVERIFY(js.contains(QStringLiteral("searchGisChaRirList")));
+    QVERIFY(js.contains(QStringLiteral("searchForm")));
+    QVERIFY(js.contains(QStringLiteral("no-region")));
+    QVERIFY(js.contains(QStringLiteral("bjdcd")));
+    // 우리가 주소를 조립하지 않는다.
+    QVERIFY(!js.contains(QStringLiteral("downloadFilesAll.do")));
+    QVERIFY(!js.contains(QStringLiteral("searchParams=")));
+  }
+
+
+  void downloadRunsInTheWindowThatOwnsTheForm() {
+    // 사이트의 다운로드 함수는 $("#searchForm")·$("#codedetaCd0")·$("#mode") 를 읽는다.
+    // 함수만 있는 다른 창에서 부르면 TypeError(reading 'value') 가 난다(2026-09-12 실제 발생).
+    const QString js = HeritageIntranetFlow::downloadAllScript();
+    QVERIFY(js.contains(QStringLiteral("searchForm")));
+    QVERIFY(js.contains(QStringLiteral("codedetaCd0")));
+    QVERIFY(js.contains(QStringLiteral("전체다운로드")));
+    // 함수를 먼저 부른다. 버튼 클릭을 먼저 하면 파일이 오지 않았다(17:33 성공 / 17:37 실패).
+    QVERIFY(js.indexOf(QStringLiteral("searchGisChaRirList")) <
+            js.indexOf(QStringLiteral("전체다운로드")));
+    QVERIFY(js.contains(QStringLiteral("not-found")));
+    QVERIFY(!js.contains(QStringLiteral("form.submit")));
+  }
+
+  void regionIsVerifiedAgainAfterPicking() {
+    // 탭을 바꾸면 폼이 ajax 로 다시 그려진다. 「골랐다」를 한 번 보고 믿으면
+    // 값이 빈 채로 전국을 받게 된다(2026-09-12 실제 발생).
+    const QString js = HeritageIntranetFlow::verifyRegionScript();
+    QVERIFY(js.contains(QStringLiteral("codedeta")));
+    QVERIFY(js.contains(QStringLiteral("codecdsg")));
+    QVERIFY(js.contains(QStringLiteral("empty")));
+    QVERIFY(js.contains(QStringLiteral("'ok:'")));
+    // 지도 패널은 폼이 아니다.
+    QVERIFY(js.contains(QStringLiteral("bjdcd")));
+  }
+
+  void searchIsScopedToTheDownloadFormNotTheMapPanel() {
+    // 왼쪽 지도 패널에도 「검색」이 있다. 그걸 누르면 조건이 안 걸린 채 전국이 검색된다.
+    // 그리고 「검색」 버튼은 select 상자 **바깥 옆**에 있어서, 범위를 너무 좁히면 못 찾는다.
+    // 사이트 JS 가 준 이름(#searchForm)을 쓰고, 없으면 codedeta 와 검색을 함께 품은 조상까지 올라간다.
+    const QString js = HeritageIntranetFlow::searchScript();
+    QVERIFY(js.contains(QStringLiteral("searchForm")));
+    QVERIFY(js.contains(QStringLiteral("codedeta")));
+    QVERIFY(js.contains(QStringLiteral("parentElement")));
+    QVERIFY(js.contains(QStringLiteral("not-found")));
+    QVERIFY(!js.contains(QStringLiteral("form.submit")));
+  }
+
+  void noScriptMayNavigateThePage() {
+    // 2026-09-12 하루에 같은 실수를 세 번 했다. 전부 「페이지를 옮겨서」 사이트를 깨뜨린 것이다.
+    //   ① 조각(heritageDownload.do)을 최상위로 POST → jQuery·tabContentAjax 없는 반쪽 페이지
+    //   ② form.submit() → 패널이 날아가고 지도+튜토리얼로 돌아감
+    //   ③ frameset 안쪽 주소로 이동 → 빈 top 프레임(하얀 화면)
+    // 이 사이트는 제 방식대로 굴러가게 두어야 한다. 우리는 읽고, 사이트 함수를 부르기만 한다.
+    const QStringList scripts = {
+        HeritageIntranetFlow::loginProbeScript(),
+        HeritageIntranetFlow::dismissTutorialScript(),
+        HeritageIntranetFlow::openDownloadPageScript(),
+        HeritageIntranetFlow::agreeTermsScript(),
+        HeritageIntranetFlow::selectDatasetScript(HeritageDataset::BuriedHeritageArea),
+        HeritageIntranetFlow::selectRegionScript(QStringLiteral("경상북도"), QStringLiteral("안동시")),
+        HeritageIntranetFlow::searchScript(),
+        HeritageIntranetFlow::downloadAllScript(),
+        HeritageIntranetFlow::loadListScript(QStringLiteral("a=1")),
+        HeritageIntranetFlow::tabContentHtmlScript(),
+        HeritageIntranetFlow::downloadPageProbeScript(),
+        HeritageIntranetFlow::pageOutlineScript(),
+    };
+    const QStringList banned = {
+        QStringLiteral("location.href="),  // ①③ 페이지 이동 (읽기는 허용, 대입만 금지)
+        QStringLiteral("location.replace"),
+        QStringLiteral("location.assign"),
+        QStringLiteral("form.submit"),     // ② 폼 제출로 화면 넘김
+        QStringLiteral("document.write"),
+        QStringLiteral("window.open"),
+    };
+    for (const QString& js : scripts) {
+      for (const QString& bad : banned) {
+        QVERIFY2(!js.contains(bad),
+                 qPrintable(QStringLiteral("금지된 페이지 이동(%1): %2").arg(bad, js.left(70))));
+      }
+    }
+  }
+
+  void termsMustBeAgreedBeforeAskingForTheList() {
+    // 서약서에 동의하지 않으면 사이트가 목록을 주지 않는다(2026-09-12 화면으로 확인).
+    // 동의 스크립트는 체크와 확인을 모두 해야 하고, 못 하면 그렇다고 말해야 한다.
+    const QString js = HeritageIntranetFlow::agreeTermsScript();
+    QVERIFY(js.contains(QStringLiteral("서약서에동의")));
+    QVERIFY(js.contains(QStringLiteral("'확인'")));
+    QVERIFY(js.contains(QStringLiteral("agreed")));
+    QVERIFY(js.contains(QStringLiteral("checked-no-confirm")));
+    QVERIFY(js.contains(QStringLiteral("not-found")));
+  }
+
+  void requestLogKeepsEndpointsButNeverLoginContent() {
+    // 기록의 목적: 검색·다운로드의 진짜 주소와 파라미터를 알아내는 것.
+    const QString dl = HeritageIntranetFlow::redactRequestLine(
+        QStringLiteral("POST"),
+        QUrl(QStringLiteral("https://intranet.gis-heritage.go.kr/ngis/gis/chaRirList.do?sido=50&sgg=50110")));
+    QVERIFY(dl.contains(QStringLiteral("chaRirList.do")));
+    QVERIFY(dl.contains(QStringLiteral("sgg=50110")));
+    QVERIFY(dl.startsWith(QStringLiteral("POST ")));
+
+    // 로그인 계열은 주소도 질의도 남기지 않는다. 비밀번호가 실려 간다.
+    const QStringList secret = {
+        QStringLiteral("https://intranet.gis-heritage.go.kr/j_spring_security_check"),
+        QStringLiteral("https://intranet.gis-heritage.go.kr/user/checkNet.do?x=1"),
+        QStringLiteral("https://intranet.gis-heritage.go.kr/user/loginProc.do?id=A0298"),
+    };
+    for (const QString& u : secret) {
+      const QString line = HeritageIntranetFlow::redactRequestLine(QStringLiteral("POST"), QUrl(u));
+      QVERIFY2(!line.contains(QStringLiteral("A0298")), qPrintable(line));
+      QVERIFY2(!line.contains(QStringLiteral("checkNet")), qPrintable(line));
+      QVERIFY2(!line.contains(QStringLiteral("security_check")), qPrintable(line));
+      QVERIFY2(line.contains(QStringLiteral("로그인 요청")), qPrintable(line));
+    }
   }
 
   void scriptsUseValidBackslashEscapes() {
@@ -192,18 +354,23 @@ private slots:
   }
 
   void searchAndDownloadStayOnTheCodedetaWindow() {
-    // 부모 메뉴의 searchGisChaRirList 는 지도 document 를 본다.
-    // fn() 이 그 함수를 집어 오면 codedeta 에서 고른 시·군이 검색에 안 실린다.
+    // 부모 메뉴의 searchGisChaRirList 는 다른 document 의 것이다.
+    // fn() 으로 아무 창의 함수나 잡으면 지도 쪽이 검색돼 조건이 안 걸린다.
     const QString search = HeritageIntranetFlow::searchScript();
     const QString down = HeritageIntranetFlow::downloadAllScript();
     QVERIFY(!search.contains(QStringLiteral("fn('searchGisChaRirList')")));
     QVERIFY(!down.contains(QStringLiteral("fn('searchGisChaRirList')")));
-    QVERIFY(search.contains(QStringLiteral("W.searchGisChaRirList")));
-    QVERIFY(down.contains(QStringLiteral("W.searchGisChaRirList")));
-    QVERIFY(search.contains(QStringLiteral("'검색'")));
+    // 함수가 있는 창에서 부른다. 부모 창 함수를 아무렇게나 잡지 않는다.
+    QVERIFY(search.contains(QStringLiteral("cands()")));
+    QVERIFY(search.contains(QStringLiteral("searchGisChaRirList")));
+    QVERIFY(down.contains(QStringLiteral("searchGisChaRirList")));
+    // 검색은 페이지를 옮기지 않는다. 사이트 자신의 함수를 그 함수가 있는 창에서 부른다.
+    QVERIFY(!search.contains(QStringLiteral("form.submit")));
+    QVERIFY(search.contains(QStringLiteral("cands()")));
     QVERIFY(!search.contains(QStringLiteral("new Function")));
     QVERIFY(!down.contains(QStringLiteral("new Function")));
   }
+
 
   void frameInventoryReadsIframeTagsWithoutEnteringThem() {
     const QString js = HeritageIntranetFlow::frameInventoryScript();
