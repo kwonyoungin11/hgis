@@ -8538,8 +8538,9 @@ void MainWindow::ensureHeritageBrowser() {
   // 한 종류를 받을 때마다 바로 지도에 올린다. 여섯 종을 다 기다리게 하지 않는다.
   connect(m_heritageBrowser, &KaHeritageBrowser::datasetReady, this,
           [this](HeritageDataset dataset, const QStringList& files) {
-            if (!importHeritageDataset(dataset, files))
-              m_heritageBrowser->rejectDataset(QStringLiteral("다운로드 후 파일 검사 또는 지도 적재에 실패했습니다. 다음 단계로 진행하지 않습니다."));
+            const auto result = importHeritageDataset(dataset, files);
+            if (!result.ok())
+              m_heritageBrowser->rejectDataset(result.error, result.retryableDownload);
           });
   connect(m_heritageBrowser, &KaHeritageBrowser::allFinished, this, [this]() {
     m_heritageBrowser->hide();
@@ -8597,8 +8598,12 @@ void MainWindow::openHeritageBrowserFor(const HeritageRegion& region) {
 }
 
 // 받은 파일을 그 자리에서 지도에 올린다. 색·범례는 HeritageStyle 이 건다.
-bool MainWindow::importHeritageDataset(HeritageDataset dataset, const QStringList& files) {
-  if (m_surveyPath.isEmpty()) return false;
+HeritageImport::Result MainWindow::importHeritageDataset(HeritageDataset dataset, const QStringList& files) {
+  if (m_surveyPath.isEmpty()) {
+    HeritageImport::Result result;
+    result.error = QStringLiteral("열린 조사가 없어 자료를 지도에 올리지 못했습니다.");
+    return result;
+  }
   // 푸는 자리도 로컬이다. OneDrive 동기화 폴더에서 풀면 파일이 잠기거나 0바이트로 보인다.
   const QString archiveRoot =
       QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))
@@ -8610,8 +8615,7 @@ bool MainWindow::importHeritageDataset(HeritageDataset dataset, const QStringLis
   for (const QString& message : result.messages)
     statusBar()->showMessage(message, 8000);
   if (!result.ok()) {
-    notify(Notice::Warning, QStringLiteral("주변유적 받기"), result.error);
-    return false;
+    return result;
   }
   LayerOps::applyLayerOrderToLabels(QgsProject::instance(), m_canvas);
   if (m_canvas) m_canvas->refresh();
@@ -8619,7 +8623,7 @@ bool MainWindow::importHeritageDataset(HeritageDataset dataset, const QStringLis
                                .arg(HeritageStyle::layerName(dataset))
                                .arg(result.featureCount),
                            8000);
-  return true;
+  return result;
 }
 
 // 서약서 동의 영수증. 언제 무엇에 동의했는지 남긴다.

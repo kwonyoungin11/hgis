@@ -12,6 +12,7 @@
 #include "core/LocationSearch.h"
 #include "core/AdminBoundaryService.h"
 #include "core/TrenchGridGenerator.h"
+#include "core/HeritageImport.h"
 class QListWidget;
 class QListWidgetItem;
 class QAction;
@@ -232,7 +233,7 @@ private slots:
   void fetchNearbyHeritage();
   void ensureHeritageBrowser();
   void openHeritageBrowserFor(const struct HeritageRegion& region);
-  bool importHeritageDataset(HeritageDataset dataset, const QStringList& files);
+  HeritageImport::Result importHeritageDataset(HeritageDataset dataset, const QStringList& files);
   void saveHeritageAgreementReceipt(const QDateTime& when, const QString& terms);
   void showSubToolsBasemap();
   void showSubToolsSubmit();

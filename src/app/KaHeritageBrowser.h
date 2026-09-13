@@ -48,7 +48,7 @@ public:
   void showWaiting(const QString& message);
   void start();
   void stop();
-  void rejectDataset(const QString& message);
+  void rejectDataset(const QString& message, bool retryableDownload = false);
 
   HeritageStage stage() const { return m_stage; }
   // 멈춘 자리에서 화면에 무엇이 있었는지. 선택자를 정하는 데 쓴다. 비밀번호는 들어가지 않는다.
@@ -66,6 +66,10 @@ signals:
   void agreementAccepted(const QDateTime& when, const QString& termsText);
 
 private:
+  friend class HeritageDownloadRetryTest;
+  void scheduleDownloadRetry(const QString& reason, bool responseOnly = false);
+  void reopenDownloadSession();
+  void closeDownloadPopups(bool includeFormPages);
   void setStage(HeritageStage stage, const QString& message);
   void fail(const QString& message);
   // 사이트가 보낸 요청을 조사폴더 receipts/ 에 남긴다. 남긴 경로를 돌려준다.
@@ -138,6 +142,12 @@ private:
   bool m_downloadRequestObserved = false;
   QList<QPointer<QWebEngineDownloadRequest>> m_downloadRequests;
   int m_idleTicks = 0;
+  QElapsedTimer m_downloadRetryWait;
+  QString m_downloadRetryReason;
+  bool m_responseOnlyRetry = false;
+  bool m_downloadPageNeedsRecovery = false;
+  int m_downloadRetryDelayMs = 0;
+  quint64 m_downloadRetryCount = 0;
   QStringList m_currentFiles;
   QString m_downloadMode;  // "all" = 결과 전체 한 번에, "selected" = 쪽마다
   int m_currentPage = 1;

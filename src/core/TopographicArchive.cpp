@@ -33,7 +33,11 @@ struct Work {
     if (cancel && cancel()) result.canceled = true;
     return result.canceled || !result.error.isEmpty();
   }
-  bool fail(const QString& message) { result.error = message; return false; }
+  bool fail(const QString& message, bool invalidArchive = false) {
+    result.error = message;
+    result.invalidArchive = invalidArchive;
+    return false;
+  }
 };
 bool safeRelative(const QString& name) {
   if (name.isEmpty() || name.size() > 2048 || name.contains(QChar::ReplacementCharacter)
@@ -98,7 +102,7 @@ bool extract(const QString& archive, const QString& payload, const QString& scra
   if (depth > work.limits.maxArchiveDepth) return work.fail(QStringLiteral("압축 자료의 중첩 깊이가 허용 범위를 넘었습니다."));
   const auto vsiRoot = QStringLiteral("/vsizip/{%1}").arg(QDir::fromNativeSeparators(archive));
   std::unique_ptr<VSIDIR, decltype(&VSICloseDir)> dir(VSIOpenDir(vsiRoot.toUtf8().constData(), -1, nullptr), VSICloseDir);
-  if (!dir) return work.fail(QStringLiteral("ZIP 자료를 열지 못했습니다. 다운로드 완료 여부를 확인하세요."));
+  if (!dir) return work.fail(QStringLiteral("ZIP 자료를 열지 못했습니다. 다운로드 완료 여부를 확인하세요."), true);
   bool found = false;
   while (const auto* entry = VSIGetNextDirEntry(dir.get())) {
     if (work.stopped()) return false;
@@ -116,13 +120,15 @@ bool extract(const QString& archive, const QString& payload, const QString& scra
     // into newly created regular files; link targets are never followed.
     if (entry->bModeKnown && !VSI_ISREG(entry->nMode))
       return work.fail(QStringLiteral("압축 자료에 지원하지 않는 링크 또는 특수 파일이 있습니다."));
-    if (!entry->bSizeKnown || entry->nSize > work.limits.maxFileBytes
+    if (!entry->bSizeKnown)
+      return work.fail(QStringLiteral("ZIP 안의 파일 크기를 확인하지 못했습니다."), true);
+    if (entry->nSize > work.limits.maxFileBytes
         || entry->nSize > work.limits.maxTotalBytes - work.total)
       return work.fail(QStringLiteral("압축 해제 크기가 허용 범위를 넘었습니다."));
     const quint64 expected = entry->nSize;
     const auto vsiPath = (vsiRoot + QLatin1Char('/') + name).toUtf8();
     std::unique_ptr<VSILFILE, decltype(&VSIFCloseL)> input(VSIFOpenL(vsiPath.constData(), "rb"), VSIFCloseL);
-    if (!input) return work.fail(QStringLiteral("ZIP 안의 파일을 읽지 못했습니다."));
+    if (!input) return work.fail(QStringLiteral("ZIP 안의 파일을 읽지 못했습니다."), true);
     const bool nested = name.endsWith(QStringLiteral(".zip"), Qt::CaseInsensitive);
     const auto target = nested ? QDir(scratch).filePath(QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral(".zip"))
                                : QDir(payload).filePath(relative);
@@ -137,7 +143,9 @@ bool extract(const QString& archive, const QString& payload, const QString& scra
       if (work.stopped()) return false;
       const size_t count = VSIFReadL(buffer.data(), 1, static_cast<size_t>(buffer.size()), input.get());
       if (count == 0) break;
-      if (count > expected - copied || count > work.limits.maxTotalBytes - work.total)
+      if (count > expected - copied)
+        return work.fail(QStringLiteral("ZIP 안의 파일 크기가 기록된 크기와 다릅니다."), true);
+      if (count > work.limits.maxTotalBytes - work.total)
         return work.fail(QStringLiteral("압축 자료의 실제 크기가 허용 범위를 넘었습니다."));
       copied += count; work.total += count;
       if (output.write(buffer.constData(), static_cast<qint64>(count)) != static_cast<qint64>(count))
@@ -145,8 +153,8 @@ bool extract(const QString& archive, const QString& payload, const QString& scra
       hash.addData(QByteArrayView(buffer.constData(), static_cast<qsizetype>(count)));
     }
     if (VSIFErrorL(input.get()) || copied != expected)
-      return work.fail(QStringLiteral("압축 자료가 손상되었거나 다운로드가 끝나지 않았습니다."));
-    if (VSIFCloseL(input.release()) != 0) return work.fail(QStringLiteral("ZIP 파일 읽기를 완료하지 못했습니다."));
+      return work.fail(QStringLiteral("압축 자료가 손상되었거나 다운로드가 끝나지 않았습니다."), true);
+    if (VSIFCloseL(input.release()) != 0) return work.fail(QStringLiteral("ZIP 파일 읽기를 완료하지 못했습니다."), true);
     if (!output.commit()) return work.fail(QStringLiteral("압축 자료 저장을 완료하지 못했습니다: %1").arg(output.errorString()));
     if (nested) {
       if (!extract(target, payload, scratch, relative + QStringLiteral(".contents/"), depth + 1, work)) return false;
@@ -156,7 +164,7 @@ bool extract(const QString& archive, const QString& payload, const QString& scra
                                       {QStringLiteral("sha256"), QString::fromLatin1(hash.result().toHex())}});
     }
   }
-  return found || work.fail(QStringLiteral("ZIP 자료에 읽을 수 있는 파일이 없습니다."));
+  return found || work.fail(QStringLiteral("ZIP 자료에 읽을 수 있는 파일이 없습니다."), true);
 }
 bool cached(const QString& directory, const QByteArray& sourceHash, Work& work) {
   const auto manifestPath = QDir(directory).filePath(QStringLiteral("manifest.json"));
@@ -242,9 +250,9 @@ TopographicArchive::Result TopographicArchive::prepare(
   }
   if (!extract(sourceInfo.absoluteFilePath(), payload, scratch, {}, 1, work)) return work.result;
   if (fileHash(sourceInfo.absoluteFilePath(), work) != digest && !work.stopped())
-    work.fail(QStringLiteral("준비 중 원본 자료가 변경되었습니다. 다시 시도하세요."));
+    work.fail(QStringLiteral("준비 중 원본 자료가 변경되었습니다. 다시 시도하세요."), true);
   if (work.stopped()) return work.result;
-  if (work.manifest.isEmpty()) { work.fail(QStringLiteral("ZIP 자료에 적재할 파일이 없습니다.")); return work.result; }
+  if (work.manifest.isEmpty()) { work.fail(QStringLiteral("ZIP 자료에 적재할 파일이 없습니다."), true); return work.result; }
   // Intermediate ZIPs are outside payload and are never discovered by the catalog.
   // Staging is exclusively owned here; remove it only after verifying this exact child.
   if (!noLinks(scratch) || !QDir(scratch).removeRecursively()) {

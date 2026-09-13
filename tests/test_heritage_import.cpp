@@ -1,8 +1,12 @@
 #include <QtTest>
 #include <QDir>
+#include <QFile>
 #include <QSet>
 #include <QFileInfo>
+#include <QScopeGuard>
 #include <QTemporaryDir>
+#include <cpl_conv.h>
+#include <optional>
 #include <qgsapplication.h>
 #include <qgscategorizedsymbolrenderer.h>
 #include <qgslayertree.h>
@@ -17,6 +21,27 @@
 #include "core/HeritageSiteLegend.h"
 #include "core/HeritageStyle.h"
 
+namespace {
+bool writeZip(const QString& path, const QList<QPair<QString, QByteArray>>& entries) {
+  void* archive = CPLCreateZip(path.toUtf8().constData(), nullptr);
+  if (!archive) return false;
+  bool ok = true;
+  for (const auto& entry : entries) {
+    if (CPLCreateFileInZip(archive, entry.first.toUtf8().constData(), nullptr) != CE_None) {
+      ok = false; break;
+    }
+    ok = CPLWriteFileInZip(archive, entry.second.constData(), static_cast<int>(entry.second.size())) == CE_None;
+    ok = CPLCloseFileInZip(archive) == CE_None && ok;
+    if (!ok) break;
+  }
+  return CPLCloseZip(archive) == CE_None && ok;
+}
+QByteArray readFile(const QString& path) {
+  QFile file(path);
+  return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+}
+}
+
 // 실제로 인트라넷에서 받은 ZIP 으로 **적재까지** 되는지 본다.
 // 사이트에 붙지 않고 확인할 수 있어야 한다 — 받는 쪽이 막혀도 올리는 쪽은 굳어 있어야 하기 때문이다.
 //
@@ -26,10 +51,106 @@ class HeritageImportTest : public QObject {
   Q_OBJECT
 
   static QString samplePath() {
-    return QStringLiteral("build/qa/heritage-sample/지정유산.zip");
+    return qEnvironmentVariable("KA_HERITAGE_SAMPLE_ZIP", "build/qa/heritage-sample/지정유산.zip");
   }
 
 private slots:
+  void receivedIncompleteZipRequestsRetry() {
+    const QString path = qEnvironmentVariable("KA_HERITAGE_INCOMPLETE_ZIP");
+    if (path.isEmpty()) QSKIP("Local received ZIP inspection is opt-in.");
+    QVERIFY(QFileInfo(path).isFile());
+    const QByteArray before = readFile(path);
+    QVERIFY(!before.isEmpty());
+    QTemporaryDir temp;
+    QgsProject project;
+    const auto result = HeritageImport::loadDataset(
+        &project, HeritageDataset::DesignatedHeritage, {path}, temp.path());
+    QVERIFY(!result.ok());
+    QVERIFY2(result.retryableDownload, qPrintable(result.error));
+    QVERIFY(project.mapLayers().isEmpty());
+    QCOMPARE(readFile(path), before);
+  }
+  void onlyIncompleteDownloadsRequestRetry_data() {
+    QTest::addColumn<QString>("fixture");
+    QTest::addColumn<bool>("retryable");
+    QTest::newRow("missing-central-directory") << QStringLiteral("truncated") << true;
+    QTest::newRow("zip-without-shp") << QStringLiteral("no-shp") << true;
+    QTest::newRow("zip-missing-shp-companions") << QStringLiteral("missing-pairs") << true;
+    QTest::newRow("raw-shp-missing-companions") << QStringLiteral("raw") << false;
+    QTest::newRow("library-is-a-file") << QStringLiteral("storage") << false;
+    QTest::newRow("provider-cannot-open-layer") << QStringLiteral("invalid-layer") << false;
+  }
+  void onlyIncompleteDownloadsRequestRetry() {
+    QFETCH(QString, fixture);
+    QFETCH(bool, retryable);
+    QTemporaryDir temp; QVERIFY(temp.isValid());
+    const auto source = temp.filePath(fixture == QLatin1String("raw")
+        ? QStringLiteral("source.shp") : QStringLiteral("source.zip"));
+    if (fixture == QLatin1String("raw")) {
+      QFile file(source); QVERIFY(file.open(QIODevice::WriteOnly));
+      QCOMPARE(file.write("incomplete shape"), qint64(16)); file.close();
+    } else {
+      QList<QPair<QString, QByteArray>> entries;
+      entries.append({fixture == QLatin1String("no-shp") ? QStringLiteral("notice.txt")
+                                                         : QStringLiteral("site.shp"), QByteArray("fixture")});
+      if (fixture == QLatin1String("invalid-layer")) {
+        for (const auto& suffix : {"shx", "dbf", "prj"})
+          entries.append({QStringLiteral("site.%1").arg(QString::fromLatin1(suffix)), QByteArray("invalid")});
+      }
+      QVERIFY(writeZip(source, entries));
+      if (fixture == QLatin1String("truncated")) {
+        auto bytes = readFile(source);
+        const auto central = bytes.indexOf(QByteArray::fromHex("504b0102")); QVERIFY(central >= 0);
+        bytes.truncate(central);
+        QFile file(source); QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write(bytes), bytes.size()); file.close();
+      }
+    }
+    const auto original = readFile(source);
+    const auto library = temp.filePath(QStringLiteral("library"));
+    if (fixture == QLatin1String("storage")) {
+      QFile blocker(library); QVERIFY(blocker.open(QIODevice::WriteOnly));
+      QCOMPARE(blocker.write("keep"), qint64(4)); blocker.close();
+    }
+    QgsProject project;
+    auto* existing = new QgsVectorLayer(QStringLiteral("Point?crs=EPSG:5179"),
+                                        QStringLiteral("existing"), QStringLiteral("memory"));
+    QVERIFY(existing->isValid()); project.addMapLayer(existing);
+    const auto result = HeritageImport::loadDataset(
+        &project, HeritageDataset::DesignatedHeritage, {source}, library);
+    QVERIFY(!result.ok()); QVERIFY(!result.error.isEmpty()); QVERIFY(result.layers.isEmpty());
+    QCOMPARE(result.retryableDownload, retryable);
+    QCOMPARE(project.mapLayers().size(), 1); QCOMPARE(project.mapLayer(existing->id()), existing);
+    QCOMPARE(readFile(source), original);
+    if (fixture == QLatin1String("storage")) QCOMPARE(readFile(library), QByteArray("keep"));
+  }
+  void zipEncodingRestoresThreadLocalSetting_data() {
+    QTest::addColumn<bool>("defined");
+    QTest::addColumn<QByteArray>("value");
+    QTest::newRow("unset") << false << QByteArray();
+    QTest::newRow("empty-value") << true << QByteArray("");
+    QTest::newRow("different-encoding") << true << QByteArray("UTF-8");
+  }
+  void zipEncodingRestoresThreadLocalSetting() {
+    QFETCH(bool, defined);
+    QFETCH(QByteArray, value);
+    const char* old = CPLGetThreadLocalConfigOption("CPL_ZIP_ENCODING", nullptr);
+    const auto saved = old ? std::optional<QByteArray>(old) : std::nullopt;
+    const auto restore = qScopeGuard([saved]() {
+      CPLSetThreadLocalConfigOption("CPL_ZIP_ENCODING", saved ? saved->constData() : nullptr);
+    });
+    CPLSetThreadLocalConfigOption("CPL_ZIP_ENCODING", defined ? value.constData() : nullptr);
+    QTemporaryDir temp; QVERIFY(temp.isValid());
+    const auto source = temp.filePath(QStringLiteral("empty-data.zip"));
+    QVERIFY(writeZip(source, {{QStringLiteral("notice.txt"), QByteArray("fixture")}}));
+    QgsProject project;
+    const auto result = HeritageImport::loadDataset(
+        &project, HeritageDataset::DesignatedHeritage, {source}, temp.filePath(QStringLiteral("library")));
+    QVERIFY(result.retryableDownload); QVERIFY(project.mapLayers().isEmpty());
+    const char* after = CPLGetThreadLocalConfigOption("CPL_ZIP_ENCODING", nullptr);
+    QCOMPARE(after != nullptr, defined);
+    if (defined) QCOMPARE(QByteArray(after), value);
+  }
   void realZipBecomesStyledReferenceLayers() {
     if (!QFileInfo::exists(samplePath()))
       QSKIP("표본 ZIP 이 없습니다(build/qa/heritage-sample/지정유산.zip).");
@@ -43,6 +164,7 @@ private slots:
 
     QVERIFY2(result.error.isEmpty(), qPrintable(result.error));
     QVERIFY2(!result.layers.isEmpty(), "레이어가 하나도 만들어지지 않았습니다.");
+    QVERIFY(!result.retryableDownload);
 
     // 한 ZIP 에 여러 SHP 가 들어온다. 이름은 파일 이름을 살려야 레이어창에서 구분된다.
     QStringList names;

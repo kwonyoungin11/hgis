@@ -282,7 +282,7 @@ KaHeritageBrowser::KaHeritageBrowser(QWidget* parent) : QDialog(parent) {
           &KaHeritageBrowser::handleDownload);
 }
 
-KaHeritageBrowser::~KaHeritageBrowser() { m_poll->stop(); }
+KaHeritageBrowser::~KaHeritageBrowser() { stop(); m_poll->stop(); }
 
 void KaHeritageBrowser::setDownloadRoot(const QString& directory) {
   m_downloadRoot = directory;
@@ -381,6 +381,8 @@ QString KaHeritageBrowser::saveRequestLog() {
 void KaHeritageBrowser::fail(const QString& message) {
   logLine(QStringLiteral("실패: %1").arg(message));
   m_running = false;
+  ++m_generation;
+  m_scriptInFlight = false;
   for (const auto& request : std::as_const(m_downloadRequests))
     if (request && !request->isFinished()) request->cancel();
   m_progress->setRange(0, 100);
@@ -411,8 +413,68 @@ void KaHeritageBrowser::stop() {
   setStage(HeritageStage::Idle, QStringLiteral("사용자가 중지했습니다."));
 }
 
-void KaHeritageBrowser::rejectDataset(const QString& message) {
-  if (m_running) fail(message);
+void KaHeritageBrowser::rejectDataset(const QString& message, bool retryableDownload) {
+  if (!m_running) return;
+  if (retryableDownload && m_stage == HeritageStage::Download)
+    scheduleDownloadRetry(message);
+  else
+    fail(message);
+}
+
+void KaHeritageBrowser::scheduleDownloadRetry(const QString& reason, bool responseOnly) {
+  if (!m_running || m_stage != HeritageStage::Download || !m_downloadRetryReason.isEmpty()) return;
+  m_downloadRetryReason = reason;
+  m_responseOnlyRetry = responseOnly;
+  ++m_downloadRetryCount;
+  constexpr int delays[] = {5000, 10000, 20000, 30000};
+  m_downloadRetryDelayMs = delays[qMin<quint64>(m_downloadRetryCount - 1, 3)];
+  m_downloadRetryWait.invalidate();
+  m_progress->setRange(0, 0);
+  m_detailLabel->setText(QStringLiteral("%1 · 정상 파일을 다시 받습니다 · 중지 가능").arg(reason));
+  logLine(QStringLiteral("재수신 예약 %1회: %2").arg(m_downloadRetryCount).arg(reason));
+}
+
+void KaHeritageBrowser::closeDownloadPopups(bool includeFormPages) {
+  for (int i = m_tabs->count() - 1; i >= 0; --i) {
+    auto* view = qobject_cast<QWebEngineView*>(m_tabs->widget(i));
+    if (!view || view == m_mainView) continue;
+    if (!includeFormPages && !view->property("heritageDownloadPopup").toBool()) continue;
+    m_tabs->removeTab(i);
+    view->deleteLater();
+  }
+}
+
+void KaHeritageBrowser::reopenDownloadSession() {
+  // 완료된 다른 자료와 현재 자료 번호는 유지한다. 실패한 문서/콜백은 재사용하지 않는다.
+  ++m_generation;
+  m_scriptInFlight = false;
+  m_downloadRequests.clear();
+  m_currentFiles.clear();
+  m_downloadMode.clear();
+  m_downloadRetryReason.clear();
+  m_responseOnlyRetry = false;
+  m_downloadPageNeedsRecovery = false;
+  m_downloadRetryWait.invalidate();
+  m_downloadNavigation = false;
+  m_downloadRequestObserved = false;
+  m_idleTicks = 0;
+  m_totalBeforeSearch = -1;
+  m_agreementSubmitted = false;
+  m_agreementRecorded = false;
+  m_openedFrameSrc = false;
+  m_frameChecked = false;
+  m_lastCppProbe.clear();
+  m_mainView = nullptr;
+  while (m_tabs->count() > 0) {
+    QWidget* old = m_tabs->widget(0);
+    m_tabs->removeTab(0);
+    old->deleteLater();
+  }
+  m_pageReady = false;
+  setStage(HeritageStage::Login,
+           QStringLiteral("공식 화면을 다시 열어 같은 지역·자료를 다시 받습니다."));
+  logLine(QStringLiteral("재수신: 공식 화면 재시작 · 현재 자료 %1 유지").arg(m_datasetIndex + 1));
+  addPage()->load(HeritageIntranetFlow::loginUrl());
 }
 
 void KaHeritageBrowser::showWaiting(const QString& message) {
@@ -425,6 +487,12 @@ void KaHeritageBrowser::start() {
   if (auto* details = findChild<QPushButton*>(QStringLiteral("heritageDetails"))) details->setChecked(false);
   resize(680, 170);
   m_downloadRequests.clear();
+  m_pendingDownloads = 0;
+  m_downloadRetryReason.clear();
+  m_responseOnlyRetry = false;
+  m_downloadPageNeedsRecovery = false;
+  m_downloadRetryWait.invalidate();
+  m_downloadRetryCount = 0;
   m_downloadNavigation = false;
   const auto account = HeritageIntranetSettings::credentials();
   if (account.username.trimmed().isEmpty() || account.password.isEmpty()) {
@@ -480,17 +548,20 @@ void KaHeritageBrowser::runOnPreferredDocument(const QString& script,
                                                const std::function<void(const QString&)>& then,
                                                bool manageFlight, bool requireForm) {
   const quint64 generation = m_generation;
+  const QPointer<KaHeritageBrowser> alive(this);
   const QVector<QWebEnginePage*> pages = allPages(m_tabs);
 
-  auto finishEmpty = [this, then, manageFlight]() {
+  auto finishEmpty = [this, alive, generation, then, manageFlight]() {
+    if (!alive || generation != m_generation) return;
     if (manageFlight) m_scriptInFlight = false;
     if (then) then(QStringLiteral("not-found"));
   };
 
-  auto invoke = [this, generation, script, then, manageFlight](QWebEngineFrame frame) {
-    auto done = [this, generation, then, manageFlight](const QVariant& value) {
+  auto invoke = [this, alive, generation, script, then, manageFlight](QWebEngineFrame frame) {
+    if (!alive || generation != m_generation) return;
+    auto done = [this, alive, generation, then, manageFlight](const QVariant& value) {
+      if (!alive || generation != m_generation) return;
       if (manageFlight) m_scriptInFlight = false;
-      if (generation != m_generation) return;
       const QString result = value.toString();
       // 스크립트 **본문은 남기지 않는다**(로그인 스크립트에 비밀번호가 들어 있다). 결과만 남긴다.
       if (!result.isEmpty() && result.size() < 400)
@@ -515,9 +586,10 @@ void KaHeritageBrowser::runOnPreferredDocument(const QString& script,
     page->runJavaScript(script, done);
   };
 
-  auto hintFrames = [this, generation, invoke, finishEmpty, manageFlight, requireForm,
+  auto hintFrames = [this, alive, generation, invoke, finishEmpty, manageFlight, requireForm,
                      then](QVector<QWebEngineFrame> frames, int jsFrames, QWebEnginePage* srcPage,
                            const QJsonArray& srcList) {
+    if (!alive || generation != m_generation) return;
     QVector<QWebEngineFrame> valid;
     for (const QWebEngineFrame& frame : frames) {
       if (frame.isValid()) valid.push_back(frame);
@@ -539,13 +611,10 @@ void KaHeritageBrowser::runOnPreferredDocument(const QString& script,
       QWebEngineFrame copy = valid.at(i);
       copy.runJavaScript(
           HeritageIntranetFlow::formHintScript(),
-          [this, generation, pending, form, bestAt, copy, invoke, finishEmpty,
+          [this, alive, generation, pending, form, bestAt, copy, invoke, finishEmpty,
            manageFlight, requireForm, then, i, n, jsFrames, srcPage, srcList,
            probe](const QVariant& value) {
-            if (generation != m_generation) {
-              if (--(*pending) == 0 && manageFlight) m_scriptInFlight = false;
-              return;
-            }
+            if (!alive || generation != m_generation) return;
             const QString hint = value.toString();
             QJsonObject row;
             row.insert(QStringLiteral("url"), copy.url().toString());
@@ -591,6 +660,7 @@ void KaHeritageBrowser::runOnPreferredDocument(const QString& script,
   auto srcPage = std::make_shared<QPointer<QWebEnginePage>>(pages.last());
   auto srcList = std::make_shared<QJsonArray>();
   for (QWebEnginePage* page : pages) {
+    const QPointer<QWebEnginePage> guardedPage(page);
     QWebEngineFrame main = page->mainFrame();
     if (!main.isValid()) {
       if (--(*pending) == 0) hintFrames(*frames, *jsMax, srcPage->data(), *srcList);
@@ -598,19 +668,20 @@ void KaHeritageBrowser::runOnPreferredDocument(const QString& script,
     }
     main.runJavaScript(
         HeritageIntranetFlow::frameInventoryScript(),
-        [this, generation, pending, frames, jsMax, srcPage, srcList, page, hintFrames,
+        [this, alive, generation, pending, frames, jsMax, srcPage, srcList, guardedPage, hintFrames,
          manageFlight](const QVariant& value) {
-          if (generation != m_generation) {
-            if (--(*pending) == 0 && manageFlight) m_scriptInFlight = false;
+          if (!alive || generation != m_generation) return;
+          if (!guardedPage) {
+            if (--(*pending) == 0) hintFrames(*frames, *jsMax, srcPage->data(), *srcList);
             return;
           }
           const QJsonObject info = QJsonDocument::fromJson(value.toString().toUtf8()).object();
           *jsMax = qMax(*jsMax, info.value(QStringLiteral("jsFrames")).toInt());
           const QJsonArray list = info.value(QStringLiteral("list")).toArray();
-          mergeNamedFrames(page, list, frames.get());
+          mergeNamedFrames(guardedPage.data(), list, frames.get());
           if (list.size() > srcList->size()) {
             *srcList = list;
-            *srcPage = page;
+            *srcPage = guardedPage;
           }
           if (--(*pending) == 0) hintFrames(*frames, *jsMax, srcPage->data(), *srcList);
         });
@@ -668,6 +739,20 @@ HeritageStage KaHeritageBrowser::nextStage(HeritageStage stage) const {
 
 void KaHeritageBrowser::runStage() {
   if (!m_running) return;
+  if (m_stage == HeritageStage::Download && !m_downloadRetryReason.isEmpty()) {
+    // 다른 전송이 남아 있으면 끝까지 기다린 뒤 현재 종류를 새 요청으로 다시 받는다.
+    if (m_pendingDownloads > 0 || m_scriptInFlight) return;
+    if (!m_downloadRetryWait.isValid()) m_downloadRetryWait.start();
+    const qint64 remaining = m_downloadRetryDelayMs - m_downloadRetryWait.elapsed();
+    if (remaining > 0) {
+      m_detailLabel->setText(QStringLiteral("%1 — %2초 후 공식 화면에서 다시 받기 (%3회) · 중지 가능")
+          .arg(HeritageStyle::layerName(m_datasets.at(m_datasetIndex)))
+          .arg((remaining + 999) / 1000).arg(m_downloadRetryCount));
+      return;
+    }
+    reopenDownloadSession();
+    return;
+  }
   // ZIP 생성 대기는 화면 탐색 제한이나 수신 후의 짧은 안정화 대기와 다르다.
   // 요청은 한 번만 보내고 Chromium의 실제 파일 수신 신호를 기다린다.
   if (m_stage == HeritageStage::Download && !m_downloadMode.isEmpty()) {
@@ -697,7 +782,9 @@ void KaHeritageBrowser::runStage() {
   if (m_scriptInFlight) return;
   // 로그인 리다이렉트 뒤 지도/타일 로딩이 남아도 인증된 DOM은 먼저 준비될 수 있다.
   // 이 두 단계는 실제 로그인 폼/로그아웃 표시를 확인하며 전체 loadFinished를 기다리지 않는다.
-  if (!m_pageReady && m_stage != HeritageStage::Login &&
+  const bool receivedFilesReady = m_stage == HeritageStage::Download &&
+      !m_downloadMode.isEmpty() && m_pendingDownloads == 0 && !m_currentFiles.isEmpty();
+  if (!m_pageReady && !receivedFilesReady && m_stage != HeritageStage::Login &&
       m_stage != HeritageStage::DismissTutorial) return;
   if (m_settle > 0) {
     --m_settle;
@@ -1005,15 +1092,14 @@ void KaHeritageBrowser::runStage() {
         for (const QString& path : std::as_const(m_currentFiles)) {
           const QFileInfo info(path);
           if (!info.exists() || info.size() <= 0) {
-            logLine(QStringLiteral("빈 파일이라 버립니다: %1").arg(path));
-            QFile::remove(path);
-            continue;
+            scheduleDownloadRetry(QStringLiteral("저장된 파일이 없거나 비어 있습니다."));
+            return;
           }
           good << path;
           totalBytes += info.size();
         }
         if (good.isEmpty()) {
-          fail(QStringLiteral("「%1」에서 받은 파일이 모두 비어 있습니다.")
+          scheduleDownloadRetry(QStringLiteral("「%1」에서 받은 파일이 모두 비어 있습니다.")
                    .arg(HeritageStyle::layerName(m_datasets.at(m_datasetIndex))));
           return;
         }
@@ -1025,9 +1111,10 @@ void KaHeritageBrowser::runStage() {
 
         // 이 종류는 끝났다. 지도에 올리게 넘기고 다음 종류로 간다.
         m_progress->setRange(0, 0);
-        m_detailLabel->setText(QStringLiteral("다운로드 완료 확인 · 파일 검사 및 지도 적재 중"));
+        m_detailLabel->setText(QStringLiteral("전송 종료 · ZIP 전체 읽기 및 지도 적재 확인 중"));
         emit datasetReady(m_datasets.at(m_datasetIndex), m_currentFiles);
-        if (!m_running || m_stage == HeritageStage::Failed) return;
+        if (!m_running || m_stage == HeritageStage::Failed || !m_downloadRetryReason.isEmpty()) return;
+        for (const QString& path : std::as_const(m_currentFiles)) emit fileDownloaded(path);
         advanceDataset();
         return;
       }
@@ -1086,12 +1173,21 @@ void KaHeritageBrowser::readDatasetBaseline() {
 }
 
 void KaHeritageBrowser::advanceDataset() {
+  closeDownloadPopups(true);
+  m_downloadRetryCount = 0;
+  m_downloadRetryReason.clear();
+  m_responseOnlyRetry = false;
+  m_downloadRetryWait.invalidate();
   ++m_datasetIndex;
   if (m_datasetIndex >= m_datasets.size()) {
     setStage(HeritageStage::Done, QStringLiteral("자료 %1종 처리를 마쳤습니다. 자료가 있는 종류는 다운로드와 지도 적재를 완료했습니다.").arg(m_datasets.size()));
     m_running = false;
     m_poll->stop();
     emit allFinished();
+    return;
+  }
+  if (m_downloadPageNeedsRecovery) {
+    reopenDownloadSession();
     return;
   }
   m_totalBeforeSearch = -1;
@@ -1101,6 +1197,10 @@ void KaHeritageBrowser::advanceDataset() {
 
 void KaHeritageBrowser::handleDownload(QWebEngineDownloadRequest* request) {
   if (!request || request->state() != QWebEngineDownloadRequest::DownloadRequested) return;
+  if (request->page() && !allPages(m_tabs).contains(request->page())) {
+    request->cancel();  // 닫은 이전 시도의 지연 응답을 새 자료에 섞지 않는다.
+    return;
+  }
   if (!m_running || m_stage != HeritageStage::Download) {
     request->cancel();
     return;
@@ -1118,6 +1218,14 @@ void KaHeritageBrowser::handleDownload(QWebEngineDownloadRequest* request) {
     return;
   }
   const QString name = safeName(request->suggestedFileName());
+  // 팝업 HTML/오류 신호보다 파일 전환 알림이 늦게 올 수 있다.
+  // 실제 파일이 도착하면 화면 응답만으로 예약했던 재시도는 철회한다.
+  if (m_responseOnlyRetry) {
+    m_downloadRetryReason.clear();
+    m_downloadRetryWait.invalidate();
+    m_responseOnlyRetry = false;
+    logLine(QStringLiteral("실제 파일 수신 시작 · 화면 응답 재시도 예약 해제"));
+  }
   request->setDownloadDirectory(directory);
   request->setDownloadFileName(name);
   ++m_pendingDownloads;
@@ -1128,7 +1236,7 @@ void KaHeritageBrowser::handleDownload(QWebEngineDownloadRequest* request) {
   const quint64 generation = m_generation;
   m_downloadRequests.append(request);
   const auto showProgress = [this, request, generation, name]() {
-    if (!m_running || generation != m_generation) return;
+    if (!m_running || generation != m_generation || request->isFinished()) return;
     const qint64 received = request->receivedBytes();
     const qint64 total = request->totalBytes();
     if (total > 0) {
@@ -1148,38 +1256,57 @@ void KaHeritageBrowser::handleDownload(QWebEngineDownloadRequest* request) {
   connect(request, &QWebEngineDownloadRequest::isFinishedChanged, this, [this, request, generation]() {
     if (!m_running || generation != m_generation) return;
     if (!request->isFinished()) return;
+    if (!m_downloadRequests.removeOne(QPointer<QWebEngineDownloadRequest>(request))) return;
     if (m_pendingDownloads > 0) --m_pendingDownloads;
     if (request->state() != QWebEngineDownloadRequest::DownloadCompleted) {
-      fail(QStringLiteral("파일을 끝까지 받지 못했습니다: %1")
-               .arg(request->interruptReasonString()));
+      const QString reason = QStringLiteral("파일을 끝까지 받지 못했습니다: %1")
+                                 .arg(request->interruptReasonString());
+      switch (request->interruptReason()) {
+        case QWebEngineDownloadRequest::FileTooShort:
+        case QWebEngineDownloadRequest::NetworkFailed:
+        case QWebEngineDownloadRequest::NetworkTimeout:
+        case QWebEngineDownloadRequest::NetworkDisconnected:
+        case QWebEngineDownloadRequest::NetworkServerDown:
+        case QWebEngineDownloadRequest::ServerFailed:
+        case QWebEngineDownloadRequest::ServerBadContent:
+        case QWebEngineDownloadRequest::ServerUnreachable:
+          scheduleDownloadRetry(reason);
+          break;
+        default:
+          fail(reason);
+          break;
+      }
       return;
     }
     const QString path =
         QDir(request->downloadDirectory()).filePath(request->downloadFileName());
     const QFileInfo saved(path);
+    logLine(QStringLiteral("전송 종료: %1 · 상태 %2 · 예상 %3 · 수신 %4 · 저장 %5 바이트")
+        .arg(request->downloadFileName()).arg(static_cast<int>(request->state()))
+        .arg(request->totalBytes()).arg(request->receivedBytes()).arg(saved.size()));
     if (!saved.isFile() || saved.size() <= 0) {
-      fail(QStringLiteral("다운로드 완료 신호를 받았지만 저장된 파일이 없거나 비어 있습니다."));
+      scheduleDownloadRetry(QStringLiteral("다운로드 완료 신호를 받았지만 저장된 파일이 없거나 비어 있습니다."));
+      return;
+    }
+    if (saved.size() != request->receivedBytes() ||
+        (request->totalBytes() > 0 && saved.size() != request->totalBytes())) {
+      scheduleDownloadRetry(QStringLiteral("예상·수신·저장 파일 크기가 일치하지 않습니다."));
       return;
     }
     m_currentFiles << path;
     logLine(QStringLiteral("받음: %1").arg(path));
-    // 사이트가 내려받기용으로 연 팝업 탭은 곧 닫는다. 창을 하나로 유지한다.
-    for (int i = m_tabs->count() - 1; i >= 0; --i) {
-      auto* view = qobject_cast<QWebEngineView*>(m_tabs->widget(i));
-      if (!view || view == m_mainView) continue;
-      m_tabs->removeTab(i);
-      view->deleteLater();
-    }
+    // 재수신 여부는 ZIP/SHP 검사 결과로 결정하므로 그때까지 검색 폼을 보존한다.
     m_idleTicks = 0;
     m_detailLabel->setText(QStringLiteral("받은 파일 %1개").arg(m_currentFiles.size()));
-    emit fileDownloaded(path);
   });
   request->accept();
 }
 
 QWebEngineView* KaHeritageBrowser::addPage(QWebEnginePage* opener) {
   Q_UNUSED(opener);
+  const quint64 generation = m_generation;
   auto* view = new QWebEngineView(m_tabs);
+  view->setProperty("heritageDownloadPopup", m_running && m_stage == HeritageStage::Download);
   auto* page = new HeritagePage(
       m_profile, view, [this](QWebEnginePage*) { return addPage(); },
       [this](const QString& message) {
@@ -1197,7 +1324,8 @@ QWebEngineView* KaHeritageBrowser::addPage(QWebEnginePage* opener) {
   // 그래서 **작업 화면(첫 탭)만** 준비 상태를 관리한다.
   const bool isMain = (m_mainView == nullptr);
   if (isMain) m_mainView = view;
-  connect(view, &QWebEngineView::loadStarted, this, [this, view]() {
+  connect(view, &QWebEngineView::loadStarted, this, [this, view, generation]() {
+    if (generation != m_generation || m_tabs->indexOf(view) < 0) return;
     if (view != m_mainView) return;
     if (m_downloadNavigation) {
       m_downloadNavigation = false;
@@ -1208,7 +1336,8 @@ QWebEngineView* KaHeritageBrowser::addPage(QWebEnginePage* opener) {
     logLine(QStringLiteral("작업 화면 로딩 시작"));
     m_frameChecked = false;  // 새 화면이면 프레임을 다시 본다
   });
-  connect(view, &QWebEngineView::loadFinished, this, [this, view](bool ok) {
+  connect(view, &QWebEngineView::loadFinished, this, [this, view, generation](bool ok) {
+    if (generation != m_generation || m_tabs->indexOf(view) < 0) return;
     if (view == m_mainView)
       logLine(QStringLiteral("작업 화면 로딩 종료: %1").arg(ok ? QStringLiteral("성공") : QStringLiteral("중단/실패")));
     if (!ok || view != m_mainView) return;
@@ -1218,19 +1347,66 @@ QWebEngineView* KaHeritageBrowser::addPage(QWebEnginePage* opener) {
     m_tabs->setCurrentWidget(view);
   });
   connect(page, &QWebEnginePage::loadingChanged, this,
-          [this, view](const QWebEngineLoadingInfo& info) {
-    if (view != m_mainView || !m_running || info.isDownload()) return;
-    if (m_stage == HeritageStage::Download && !m_downloadMode.isEmpty() &&
-        m_pendingDownloads == 0 && m_currentFiles.isEmpty() &&
-        info.status() == QWebEngineLoadingInfo::LoadSucceededStatus) {
-      fail(QStringLiteral("파일 대신 웹페이지 응답이 돌아왔습니다. 다운로드가 시작되지 않았습니다."));
+          [this, view, generation](const QWebEngineLoadingInfo& info) {
+    if (!m_running || generation != m_generation || m_tabs->indexOf(view) < 0) return;
+    const bool downloadStage = m_stage == HeritageStage::Download && !m_downloadMode.isEmpty();
+    const bool downloadUrl = info.url().host() == HeritageIntranetFlow::portalUrl().host() &&
+        info.url().path() == HeritageIntranetFlow::downloadFilesAllPath();
+    if (downloadStage && downloadUrl) view->setProperty("heritageFileResponse", true);
+    const bool fileResponse = downloadStage && view->property("heritageFileResponse").toBool();
+    if (fileResponse) {
+      // 응답 본문/쿠키/위치 헤더는 기록하지 않는다. 실제 전송 관련 헤더만 보존한다.
+      QStringList headers;
+      const auto responseHeaders = info.responseHeaders();
+      for (auto it = responseHeaders.cbegin(); it != responseHeaders.cend(); ++it) {
+        const QByteArray name = it.key().toLower();
+        if (name != "content-length" && name != "content-type" &&
+            name != "content-encoding" && name != "transfer-encoding") continue;
+        const QString value = QString::fromLatin1(it.value()).replace(QLatin1Char('\r'), QLatin1Char(' '))
+            .replace(QLatin1Char('\n'), QLatin1Char(' ')).left(120);
+        headers << QStringLiteral("%1=%2").arg(QString::fromLatin1(name), value);
+      }
+      logLine(QStringLiteral("파일 응답: 상태 %1 · 다운로드 %2 · 오류영역 %3 · 코드 %4 · %5")
+          .arg(static_cast<int>(info.status())).arg(info.isDownload())
+          .arg(static_cast<int>(info.errorDomain())).arg(info.errorCode())
+          .arg(headers.isEmpty() ? QStringLiteral("전송 헤더 없음") : headers.join(QStringLiteral("; "))));
+    }
+    if (info.isDownload()) return;
+    if (downloadStage) {
+      // 화면 오류가 Chromium의 별도 파일 전송까지 취소하지 않게 한다.
+      // 실제 전송/저장 파일이 있으면 그 완료 및 ZIP 검사 결과를 우선한다.
+      const bool mainFailed = view == m_mainView &&
+          info.status() == QWebEngineLoadingInfo::LoadFailedStatus && info.errorCode() != -3;
+      if (mainFailed) m_downloadPageNeedsRecovery = true;
+      if (m_pendingDownloads > 0 || !m_currentFiles.isEmpty()) return;
+      if (fileResponse && info.status() == QWebEngineLoadingInfo::LoadSucceededStatus &&
+          !info.url().isEmpty() && info.url().scheme() != QLatin1String("about")) {
+        scheduleDownloadRetry(QStringLiteral("파일 대신 웹페이지가 돌아왔습니다. 공식 화면에서 다시 받습니다."), true);
+      } else if (fileResponse && info.status() == QWebEngineLoadingInfo::LoadFailedStatus &&
+                 info.errorCode() != -3) {
+        scheduleDownloadRetry(QStringLiteral("파일 응답 오류 %1. 공식 화면에서 다시 받습니다.").arg(info.errorCode()), true);
+      } else if (mainFailed) {
+        logLine(QStringLiteral("작업 화면 오류 %1 · 진행 중 파일 응답은 취소하지 않습니다.").arg(info.errorCode()));
+        // 다운로드 팝업이 응답 중이면 계속 기다린다. 그 창도 없는 경우에만 복구한다.
+        bool responsePending = false;
+        for (int i = 0; i < m_tabs->count(); ++i) {
+          const auto* candidate = m_tabs->widget(i);
+          if (candidate != view && candidate->property("heritageFileResponse").toBool())
+            responsePending = true;
+        }
+        if (!responsePending)
+          scheduleDownloadRetry(QStringLiteral("작업 화면 연결 오류. 공식 화면에서 다시 받습니다."), true);
+      }
       return;
     }
+    if (view != m_mainView) return;
     if (info.status() != QWebEngineLoadingInfo::LoadFailedStatus || info.errorCode() == -3) return;
     fail(QStringLiteral("국가유산 사이트 화면을 불러오지 못했습니다. 오류 코드 %1 · %2")
              .arg(info.errorCode()).arg(info.url().path()));
   });
-  connect(page, &QWebEnginePage::windowCloseRequested, this, [this, view]() {
+  connect(page, &QWebEnginePage::windowCloseRequested, this, [this, view, generation]() {
+    if (generation != m_generation || m_tabs->indexOf(view) < 0) return;
+    if (m_running && m_stage == HeritageStage::Download) return;
     const int at = m_tabs->indexOf(view);
     if (at >= 0) {
       m_tabs->removeTab(at);
@@ -1238,7 +1414,16 @@ QWebEngineView* KaHeritageBrowser::addPage(QWebEnginePage* opener) {
     }
   });
   connect(view, &QWebEngineView::renderProcessTerminated, this,
-          [this](QWebEnginePage::RenderProcessTerminationStatus, int) {
+          [this, view, generation](QWebEnginePage::RenderProcessTerminationStatus status, int code) {
+            if (!m_running || generation != m_generation || m_tabs->indexOf(view) < 0) return;
+            if (m_stage == HeritageStage::Download) {
+              m_downloadPageNeedsRecovery = true;
+              logLine(QStringLiteral("사이트 화면 종료: 상태 %1 · 코드 %2 · 진행 중 파일 전송은 보존합니다.")
+                  .arg(static_cast<int>(status)).arg(code));
+              if (m_pendingDownloads == 0 && m_currentFiles.isEmpty())
+                scheduleDownloadRetry(QStringLiteral("파일 응답 화면이 종료되었습니다. 공식 화면에서 다시 받습니다."), true);
+              return;
+            }
             fail(QStringLiteral("인트라넷 연결이 끊겼습니다. 다시 눌러 주세요."));
           });
   return view;

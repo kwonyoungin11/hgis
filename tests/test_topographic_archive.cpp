@@ -41,6 +41,7 @@ private slots:
     const auto library = temp.filePath(QStringLiteral("library"));
     const auto first = TopographicArchive::prepare(outer, library);
     QVERIFY2(first.error.isEmpty(), qPrintable(first.error)); QVERIFY(!first.canceled);
+    QVERIFY(!first.invalidArchive);
     QVERIFY(!first.reused); QCOMPARE(first.files.size(), 2);
     QVERIFY(QFileInfo::exists(first.directory));
     bool found = false;
@@ -50,6 +51,7 @@ private slots:
     QVERIFY(found); QCOMPARE(contents(outer), original);
     const auto again = TopographicArchive::prepare(outer, library);
     QVERIFY2(again.error.isEmpty(), qPrintable(again.error)); QVERIFY(again.reused);
+    QVERIFY(!again.invalidArchive);
     QCOMPARE(again.directory, first.directory); QCOMPARE(again.files, first.files);
     QFile corrupted(first.files.first()); QVERIFY(corrupted.open(QIODevice::WriteOnly));
     QVERIFY(corrupted.write("corrupted") > 0); corrupted.close();
@@ -61,17 +63,26 @@ private slots:
   }
   void rejectsUnsafePaths_data() {
     QTest::addColumn<QString>("name");
+    QTest::addColumn<bool>("invalidArchive");
+    // GDAL omits these entries (or exposes only their parent directory). The
+    // archive has no readable payload, so it follows the invalid-ZIP contract.
     for (const auto& name : {"../escape.dxf", "safe/../../escape.dxf", "/escape.dxf",
-                            "C:/escape.dxf", "safe\\..\\escape.dxf", "NUL.dxf",
+                            "safe\\..\\escape.dxf"})
+      QTest::newRow(name) << QString::fromLatin1(name) << true;
+    // These names reach our path policy and are rejected without requesting
+    // another download. Both groups must still leave no extracted output.
+    for (const auto& name : {"C:/escape.dxf", "NUL.dxf",
                             "safe/CON/file.dxf", "safe/file.dxf:stream", "safe./file.dxf"})
-      QTest::newRow(name) << QString::fromLatin1(name);
+      QTest::newRow(name) << QString::fromLatin1(name) << false;
   }
   void rejectsUnsafePaths() {
     QFETCH(QString, name);
+    QFETCH(bool, invalidArchive);
     QTemporaryDir temp; const auto source = temp.filePath(QStringLiteral("unsafe.zip"));
     QVERIFY(zip(source, {{name, QByteArray("data")}}));
     const auto result = TopographicArchive::prepare(source, temp.filePath(QStringLiteral("library")));
     QVERIFY(!result.error.isEmpty()); QVERIFY(result.directory.isEmpty()); QVERIFY(result.files.isEmpty());
+    QCOMPARE(result.invalidArchive, invalidArchive);
     QVERIFY(!QFileInfo::exists(temp.filePath(QStringLiteral("escape.dxf"))));
   }
   void rejectsResourceLimitsAndCancellation() {
@@ -81,7 +92,8 @@ private slots:
                          {QStringLiteral("b.dxf"), QByteArray(32768, 'b')}}));
     const auto library = temp.filePath(QStringLiteral("library"));
     TopographicArchive::Limits limits; limits.maxFileBytes = 100;
-    QVERIFY(!TopographicArchive::prepare(source, library, limits).error.isEmpty());
+    const auto limited = TopographicArchive::prepare(source, library, limits);
+    QVERIFY(!limited.error.isEmpty()); QVERIFY(!limited.invalidArchive);
     limits = {}; limits.maxTotalBytes = 40000;
     QVERIFY(!TopographicArchive::prepare(source, library, limits).error.isEmpty());
     limits = {}; limits.maxEntries = 1;
@@ -89,6 +101,7 @@ private slots:
     int checks = 0;
     const auto canceled = TopographicArchive::prepare(source, library, {}, [&] { return ++checks > 3; });
     QVERIFY(canceled.canceled); QVERIFY(canceled.directory.isEmpty()); QVERIFY(canceled.files.isEmpty());
+    QVERIFY(!canceled.invalidArchive);
     const auto retry = TopographicArchive::prepare(source, library);
     QVERIFY2(retry.error.isEmpty(), qPrintable(retry.error));
     const auto lateCancel = TopographicArchive::prepare(source, library, {}, [] { return true; });
@@ -101,6 +114,62 @@ private slots:
     QVERIFY2(result.error.isEmpty(), qPrintable(result.error)); QCOMPARE(result.files, QStringList{source});
     QCOMPARE(contents(source), QByteArray("test"));
     QVERIFY(!TopographicArchive::prepare(temp.filePath(QStringLiteral("absent.zip")), temp.path()).error.isEmpty());
+  }
+  void damagedArchiveCanBeDownloadedAgain_data() {
+    QTest::addColumn<QString>("damage");
+    QTest::newRow("missing-central-directory") << QStringLiteral("central");
+    QTest::newRow("deflate-crc-mismatch") << QStringLiteral("crc");
+    QTest::newRow("truncated-deflate-stream") << QStringLiteral("deflate");
+    QTest::newRow("empty-archive") << QStringLiteral("empty");
+  }
+  void damagedArchiveCanBeDownloadedAgain() {
+    QFETCH(QString, damage);
+    QTemporaryDir temp; QVERIFY(temp.isValid());
+    const auto source = temp.filePath(QStringLiteral("damaged.zip"));
+    QByteArray payload;
+    for (int i = 0; i < 74000; ++i) payload.append(static_cast<char>(i % 251));
+    QVERIFY(zip(source, {{QStringLiteral("map.dxf"), payload}}));
+    auto bytes = contents(source);
+    const auto local = bytes.indexOf(QByteArray::fromHex("504b0304")); QVERIFY(local >= 0);
+    const auto central = bytes.indexOf(QByteArray::fromHex("504b0102")); QVERIFY(central > local);
+    const auto end = bytes.indexOf(QByteArray::fromHex("504b0506")); QVERIFY(end > central);
+    if (damage == QLatin1String("central")) {
+      bytes.truncate(central);
+    } else if (damage == QLatin1String("empty")) {
+      bytes = QByteArray::fromHex("504b0506000000000000000000000000000000000000");
+    } else {
+      QCOMPARE(qFromLittleEndian<quint16>(bytes.constData() + local + 8), quint16(8));
+      if (damage == QLatin1String("crc")) {
+        const auto wrongCrc = qFromLittleEndian<quint32>(bytes.constData() + central + 16) ^ 1U;
+        qToLittleEndian(wrongCrc, bytes.data() + local + 14);
+        qToLittleEndian(wrongCrc, bytes.data() + central + 16);
+      } else {
+        // Keep the directory intact but advertise only half the DEFLATE stream.
+        const auto compressed = qFromLittleEndian<quint32>(bytes.constData() + central + 20);
+        QVERIFY(compressed > 4);
+        qToLittleEndian(compressed / 2, bytes.data() + local + 18);
+        qToLittleEndian(compressed / 2, bytes.data() + central + 20);
+      }
+    }
+    QFile file(source); QVERIFY(file.open(QIODevice::WriteOnly));
+    QCOMPARE(file.write(bytes), bytes.size()); file.close();
+    const auto result = TopographicArchive::prepare(source, temp.filePath(QStringLiteral("library")));
+    QVERIFY(!result.error.isEmpty()); QVERIFY(result.invalidArchive);
+    QVERIFY(result.files.isEmpty()); QVERIFY(result.directory.isEmpty());
+    QCOMPARE(contents(source), bytes);
+  }
+  void storageFailureDoesNotRequestAnotherDownload() {
+    QTemporaryDir temp; QVERIFY(temp.isValid());
+    const auto source = temp.filePath(QStringLiteral("valid.zip"));
+    QVERIFY(zip(source, {{QStringLiteral("map.dxf"), QByteArray("map")}}));
+    const auto original = contents(source);
+    const auto library = temp.filePath(QStringLiteral("library"));
+    QFile blocker(library); QVERIFY(blocker.open(QIODevice::WriteOnly));
+    QCOMPARE(blocker.write("keep"), qint64(4)); blocker.close();
+    const auto result = TopographicArchive::prepare(source, library);
+    QVERIFY(!result.error.isEmpty()); QVERIFY(!result.invalidArchive);
+    QVERIFY(result.files.isEmpty()); QVERIFY(result.directory.isEmpty());
+    QCOMPARE(contents(source), original); QCOMPARE(contents(library), QByteArray("keep"));
   }
   void rejectsNestedDepthAndCaseCollisions() {
     QTemporaryDir temp;

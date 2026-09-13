@@ -15,6 +15,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QSet>
+#include <optional>
 
 namespace {
 
@@ -82,24 +83,38 @@ HeritageImport::Result HeritageImport::loadDataset(QgsProject* project, Heritage
   // ZIP 안의 파일 이름이 **CP949** 다(국가유산 인트라넷이 주는 ZIP, 2026-09-13 확인).
   // GDAL 의 /vsizip/ 은 기본으로 UTF-8 로 읽어 「국가지정유산」이 「?├??┴÷┴n└≫?Ω」가 된다.
   // 레이어 이름이 그대로 깨지므로 푸는 동안만 인코딩을 알려 준다.
-  const QByteArray previousZipEncoding(CPLGetConfigOption("CPL_ZIP_ENCODING", ""));
-  CPLSetConfigOption("CPL_ZIP_ENCODING", "CP949");
+  const char* previousZipEncoding = CPLGetThreadLocalConfigOption("CPL_ZIP_ENCODING", nullptr);
   struct ZipEncodingGuard {
-    QByteArray previous;
+    std::optional<QByteArray> previous;
     ~ZipEncodingGuard() {
-      CPLSetConfigOption("CPL_ZIP_ENCODING", previous.isEmpty() ? nullptr : previous.constData());
+      CPLSetThreadLocalConfigOption("CPL_ZIP_ENCODING", previous ? previous->constData() : nullptr);
     }
-  } zipEncodingGuard{previousZipEncoding};
+  } zipEncodingGuard{previousZipEncoding ? std::optional<QByteArray>(previousZipEncoding) : std::nullopt};
+  CPLSetThreadLocalConfigOption("CPL_ZIP_ENCODING", "CP949");
 
   QStringList shapefiles;
+  QSet<QString> archivedShapefiles;
   for (const QString& file : downloadedFiles) {
+    const bool isArchive = QFileInfo(file).suffix().compare(QLatin1String("zip"), Qt::CaseInsensitive) == 0;
     const TopographicArchive::Result prepared = TopographicArchive::prepare(file, archiveRoot);
     if (!prepared.error.isEmpty()) {
       out.error = QStringLiteral("%1: %2").arg(QFileInfo(file).fileName(), prepared.error);
+      out.retryableDownload = prepared.invalidArchive;
       return out;
     }
+    bool hasShapefile = false;
     for (const QString& inner : prepared.files) {
-      if (inner.endsWith(QStringLiteral(".shp"), Qt::CaseInsensitive)) shapefiles << inner;
+      if (inner.endsWith(QStringLiteral(".shp"), Qt::CaseInsensitive)) {
+        shapefiles << inner;
+        hasShapefile = true;
+        if (isArchive) archivedShapefiles.insert(inner);
+      }
+    }
+    if (isArchive && !hasShapefile) {
+      out.error = QStringLiteral("%1에서 SHP를 찾지 못했습니다. 자료를 다시 받아야 합니다.")
+                      .arg(QFileInfo(file).fileName());
+      out.retryableDownload = true;
+      return out;
     }
   }
   if (shapefiles.isEmpty()) {
@@ -116,6 +131,7 @@ HeritageImport::Result HeritageImport::loadDataset(QgsProject* project, Heritage
       if (!QFileInfo::exists(base + suffix)) {
         out.error = QStringLiteral("%1의 필수 파일 %2가 없습니다. 적재를 중단합니다.")
                         .arg(shapeInfo.fileName(), suffix);
+        out.retryableDownload = archivedShapefiles.contains(shp);
         qDeleteAll(loaded);
         return out;
       }

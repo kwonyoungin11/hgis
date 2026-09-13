@@ -23,6 +23,7 @@ struct Result {
   int featureCount = 0;
   QStringList messages;  // 사용자에게 보여 줄 알림(상한 초과, 필드 못 찾음 등)
   QString error;
+  bool retryableDownload = false;  // 불완전한 ZIP/SHP 세트만 다시 받는다. 적재/저장 실패는 제외한다.
   bool ok() const { return error.isEmpty() && !layers.isEmpty(); }
 };
 

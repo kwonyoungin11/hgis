@@ -16,6 +16,7 @@ struct Result {
   QString directory;
   QStringList files;
   QString error;
+  bool invalidArchive = false;  // Source ZIP is incomplete or corrupt; storage/policy failures are separate.
   bool canceled = false;
   bool reused = false;
 };
