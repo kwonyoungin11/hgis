@@ -1,0 +1,43 @@
+# ka-hgis 코드 스타일 — 기존 코드에서 실측해 맞춘 설정
+#   들여쓰기 2칸(14,428곳), 중괄호 같은 줄(3,806 vs 74), 포인터 왼쪽 정렬(2,262 vs 1)
+#
+# 주의: ColumnLimit 을 100 으로 낮추면 기존 1,072줄이 재배치된다.
+#       120 은 193줄만 영향받으므로 현 코드베이스에 가장 덜 침습적이다.
+---
+Language: Cpp
+BasedOnStyle: Google
+
+IndentWidth: 2
+TabWidth: 2
+UseTab: Never
+ColumnLimit: 120
+
+# 중괄호는 같은 줄에 (기존 코드 지배적 스타일)
+BreakBeforeBraces: Attach
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+
+# 포인터/참조는 타입에 붙인다: QgsVectorLayer* layer
+PointerAlignment: Left
+ReferenceAlignment: Left
+DerivePointerAlignment: false
+
+# include 정렬 — 자체 헤더(따옴표)를 먼저, Qt/QGIS(꺾쇠)를 뒤로
+SortIncludes: CaseSensitive
+IncludeBlocks: Preserve
+IncludeCategories:
+  - Regex: '^"'
+    Priority: 1
+  - Regex: '^<Q[A-Z]'
+    Priority: 3
+  - Regex: '^<qgs'
+    Priority: 4
+  - Regex: '^<'
+    Priority: 2
+
+AccessModifierOffset: -1
+NamespaceIndentation: None
+FixNamespaceComments: true
+SeparateDefinitionBlocks: Leave

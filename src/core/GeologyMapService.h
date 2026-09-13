@@ -1,0 +1,75 @@
+#pragma once
+
+#include "PreparedReferenceMap.h"
+
+class QgsCoordinateTransformContext;
+
+#include <QColor>
+#include <QHash>
+#include <QString>
+
+class QgsMapCanvas;
+class QgsMapLayer;
+class QgsProject;
+class QgsRectangle;
+class QgsVectorLayer;
+
+// KIGAM(한국지질자원연구원) 지오빅데이터 공개 GeoServer에서 1:5만 국토기본지질도
+// 암상 폴리곤을 WFS로 내려받아 로컬 GPKG로 저장하고, 보고서 지질도 관례대로
+// 지질단위(기호+지층명)별로 칠한 뒤 기호(Qa, PCEpgn 등)를 라벨로 표시한다.
+// 단위색은 공식 지질도 래스터(WMS)에서 단위 내부점 픽셀을 샘플링해 도폭색
+// 그대로 쓰고, 실패하면 지질시대(ICS) 계열색으로 대체한다.
+//
+//  - 서버: https://data.kigam.re.kr/geoserver (키·신청 불필요, EPSG:5186 재투영 지원)
+//  - 레이어: geoOpen:l_50k_geology_litho_latest (전국 72,000여 폴리곤)
+//  - 속성: 시대·지층·대표암상·기호·도폭명 — 시대를 정규화해 era_class 필드로 저장
+//  - 한 번 내려받으면 GPKG로 남아 오프라인 현장에서도 쓸 수 있다.
+class GeologyMapService {
+public:
+  // Worker-only preparation; no project, canvas or layer objects escape.
+  static PreparedReferenceMap prepare(const QgsRectangle& extent5186,
+      const QString& requestedBasePath, const QgsCoordinateTransformContext& transformContext,
+      QgsFeedback* feedback = nullptr, const ReferenceDownload& download = {});
+  // GUI-only registration; successful registration retains the generated files.
+  static QgsMapLayer* addPrepared(QgsProject* project, QgsMapCanvas* canvas,
+      const PreparedReferenceMap& prepared, QString* errorOut = nullptr);
+  // extent(EPSG:5186) 범위의 암상 폴리곤을 내려받아 outGpkgPath에 저장하고
+  // 프로젝트 「참조 지도」 그룹에 추가한다. 본토는 l_50k_geology_litho_latest,
+  // 제주(남단 ~33.97°N 밖)는 l_jeju_50k_geology_litho_view. 둘 다 같은 기호·지층
+  // 분류 범례. 암상 벡터가 전혀 없으면 공식 5만 래스터(WMS)를 최후 수단으로 올린다.
+  static QgsMapLayer* downloadAndAdd(QgsProject* project, QgsMapCanvas* canvas,
+                                     const QgsRectangle& extent5186,
+                                     const QString& outGpkgPath,
+                                     QString* errorOut = nullptr);
+
+  // KIGAM litho WFS 모자이크(한반도, 남단 ~33.97°N)가 이 위경도 박스를 덮는지.
+  static bool lithoWfsCoversWgs84(const QgsRectangle& extentWgs84);
+  // 제주 전용 암상 WFS(광령리 등 ≤33.56°N) 범위.
+  static bool jejuLithoWfsCoversWgs84(const QgsRectangle& extentWgs84);
+  // 본토 또는 제주 typeName. 둘 다 아니면 빈 문자열(래스터 폴백).
+  static QString lithoTypeNameForWgs84(const QgsRectangle& extentWgs84);
+  // 공식 5만 지질도 래스터 WMS URI (레이어 CRS EPSG:4326, 캔버스는 OTF).
+  static QString officialRasterWmsUri();
+
+  // 서버의 시대 문자열(예: "현생누대 신생대 제4기") → 정규화된 시대 분류 이름.
+  static QString eraClass(const QString& eraText);
+  // 정규화된 시대 분류 이름 → ICS 표준 지질시대색(대체색 계열의 기준).
+  static QColor eraColor(const QString& eraClassName);
+
+  // 데이터에 실제로 있는 지질단위(기호)만 골라 「기호 · 지층명」 범례를 만들고
+  // 기호 라벨을 입힌다. officialColors(기호→도폭색)가 있으면 그 색을 쓴다.
+  static bool applyGeologyStyle(QgsVectorLayer* layer,
+                                const QHash<QString, QColor>& officialColors = {});
+  // 조판 범례에서 구조선·주향점(부정합·주향경사·지질경계·단층추정)을 뺀다.
+  static bool omitFromSheetLegend(const QString& label);
+  static void pruneStructureLegend(QgsVectorLayer* layer);
+
+  // 지질 색 위에 음영 오버레이(2.5D). 산이 솟는 3D 렌더가 아님. 참조 지도.
+  static QString reliefLayerTitle();
+  static QgsMapLayer* existingGeologyLayer(QgsProject* project);
+  static void drapeOnRelief(QgsMapLayer* layer);
+  static bool ensureReliefUnderlay(QgsProject* project, QgsMapCanvas* canvas,
+                                   QgsMapLayer* geology, QString* errorOut = nullptr);
+
+  static double maxSpanMeters() { return 80000.0; }
+};

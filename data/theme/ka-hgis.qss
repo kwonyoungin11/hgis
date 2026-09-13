@@ -1,0 +1,934 @@
+/* ka-hgis chrome — Windows 11 Bloom / Fluent mica (cyan glow, accent #0078D4).
+   Color and size SSOT: KaTheme tokens; resolve before applying this raw sheet.
+   Keep GIS surfaces excluded; no bare QWidget/QGraphicsView/QFrame fills. */
+
+/* ---- GIS exclude (contract 1). No fill/border color here. ---- */
+QgsMapCanvas, QWidget#mapCanvas, QgsLayoutView, QWidget#layoutView {
+  background: none;
+  border: none;
+}
+
+/* ---- Window face ---- */
+QMainWindow, QDialog, QMessageBox, QInputDialog, QColorDialog, QDialogButtonBox {
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 @selectedTop@, stop:0.42 @surface@, stop:1 @selectedBottom@);
+  color: @ink@;
+  font-family: "Malgun Gothic", "Segoe UI";
+  font-size: 13px;
+}
+QWidget#startPage {
+  font-family: "Malgun Gothic", "Segoe UI";
+  font-size: 13px;
+  color: @ink@;
+}
+QLabel#recentEmptyHint {
+  color: @inkMuted@;
+  font-size: 13px;
+  font-family: "Malgun Gothic", "Segoe UI";
+}
+QWidget#startRail {
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 @accent@, stop:0.45 @accentHover@, stop:1 @rail@);
+  color: @railText@;
+  font-family: "Malgun Gothic", "Segoe UI";
+}
+QWidget#startRail QLabel {
+  font-size: 13px;
+  color: @railMuted@;
+  font-family: "Malgun Gothic", "Segoe UI";
+}
+QWidget#startRail QLabel#startRailHome {
+  font-size: 16px;
+  font-weight: 800;
+  color: @railText@;
+  font-family: "Malgun Gothic", "Segoe UI";
+}
+QPushButton#startNewBtn, QPushButton#startOpenBtn {
+  font-size: 14px;
+  font-weight: 700;
+  font-family: "Malgun Gothic", "Segoe UI";
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.42 @glossShoulder@, stop:0.48 @glossMiddle@, stop:1 @glossBottom@);
+  border: 1px solid @border@;
+  border-bottom: 1px solid @edgeDark@;
+  border-radius: 12px;
+  color: @ink@;
+  padding: 10px;
+}
+QPushButton#startNewBtn:enabled:hover, QPushButton#startOpenBtn:enabled:hover {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.48 @glossShoulder@, stop:1 @hoverBottom@);
+  border-color: @accent@;
+  border-bottom: 1px solid @accentDeep@;
+  color: @accentDeep@;
+}
+QPushButton#startNewBtn:enabled:pressed, QPushButton#startOpenBtn:enabled:pressed {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @pressedTop@, stop:1 @pressedBottom@);
+  border-bottom: 1px solid @edgeDark@;
+  margin-top: 0;
+}
+QDialogButtonBox QPushButton {
+  font-size: 13px;
+  min-height: 34px;
+  font-family: "Malgun Gothic", "Segoe UI";
+}
+QMessageBox QLabel, QInputDialog QLabel {
+  font-size: 13px;
+  color: @ink@;
+  font-family: "Malgun Gothic", "Segoe UI";
+}
+
+/* ---- Push buttons ---- */
+QPushButton {
+  color: @ink@;
+  font-weight: 600;
+  min-height: 34px;
+  padding: 8px 16px;
+  border: 1px solid @border@;
+  border-bottom: 2px solid @edgeDark@;
+  border-radius: 8px;
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.42 @glossShoulder@, stop:0.48 @glossMiddle@, stop:1 @glossBottom@);
+}
+QPushButton:enabled:hover { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.48 @glossShoulder@, stop:1 @hoverBottom@); border-color: @edgeDark@; border-bottom: 2px solid @edgeDark@; }
+QPushButton:enabled:pressed { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @pressedTop@, stop:1 @pressedBottom@); border-bottom: 1px solid @edgeDark@; margin-top: 0; min-height: 34px; }
+QPushButton:enabled:checked {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.12 @glossReflection@, stop:0.46 @selectedTop@, stop:1 @selectedBottom@);
+  color: @accentDeep@;
+  border-color: @accent@;
+  border-bottom: 2px solid @accentDeep@;
+}
+QPushButton:default, QPushButton#btnAdjustDone, QPushButton.primary, QPushButton#btnPrimary {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @accentReflection@, stop:0.16 @accentReflection@, stop:0.48 @accent@, stop:1 @accentHover@);
+  color: @surface@;
+  border: 1px solid @accent@;
+  border-bottom: 2px solid @accentDeep@;
+}
+QPushButton:default:enabled:hover, QPushButton#btnAdjustDone:enabled:hover, QPushButton.primary:enabled:hover, QPushButton#btnPrimary:enabled:hover {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @accentHover@, stop:1 @accentDeep@);
+  border-bottom: 2px solid @accentDeep@;
+}
+QPushButton:default:enabled:checked, QPushButton#btnAdjustDone:enabled:checked,
+QPushButton.primary:enabled:checked, QPushButton#btnPrimary:enabled:checked {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @accentHover@, stop:1 @accentDeep@);
+  color: @surface@;
+}
+QPushButton:default:enabled:pressed, QPushButton#btnAdjustDone:enabled:pressed,
+QPushButton.primary:enabled:pressed, QPushButton#btnPrimary:enabled:pressed {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @accentDeep@, stop:1 @accentHover@);
+  color: @surface@;
+  margin-top: 0;
+}
+QPushButton:disabled {
+  background: @disabledSurface@;
+  color: @inkDisabled@;
+  border-color: @border@;
+}
+
+/* ---- Tool buttons ---- */
+QToolButton {
+  color: @inkMuted@;
+  font-weight: 600;
+  font-size: 12px;
+  border: 2px solid transparent;
+  border-radius: 0;
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.42 @glossShoulder@, stop:0.48 @glossMiddle@, stop:1 @glossBottom@);
+  padding: 6px 10px;
+}
+QToolButton:enabled:hover { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.48 @glossShoulder@, stop:1 @hoverBottom@); color: @ink@; }
+QToolButton:enabled:pressed { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @pressedTop@, stop:1 @pressedBottom@); }
+QToolButton:enabled:checked {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.12 @glossReflection@, stop:0.46 @selectedTop@, stop:1 @selectedBottom@);
+  color: @accentDeep@;
+  border: 2px solid transparent;
+  border-bottom: 2px solid @accent@;
+  font-weight: 700;
+}
+QToolButton:enabled:checked:hover {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.12 @glossReflection@, stop:0.46 @selectedTop@, stop:1 @selectedBottom@);
+  color: @accentDeep@;
+  border: 2px solid transparent;
+  border-bottom: 2px solid @accentHover@;
+}
+QToolButton:disabled { color: @inkDisabled@; }
+QToolButton#btnPrimary {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.42 @glossShoulder@, stop:0.48 @glossMiddle@, stop:1 @glossBottom@);
+  color: @accentDeep@;
+  border: 2px solid transparent;
+}
+QToolButton#btnPrimary:enabled:hover {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.48 @glossShoulder@, stop:1 @hoverBottom@);
+  color: @ink@;
+  border: 2px solid transparent;
+}
+QToolButton#btnPrimary:enabled:pressed { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @pressedTop@, stop:1 @pressedBottom@); }
+QToolButton#btnPrimary:enabled:checked {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.12 @glossReflection@, stop:0.46 @selectedTop@, stop:1 @selectedBottom@);
+  color: @accentDeep@;
+  border: 2px solid transparent;
+  border-bottom: 2px solid @accent@;
+}
+
+QToolBar {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.48 @glossShoulder@, stop:1 @glossMiddle@);
+  border: none;
+  spacing: 1px;
+  padding: 4px 8px;
+}
+QToolBar::separator {
+  background: @border@;
+  width: 1px;
+  margin: 8px 4px;
+}
+QToolBar#mainToolbar::separator {
+  background: @edgeDark@;
+  width: 1px;
+  margin: 10px 8px;
+}
+QToolBar#mainToolbar, QToolBar#studioToolbar {
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 @selectedTop@, stop:0.45 @glossReflection@, stop:1 @hoverBottom@);
+  border-bottom: 1px solid @border@;
+}
+QToolBar#studioToolbar QToolButton {
+  min-height: 36px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: @inkMuted@;
+}
+QToolBar#subToolbar {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.48 @glossShoulder@, stop:1 @glossMiddle@);
+  border-top: 1px solid @border@;
+  border-bottom: 1px solid @border@;
+}
+QToolBar#subToolbar QToolButton:enabled:checked {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.12 @glossReflection@, stop:0.46 @selectedTop@, stop:1 @selectedBottom@);
+  color: @accentDeep@;
+  border: 2px solid transparent;
+  border-bottom: 2px solid @accent@;
+}
+QToolBar#mainToolbar {
+  spacing: @buttonSpacing@px;
+  padding: 4px 8px;
+}
+QToolBar#mainToolbar QToolButton {
+  min-width: 0;
+  min-height: 0;
+  padding: @buttonPadding@px;
+  font-size: @ribbonFontSize@px;
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.42 @glossShoulder@, stop:0.48 @glossMiddle@, stop:1 @glossBottom@);
+  border: 2px solid transparent;
+  border-radius: 0;
+}
+QToolBar#mainToolbar QToolButton:enabled:hover {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.48 @glossShoulder@, stop:1 @hoverBottom@);
+  border: 2px solid transparent;
+}
+QToolBar#mainToolbar QToolButton:enabled:pressed { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @pressedTop@, stop:1 @pressedBottom@); }
+QToolBar#mainToolbar QToolButton::menu-indicator {
+  image: none;
+  width: 0px;
+}
+QToolBar#mainToolbar QToolButton:enabled:checked {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.12 @glossReflection@, stop:0.46 @selectedTop@, stop:1 @selectedBottom@);
+  color: @accentDeep@;
+  border: 2px solid transparent;
+  border-bottom: 2px solid @accent@;
+}
+QToolBar#mainToolbar QToolButton:enabled:checked:hover {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.12 @glossReflection@, stop:0.46 @selectedTop@, stop:1 @selectedBottom@);
+  color: @accentDeep@;
+  border: 2px solid transparent;
+  border-bottom: 2px solid @accentHover@;
+}
+QWidget#beginnerRibbon {
+  background: transparent;
+}
+QFrame#ribbonGroup {
+  background: transparent;
+  border: none;
+  border-right: 1px solid @border@;
+}
+QLabel#ribbonGroupCaption {
+  color: @inkMuted@;
+  font-size: 11px;
+  font-weight: 600;
+  min-height: 18px;
+  padding: 0 2px;
+  background: transparent;
+}
+QWidget#beginnerRibbon QToolButton {
+  /* Outer button dimensions come from KaTheme::ButtonMetrics in C++. */
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: @buttonPadding@px;
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.42 @glossShoulder@, stop:0.48 @glossMiddle@, stop:1 @glossBottom@);
+  color: @ink@;
+  font-size: @ribbonFontSize@px;
+  border: 1px solid @border@;
+  border-bottom: 2px solid @edgeDark@;
+  border-radius: 8px;
+  text-align: center;
+}
+QWidget#beginnerRibbon QToolButton:enabled:hover {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.48 @glossShoulder@, stop:1 @hoverBottom@);
+  border-color: @edgeDark@;
+  border-bottom: 2px solid @edgeDark@;
+}
+QWidget#beginnerRibbon QToolButton:enabled:pressed {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @pressedTop@, stop:1 @pressedBottom@);
+  border-bottom: 1px solid @edgeDark@;
+  margin-top: 0;
+  min-height: 0;
+}
+QWidget#beginnerRibbon QToolButton:enabled:checked {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.12 @glossReflection@, stop:0.46 @selectedTop@, stop:1 @selectedBottom@);
+  color: @accentDeep@;
+  border: 1px solid @accent@;
+  border-bottom: 2px solid @accentDeep@;
+  border-radius: 8px;
+}
+QWidget#beginnerRibbon QToolButton::menu-button {
+  border: none;
+  background: transparent;
+  width: 0px;
+}
+QWidget#beginnerRibbon QToolButton::menu-arrow {
+  image: none;
+  width: 0px;
+  height: 0px;
+}
+QWidget#beginnerRibbon QToolButton::menu-indicator {
+  image: none;
+  width: 0px;
+  height: 0px;
+}
+QWidget#regionLocator {
+  min-height: 72px;
+  min-width: 230px;
+  background: transparent;
+  border: none;
+}
+QWidget#regionLocator QToolButton#regionChip {
+  min-width: 32px;
+  max-width: 38px;
+  min-height: 22px;
+  max-height: 22px;
+  margin: 1px;
+  padding: 0 2px;
+  font-size: 11px;
+  font-weight: 700;
+  color: @accentDeep@;
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.42 @glossShoulder@, stop:0.48 @glossMiddle@, stop:1 @glossBottom@);
+  border: 1px solid @border@;
+  border-radius: 6px;
+}
+QWidget#regionLocator QToolButton#regionChip:enabled:hover {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.48 @glossShoulder@, stop:1 @hoverBottom@);
+  border-color: @accent@;
+}
+QWidget#regionLocator QToolButton#regionChip:enabled:checked {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.12 @glossReflection@, stop:0.46 @selectedTop@, stop:1 @selectedBottom@);
+  color: @accentDeep@;
+  border: 1px solid @accent@;
+  border-radius: 8px;
+}
+QToolBar#studioToolRail {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.48 @glossShoulder@, stop:1 @glossMiddle@);
+  spacing: 1px;
+  padding: 2px 4px;
+  border: none;
+  border-left: 1px solid @border@;
+}
+QToolBar#studioToolRail QToolButton {
+  min-width: 60px;
+  min-height: 40px;
+  padding: 1px 2px;
+  font-size: 12px;
+  color: @inkMuted@;
+}
+QToolButton#layerCheckAllBtn, QToolButton#layoutLayerCheckAllBtn {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.42 @glossShoulder@, stop:0.48 @glossMiddle@, stop:1 @glossBottom@);
+  border: 1px solid @border@;
+  border-radius: 8px;
+  padding: 2px 10px;
+  color: @inkMuted@;
+  font-size: 12px;
+  font-weight: 600;
+}
+QToolButton#layerCheckAllBtn:enabled:hover, QToolButton#layoutLayerCheckAllBtn:enabled:hover {
+  border-color: @accent@;
+  color: @accentDeep@;
+}
+QToolButton#layerCheckAllBtn:enabled:pressed, QToolButton#layoutLayerCheckAllBtn:enabled:pressed { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @pressedTop@, stop:1 @pressedBottom@); }
+QToolButton#layerCheckAllBtn:disabled, QToolButton#layoutLayerCheckAllBtn:disabled { color: @inkDisabled@; border-color: @border@; }
+QLabel#subToolbarCaption { color: @inkMuted@; font-weight: 600; padding: 0 8px; background: transparent; }
+
+/* ---- Fields ---- */
+QLineEdit, QComboBox, QAbstractSpinBox, QTextEdit, QPlainTextEdit {
+  background: @surface@;
+  color: @ink@;
+  border: 1px solid @border@;
+  border-radius: 8px;
+  min-height: 32px;
+  padding: 4px 10px;
+  selection-background-color: @accent@;
+  selection-color: @surface@;
+}
+QLineEdit:focus, QComboBox:focus, QAbstractSpinBox:focus {
+  border-color: @accent@;
+}
+QLineEdit:disabled, QComboBox:disabled, QAbstractSpinBox:disabled {
+  background: @desk@;
+  color: @inkDisabled@;
+}
+QToolBar#mainToolbar QToolButton#regionChip {
+  min-width: 32px;
+  max-width: 38px;
+  min-height: 22px;
+  max-height: 22px;
+  margin: 1px;
+  padding: 0 2px;
+  font-size: 11px;
+  font-weight: 700;
+  color: @accentDeep@;
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.42 @glossShoulder@, stop:0.48 @glossMiddle@, stop:1 @glossBottom@);
+  border: 1px solid @border@;
+  border-radius: 6px;
+}
+QToolBar#mainToolbar QToolButton#regionChip:enabled:hover { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.48 @glossShoulder@, stop:1 @hoverBottom@); border-color: @accent@; }
+QToolBar#mainToolbar QToolButton#regionChip:enabled:checked {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.12 @glossReflection@, stop:0.46 @selectedTop@, stop:1 @selectedBottom@);
+  color: @accentDeep@;
+  border: 1px solid @border@;
+  border-bottom: 2px solid @accent@;
+}
+QFrame#regionAddressPopup {
+  background: @surface@;
+  border: 1px solid @border@;
+  border-radius: 10px;
+}
+QLabel#regionSidoTitle { color: @accentDeep@; font-weight: 700; }
+
+QAbstractSpinBox { padding-right: 16px; }
+QAbstractSpinBox::up-button { width: 16px; }
+QComboBox::drop-down {
+  subcontrol-origin: border;
+  width: 20px;
+  border-left: 1px solid @border@;
+}
+QComboBox QAbstractItemView, QColorDialog QAbstractSpinBox {
+  background: @surface@;
+  color: @ink@;
+  selection-background-color: @selectedBottom@;
+  selection-color: @ink@;
+  min-height: 26px;
+  border: 1px solid @border@;
+}
+
+/* ---- Trees / layer list ---- */
+QTreeView, QgsLayerTreeView, QListWidget, QTableWidget, QTableView {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @surface@, stop:1 @selectedTop@);
+  color: @ink@;
+  border: 1px solid @border@;
+  border-radius: 8px;
+  outline: none;
+  font-size: 13px;
+  font-family: "Malgun Gothic", "Segoe UI";
+}
+QTreeView::item, QgsLayerTreeView::item, QListWidget::item, QTableWidget::item, QTableView::item {
+  color: @ink@;
+  padding: 5px 6px;
+  min-height: 24px;
+}
+QTreeView::item:selected, QgsLayerTreeView::item:selected, QListWidget::item:selected,
+QTableWidget::item:selected, QTableView::item:selected {
+  background: @selectedBottom@;
+  color: @ink@;
+}
+QTreeView::item:hover, QgsLayerTreeView::item:hover, QListWidget::item:hover,
+QTableWidget::item:hover, QTableView::item:hover {
+  background: @pressedBottom@;
+}
+QHeaderView::section {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @surface@, stop:1 @selectedTop@);
+  color: @inkMuted@;
+  border: 1px solid @border@;
+  padding: 6px 8px;
+}
+
+/* ---- Cards / docks / splitter ---- */
+QFrame#mapCard, QFrame#layersCard, QFrame#filesCard, QFrame#studioFilesPanel,
+QFrame#itemInspector, QFrame#mapAdjustBar, QFrame#drawerCard,
+QFrame#studioLeftCol, QFrame#studioBottomBar,
+QFrame#terrainLayersCard, QFrame#terrainFilesCard {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.48 @glossShoulder@, stop:1 @glossMiddle@);
+  border: 1px solid @border@;
+  border-bottom: 1px solid @edgeDark@;
+  border-right: 1px solid @border@;
+  border-radius: 10px;
+  color: @ink@;
+}
+QFrame#filesInner, QFrame#layersInner {
+  background: @glossMiddle@;
+  border: 1px solid @border@;
+  border-radius: 8px;
+  color: @ink@;
+}
+QFrame#studioLeftCol {
+  border-radius: 0px;
+  border: none;
+  border-right: 1px solid @border@;
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @selectedTop@, stop:1 @hoverBottom@);
+}
+QWidget#terrain3dPanel {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @selectedTop@, stop:1 @hoverBottom@);
+  border-right: 1px solid @border@;
+}
+QFrame#studioBottomBar {
+  border-radius: 0px;
+  border: none;
+  border-top: 1px solid @border@;
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.48 @glossShoulder@, stop:1 @glossMiddle@);
+}
+QFrame#mapCard { background: @surface@; }
+QWidget#sampleStrip {
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 @selectedTop@, stop:0.5 @surface@, stop:1 @hoverBottom@);
+  border: none;
+  border-bottom: 1px solid @border@;
+}
+QToolButton.sampleTile {
+  /* C++ uses layoutButtonHeight and scaleButtonMinWidth for outer size. */
+  min-width: 0;
+  min-height: 0;
+  padding: @buttonPadding@px;
+  font-size: @scaleFontSize@px;
+  font-weight: 600;
+  color: @ink@;
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.42 @glossShoulder@, stop:0.48 @glossMiddle@, stop:1 @glossBottom@);
+  border: 1px solid @border@;
+  border-radius: 8px;
+}
+QToolButton.sampleTile:enabled:hover {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.48 @glossShoulder@, stop:1 @hoverBottom@);
+  border-color: @edgeDark@;
+  color: @ink@;
+}
+QToolButton.sampleTile:enabled:checked {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.12 @glossReflection@, stop:0.46 @selectedTop@, stop:1 @selectedBottom@);
+  color: @accentDeep@;
+  border: 1px solid @accent@;
+}
+QToolButton.sampleTile:enabled:checked:hover {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.12 @glossReflection@, stop:0.46 @selectedTop@, stop:1 @selectedBottom@);
+  color: @accentDeep@;
+  border-color: @accentHover@;
+}
+QToolButton#scaleChip {
+  /* C++ uses scaleButtonHeight and scaleButtonMinWidth for outer size. */
+  min-width: 0;
+  min-height: 0;
+  padding: @buttonPadding@px;
+  font-size: @scaleFontSize@px;
+  font-weight: 700;
+  color: @ink@;
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.42 @glossShoulder@, stop:0.48 @glossMiddle@, stop:1 @glossBottom@);
+  border: 1px solid @border@;
+  border-radius: 8px;
+}
+QToolButton#scaleChip:enabled:checked {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.12 @glossReflection@, stop:0.46 @selectedTop@, stop:1 @selectedBottom@);
+  color: @accentDeep@;
+  border: 1px solid @accent@;
+}
+QPushButton#scaleApply, QSpinBox#drawingScale {
+  min-height: 0;
+  padding: @buttonPadding@px 6px;
+  font-size: @scaleFontSize@px;
+}
+QPushButton#scaleApply:enabled:pressed {
+  min-height: 0;
+  margin-top: 0;
+  border-bottom-width: 2px;
+}
+QSpinBox#drawingScale { padding-right: 20px; }
+QLabel#emptyState {
+  color: @inkMuted@;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 24px 16px;
+  min-height: 88px;
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 @surface@, stop:1 @selectedTop@);
+  border: 1px dashed @border@;
+  border-radius: 8px;
+}
+/* ---- View tabs (홈/지도) ---- */
+QTabWidget::pane { border: none; }
+/* ---- 바깥 라운드 ----
+   탭 안쪽 면을 조금 들여 놓아 창의 회색 바탕이 테두리처럼 보이게 하고,
+   그 위에 얹히는 본문 판을 둥글게 깎는다. 배경만 바뀌며 배치는 그대로다. */
+QTabWidget#viewTabs::pane { border: none; margin: 0 8px 8px 8px; }
+QWidget#centralRoot, QWidget#startPage {
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:0.55, stop:0 @hoverBottom@, stop:0.4 @surface@, stop:1 @selectedBottom@);
+  border: 1px solid @border@;
+  border-radius: 14px;
+}
+QWidget#startMain {
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:0.55, stop:0 @hoverBottom@, stop:0.4 @surface@, stop:1 @selectedBottom@);
+  border: none;
+}
+QTabBar { background: transparent; font-weight: 600; }
+QTabBar::tab {
+  background: transparent;
+  color: @inkMuted@;
+  padding: 7px 16px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin: 0 2px;
+}
+QTabBar::tab:selected { color: @accentDeep@; border-bottom: 2px solid @accent@; }
+/* ---- Left Dock (레이어 위 / 파일함 아래 동시 노출) ---- */
+QSplitter#leftSplit,
+QSplitter#studioLeftSplit,
+QSplitter#studioMainSplit {
+  background: transparent;
+}
+QSplitter#leftSplit::handle,
+QSplitter#studioLeftSplit::handle {
+  background: @border@;
+  height: 6px;
+  margin: 2px 12px;
+  border-radius: 3px;
+}
+QSplitter#studioMainSplit::handle {
+  background: @border@;
+  width: 6px;
+  margin: 12px 2px;
+  border-radius: 3px;
+}
+QSplitter#leftSplit::handle:hover,
+QSplitter#studioLeftSplit::handle:hover,
+QSplitter#studioMainSplit::handle:hover {
+  background: @accent@;
+}
+QFrame#layerOpacityRail {
+  background: @surface@;
+  border: 1px solid @border@;
+  border-radius: 8px;
+}
+QFrame#layerOpacityRail QLabel {
+  color: @inkMuted@;
+  font-size: 11px;
+  font-weight: 700;
+}
+QFrame#layerOpacityRail QSlider::groove:vertical {
+  background: @glossBottom@;
+  width: 6px;
+  border-radius: 3px;
+}
+QFrame#layerOpacityRail QSlider::handle:vertical {
+  background: @accent@;
+  border: 1px solid @accentHover@;
+  height: 14px;
+  margin: 0 -5px;
+  border-radius: 7px;
+}
+QFrame#layersCard,
+QFrame#filesCard,
+QFrame#studioFilesPanel {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.48 @glossShoulder@, stop:1 @glossMiddle@);
+  border: 1px solid @border@;
+  border-bottom: 1px solid @edgeDark@;
+  border-right: 1px solid @border@;
+  border-radius: 8px;
+}
+QFrame#layersInner,
+QFrame#filesInner {
+  background: @glossMiddle@;
+  border: 1px solid @border@;
+  border-radius: 6px;
+}
+
+/* ---- Side panel buttons (레이어·파일함) ---- */
+QFrame#layersCard QToolButton {
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid @border@;
+  border-bottom: 2px solid @edgeDark@;
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.42 @glossShoulder@, stop:0.48 @glossMiddle@, stop:1 @glossBottom@);
+  border-radius: 6px;
+  color: @inkMuted@;
+}
+QFrame#filesCard QToolButton,
+QFrame#studioFilesPanel QToolButton {
+  padding: 4px 6px;
+  border: 1px solid @border@;
+  border-bottom: 2px solid @edgeDark@;
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.42 @glossShoulder@, stop:0.48 @glossMiddle@, stop:1 @glossBottom@);
+  border-radius: 6px;
+  color: @inkMuted@;
+}
+QFrame#layersCard QToolButton:enabled:hover,
+QFrame#filesCard QToolButton:enabled:hover,
+QFrame#studioFilesPanel QToolButton:enabled:hover {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.48 @glossShoulder@, stop:1 @hoverBottom@);
+  border-color: @edgeDark@;
+  border-bottom: 2px solid @edgeDark@;
+  color: @ink@;
+}
+QFrame#layersCard QToolButton:enabled:pressed,
+QFrame#filesCard QToolButton:enabled:pressed,
+QFrame#studioFilesPanel QToolButton:enabled:pressed {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @pressedTop@, stop:1 @pressedBottom@);
+  border-bottom: 1px solid @edgeDark@;
+}
+
+QDockWidget { border: 1px solid @border@; color: @ink@; titlebar-close-icon: none; }
+QDockWidget::title {
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 @selectedTop@, stop:1 @hoverBottom@);
+  color: @ink@;
+  padding: 8px;
+  border-bottom: 1px solid @border@;
+}
+QSplitter::handle {
+  background: @border@;
+  width: 1px;
+  height: 1px;
+}
+/* 왼쪽 패널 ↔ 지도 경계는 손으로 끌어야 한다. 1px 손잡이는 잡히지 않는다. */
+QSplitter#mainSplit::handle:horizontal {
+  background: @glossBottom@;
+  width: 7px;
+  border-left: 1px solid @border@;
+  border-right: 1px solid @border@;
+}
+QSplitter#mainSplit::handle:horizontal:hover { background: @edgeDark@; }
+
+QLabel { color: @ink@; background: transparent; }
+QLabel#cardCaption { color: @inkMuted@; font-weight: 700; font-size: 12px; padding: 2px 2px 0 2px; }
+QCheckBox { color: @ink@; spacing: 8px; font-weight: 600; background: transparent; }
+QCheckBox:disabled { color: @inkDisabled@; }
+QCheckBox::indicator, QTreeView::indicator, QgsLayerTreeView::indicator {
+  width: 16px;
+  height: 16px;
+  margin: 2px;
+  border: 1.2px solid @inkDisabled@;
+  border-radius: 4px;
+  background: @surface@;
+}
+QCheckBox::indicator:checked, QTreeView::indicator:checked, QgsLayerTreeView::indicator:checked {
+  background: @accent@;
+  border: 1.2px solid @accent@;
+}
+QCheckBox::indicator:unchecked, QTreeView::indicator:unchecked, QgsLayerTreeView::indicator:unchecked {
+  background: @surface@;
+  border: 1.2px solid @inkDisabled@;
+}
+
+QMenu {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @surface@, stop:1 @selectedTop@);
+  color: @ink@;
+  border: 1px solid @border@;
+  padding: 6px;
+  font-family: "Malgun Gothic", "Segoe UI";
+  font-size: 13px;
+}
+QMenu::item { color: @ink@; padding: 8px 16px; min-height: 22px; border-radius: 6px; }
+QMenu::item:selected { background: @selectedBottom@; color: @ink@; }
+QMenu::item:disabled { color: @inkDisabled@; }
+
+QStatusBar {
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 @selectedTop@, stop:0.5 @surface@, stop:1 @hoverBottom@);
+  color: @inkMuted@;
+  font-weight: 600;
+  border-top: 1px solid @border@;
+}
+QStatusBar QLabel { color: @inkMuted@; }
+
+/* ---- Status bar instrument panel ---- */
+QStatusBar#kaStatusBar {
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 @selectedTop@, stop:0.5 @surface@, stop:1 @hoverBottom@);
+  color: @inkMuted@;
+  min-height: 34px;
+  padding: 0 6px;
+}
+QStatusBar::item { border: none; }
+QFrame#statusSep { background: @border@; border: none; margin: 7px 3px; }
+QLabel#xyReadout {
+  color: @ink@;
+  font-family: "Consolas", "D2Coding", "Malgun Gothic";
+  font-size: 12px;
+  padding: 0 8px;
+}
+QLabel#scaleLabel { color: @inkMuted@; padding-left: 4px; }
+QStatusBar#kaStatusBar QLineEdit#scaleEdit,
+QStatusBar#kaStatusBar QComboBox#scaleCombo {
+  min-height: 24px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+QToolButton#crsButton {
+  color: @accentDeep@;
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.42 @glossShoulder@, stop:0.48 @glossMiddle@, stop:1 @glossBottom@);
+  border: 1px solid @border@;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+QToolButton#crsButton:enabled:hover { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.48 @glossShoulder@, stop:1 @hoverBottom@); border-color: @accent@; }
+QLabel#uploadCrsChip {
+  color: @ok@;
+  background: @successSurface@;
+  border: 1px solid @border@;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+QToolButton#renderToggle {
+  color: @accentDeep@;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+QToolButton#renderToggle:enabled:checked {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.12 @glossReflection@, stop:0.46 @selectedTop@, stop:1 @selectedBottom@);
+  color: @accentDeep@;
+  border: 1px solid @border@;
+}
+QToolButton#renderToggle:enabled:!checked {
+  color: @danger@;
+  background: @dangerSurface@;
+  border: 1px solid @border@;
+}
+QToolButton#renderToggle:enabled:hover { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.48 @glossShoulder@, stop:1 @hoverBottom@); color: @accentDeep@; }
+
+QMenuBar { height: 0px; max-height: 0px; border: none; }
+
+QToolTip {
+  color: @ink@;
+  background: @surface@;
+  border: 1px solid @border@;
+  padding: 6px 10px;
+  font-family: "Malgun Gothic", "Segoe UI";
+  font-size: 13px;
+}
+
+QScrollBar:vertical, QScrollBar:horizontal { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 @selectedTop@, stop:1 @hoverBottom@); border: none; }
+QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
+  background: @edgeDark@;
+  border: none;
+  border-radius: 4px;
+  min-height: 24px;
+  min-width: 24px;
+}
+
+
+/* Local layout chrome belongs here, never on QgsLayoutView or layout items. */
+QWidget#layoutBottomTools {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.48 @glossShoulder@, stop:1 @glossMiddle@);
+  color: @ink@;
+  border: 1px solid @border@;
+  border-top-color: @edgeLight@;
+  border-radius: 10px;
+}
+
+/* Keep ID-scoped buttons readable when disabled. These explicit selectors
+   outrank the normal scoped faces without changing their size or spacing. */
+QPushButton:disabled, QPushButton:default:disabled,
+QPushButton#btnPrimary:disabled, QPushButton#btnAdjustDone:disabled,
+QPushButton.primary:disabled, QPushButton#startNewBtn:disabled,
+QPushButton#startOpenBtn:disabled, QPushButton#scaleApply:disabled,
+QToolButton:disabled, QToolButton#btnPrimary:disabled,
+QToolButton.sampleTile:disabled, QToolButton#scaleChip:disabled,
+QToolButton#layerCheckAllBtn:disabled, QToolButton#layoutLayerCheckAllBtn:disabled, QToolButton#crsButton:disabled,
+QToolButton#renderToggle:disabled,
+QWidget#beginnerRibbon QToolButton:disabled,
+QToolBar#mainToolbar QToolButton:disabled,
+QToolBar#studioToolbar QToolButton:disabled,
+QToolBar#subToolbar QToolButton:disabled,
+QToolBar#studioToolRail QToolButton:disabled,
+QWidget#regionLocator QToolButton#regionChip:disabled,
+QToolBar#mainToolbar QToolButton#regionChip:disabled,
+QFrame#layersCard QToolButton:disabled,
+QFrame#filesCard QToolButton:disabled,
+QFrame#studioFilesPanel QToolButton:disabled {
+  background: @disabledSurface@;
+  color: @inkDisabled@;
+  border-color: @border@;
+}
+
+/* PDF is a sample tile too: its primary ID must not erase the shared face. */
+QToolButton.sampleTile#btnPrimary:enabled {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.42 @glossShoulder@, stop:0.48 @glossMiddle@, stop:1 @glossBottom@);
+  color: @accentDeep@;
+  border: 1px solid @border@;
+  border-radius: 8px;
+}
+QToolButton.sampleTile#btnPrimary:enabled:hover { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.48 @glossShoulder@, stop:1 @hoverBottom@); }
+QToolButton.sampleTile#btnPrimary:enabled:pressed { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @pressedTop@, stop:1 @pressedBottom@); }
+QToolButton.sampleTile#btnPrimary:disabled {
+  background: @disabledSurface@;
+  color: @inkDisabled@;
+  border: 1px solid @border@;
+}
+
+/* Pressed takes precedence over checked/hover, including scoped button faces. */
+QToolButton#scaleChip:enabled:hover {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.16 @glossReflection@, stop:0.48 @glossShoulder@, stop:1 @hoverBottom@);
+}
+QToolButton#scaleChip:enabled:checked:hover {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @glossReflection@, stop:0.12 @glossReflection@, stop:0.46 @selectedTop@, stop:1 @selectedBottom@);
+}
+QPushButton:enabled:checked:pressed,
+QToolButton:enabled:checked:pressed,
+QToolButton#btnPrimary:enabled:checked:pressed,
+QToolButton.sampleTile:enabled:pressed,
+QToolButton.sampleTile:enabled:checked:pressed,
+QToolButton#scaleChip:enabled:pressed,
+QToolButton#scaleChip:enabled:checked:pressed,
+QToolButton#layerCheckAllBtn:enabled:pressed,
+QToolButton#layoutLayerCheckAllBtn:enabled:pressed,
+QToolButton#crsButton:enabled:pressed,
+QToolButton#renderToggle:enabled:pressed,
+QToolButton#renderToggle:enabled:checked:pressed,
+QWidget#beginnerRibbon QToolButton:enabled:checked:pressed,
+QToolBar#mainToolbar QToolButton:enabled:checked:pressed,
+QToolBar#subToolbar QToolButton:enabled:checked:pressed,
+QWidget#regionLocator QToolButton#regionChip:enabled:pressed,
+QWidget#regionLocator QToolButton#regionChip:enabled:checked:pressed,
+QToolBar#mainToolbar QToolButton#regionChip:enabled:pressed,
+QToolBar#mainToolbar QToolButton#regionChip:enabled:checked:pressed,
+QFrame#layersCard QToolButton:enabled:checked:pressed,
+QFrame#filesCard QToolButton:enabled:checked:pressed,
+QFrame#studioFilesPanel QToolButton:enabled:checked:pressed {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @pressedTop@, stop:1 @pressedBottom@);
+  color: @ink@;
+  margin-top: 0;
+}
+QPushButton:default:enabled:checked:pressed,
+QPushButton#btnAdjustDone:enabled:checked:pressed,
+QPushButton.primary:enabled:checked:pressed,
+QPushButton#btnPrimary:enabled:checked:pressed {
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @accentDeep@, stop:1 @accentHover@);
+  color: @surface@;
+}
+
+
+/* A thin light edge supports the reflection band without adding bevel depth.
+   Pressed and disabled faces retain their existing flat/darker edges. */
+QPushButton:enabled:!pressed:!checked,
+QPushButton#startNewBtn:enabled:!pressed:!checked,
+QPushButton#startOpenBtn:enabled:!pressed:!checked,
+QWidget#beginnerRibbon QToolButton:enabled:!pressed:!checked,
+QToolButton.sampleTile:enabled:!pressed:!checked,
+QToolButton.sampleTile#btnPrimary:enabled:!pressed:!checked,
+QToolButton#scaleChip:enabled:!pressed:!checked,
+QFrame#layersCard QToolButton:enabled:!pressed:!checked,
+QFrame#filesCard QToolButton:enabled:!pressed:!checked,
+QFrame#studioFilesPanel QToolButton:enabled:!pressed:!checked {
+  border-top-color: @edgeLight@;
+}
+QPushButton:default:enabled:!pressed:!checked,
+QPushButton#btnPrimary:enabled:!pressed:!checked,
+QPushButton#btnAdjustDone:enabled:!pressed:!checked,
+QPushButton.primary:enabled:!pressed:!checked {
+  border-top-color: @accentReflection@;
+}

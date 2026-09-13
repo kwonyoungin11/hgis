@@ -1,0 +1,132 @@
+#include "KaBeginnerRibbon.h"
+#include "KaTheme.h"
+
+#include <algorithm>
+
+#include <QAction>
+#include <QFontMetrics>
+#include <QFrame>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QSizePolicy>
+#include <QToolButton>
+#include <QVBoxLayout>
+
+KaBeginnerRibbon::KaBeginnerRibbon(QWidget* parent) : QWidget(parent) {
+  setObjectName(QStringLiteral("beginnerRibbon"));
+  setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+  m_row = new QHBoxLayout(this);
+  const auto& metrics = KaTheme::buttonMetrics();
+  m_row->setContentsMargins(metrics.buttonSpacing, metrics.buttonPadding,
+                           metrics.buttonSpacing, metrics.buttonPadding);
+  m_row->setSpacing(metrics.buttonSpacing);
+}
+
+QFrame* KaBeginnerRibbon::addGroup(const QString& id, const QString& caption) {
+  if (m_groups.contains(id))
+    return m_groups.value(id);
+  auto* fr = new QFrame(this);
+  fr->setObjectName(QStringLiteral("ribbonGroup"));
+  auto* vl = new QVBoxLayout(fr);
+  const auto& metrics = KaTheme::buttonMetrics();
+  vl->setContentsMargins(metrics.buttonSpacing, metrics.buttonPadding,
+                        metrics.buttonSpacing, metrics.buttonPadding);
+  vl->setSpacing(metrics.buttonPadding);
+  auto* cap = new QLabel(caption, fr);
+  cap->setObjectName(QStringLiteral("ribbonGroupCaption"));
+  cap->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+  cap->setWordWrap(false);
+  auto* btns = new QHBoxLayout();
+  btns->setContentsMargins(0, 0, 0, 0);
+  btns->setSpacing(metrics.buttonSpacing);
+  vl->addWidget(cap);
+  vl->addLayout(btns, 1);
+  m_row->addWidget(fr, 0);
+  m_groups.insert(id, fr);
+  m_btnRows.insert(id, btns);
+  return fr;
+}
+
+QHBoxLayout* KaBeginnerRibbon::buttonRow(const QString& groupId) const {
+  return m_btnRows.value(groupId, nullptr);
+}
+
+QToolButton* KaBeginnerRibbon::addAction(const QString& groupId, QAction* action) {
+  QHBoxLayout* row = buttonRow(groupId);
+  if (!row || !action)
+    return nullptr;
+  auto* b = new QToolButton(m_groups.value(groupId));
+  if (action)
+    action->setText(twoLine(action->text()));
+  b->setDefaultAction(action);
+  applyTwoLine(b);
+  row->addWidget(b);
+  return b;
+}
+
+void KaBeginnerRibbon::addWidget(const QString& groupId, QWidget* widget) {
+  QHBoxLayout* row = buttonRow(groupId);
+  if (!row || !widget)
+    return;
+  if (auto* b = qobject_cast<QToolButton*>(widget)) {
+    b->setText(twoLine(b->text()));
+    applyTwoLine(b);
+  }
+  row->addWidget(widget);
+}
+
+QString KaBeginnerRibbon::twoLine(const QString& text) {
+  const QString t = text.trimmed();
+  if (t.isEmpty() || t.contains(QLatin1Char('\n')))
+    return t;
+  if (t.contains(QLatin1Char('('))) {
+    const int paren = t.indexOf(QLatin1Char('('));
+    if (paren > 0)
+      return t.left(paren).trimmed() + QLatin1Char('\n') + t.mid(paren).trimmed();
+  }
+  if (t.size() <= 4)
+    return t;
+  int cut = t.lastIndexOf(QChar::Space, t.size() / 2 + 2);
+  if (cut < 1)
+    cut = t.indexOf(QChar::Space);
+  if (cut < 1)
+    cut = t.size() / 2;
+  const QString a = t.left(cut).trimmed();
+  const QString b = t.mid(cut).trimmed();
+  if (a.isEmpty() || b.isEmpty())
+    return t;
+  return a + QLatin1Char('\n') + b;
+}
+
+void KaBeginnerRibbon::applyTwoLine(QToolButton* button) {
+  if (!button)
+    return;
+  const auto& metrics = KaTheme::buttonMetrics();
+  button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+  button->setAutoRaise(false);
+  button->setFocusPolicy(Qt::TabFocus);
+  button->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+  button->setIconSize(QSize(metrics.ribbonIconSize, metrics.ribbonIconSize));
+  QFont font = button->font();
+  font.setPixelSize(metrics.ribbonFontSize);
+  button->setFont(font);
+  button->ensurePolished();
+  const QFontMetrics fm(button->font());
+  int textW = 0;
+  const QString text = button->text();
+  const QStringList lines = text.split(QLatin1Char('\n'));
+  for (const QString& line : lines) {
+    textW = std::max(textW, fm.horizontalAdvance(line));
+  }
+  const int contentWidth = std::max(textW, metrics.ribbonIconSize);
+  const int w = std::max(metrics.ribbonMinWidth, contentWidth + 2 * metrics.buttonPadding + 2);
+  button->setMinimumWidth(w);
+  // Reserve two label lines for every button, including single-line labels.
+  const int contentHeight = metrics.ribbonIconSize + 2 * fm.lineSpacing() +
+                            2 * metrics.buttonPadding + 3 + metrics.buttonSpacing;
+  button->setFixedHeight(std::max(metrics.ribbonHeight, contentHeight));
+}
+
+QFrame* KaBeginnerRibbon::group(const QString& id) const {
+  return m_groups.value(id, nullptr);
+}

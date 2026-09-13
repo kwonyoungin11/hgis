@@ -1,0 +1,161 @@
+# ka-hgis Codex Agent Rules
+
+This repository is **ka-hgis**: a standalone C++20/Qt6 desktop HGIS for Korean archaeology field drawings. It links against OSGeo4W `qgis-dev` through `qgis_core` and `qgis_gui`. It is not a QGIS fork.
+
+Reply in the user's language, usually Korean. Code, paths, and identifiers may remain English; user-visible UI strings should follow existing Korean `QStringLiteral` patterns.
+
+## Codex Runtime
+
+- Use native Codex App/CLI settings, skills, MCP tools, hooks, and subagents when they are available and useful.
+- Prefer the user's current GPT-6 Codex global profile for this project. Do not keep project-level Grok, Antigravity, Cursor-only, or old fixed model presets as required execution paths.
+- Legacy `.grok`, `.cursor`, `.agents` dispatch/history files, and Orca files may remain for history or compatibility, but they are not the authoritative harness for new Codex work. The explicitly maintained `.agents/skills/ka-hgis-gis/` is a current Codex project skill.
+- Do not introduce OpenCode, Sisyphus, hidden auto-push, or hardcoded personal credentials.
+- Work directly for small and local changes. Use Codex native subagents only for bounded independent research, review, or verification when that improves correctness or throughput.
+- Commit only when the user explicitly asks.
+
+## SSOT
+
+### Project-local GIS specialization
+
+- Global Codex settings supply general C++ guidance, GPT-6 and C++ tools. GIS rules belong only to this repository; do not copy them to global AGENTS.md or global skills.
+- Use [ka-hgis-gis](.agents/skills/ka-hgis-gis/SKILL.md) for HGIS implementation, diagnosis and review. It routes to relevant evidence and tests without requiring a GIS investigation for an unrelated edit.
+- Use [문화재인트라넷](.agents/skills/heritage-intranet/SKILL.md) for nearby-heritage intranet downloads, related legends and recovery; it records the confirmed success contract and the stale-object-file restore failure.
+- Resolve historical documentation against current user requirements, `.codex/NOW.md`, current handoffs and actual code. The original ADR's C++17/LTR baseline and the schema's legacy 5179 default do not override the current C++20/Qt6/qgis-dev build or selected survey CRS.
+- Use the repo PowerShell environment and installed OSGeo4W SDK. Do not replace this application's Qt/QGIS build, runtime plugins or package layout with the global standalone C++ template.
+
+Read these before non-trivial product or GIS work:
+
+1. `.codex/NOW.md` - current Codex session state and most recent field constraints.
+2. `HANDOFF.md` and `docs/HANDOFF.md` - product truth; edit both together when the handoff changes.
+3. `docs/adr/0001-standalone-cpp-qgis-libs.md` - Architecture B, no QGIS fork.
+4. `docs/domain/data-model.md` - GPKG layers and fields.
+5. `docs/architecture/data-flow.md` - critical path.
+6. `docs/vendor/qgis-manual-3.44/` - local QGIS manual/cookbook evidence for map, layer, edit-buffer, and layout behavior.
+
+Use official online documentation only when local repo evidence is missing or version-specific behavior matters.
+
+## Current Field Behavior
+
+- Startup opens the home screen only.
+- Do not auto-restore the last survey, recent project, drawing, basemap, WMS, XYZ, or workspace on launch.
+- The user must explicitly choose **조사 열기**, a recent survey item, or **새 조사** to open/create a project.
+- Do not reintroduce automatic LayersOnly restore, automatic basemap loading, or automatic project restore.
+- Do not modify the user's original survey data unless the requested operation is explicitly a save/export/edit operation.
+
+## Product Invariants
+
+- Architecture B only: link `qgis_core` / `qgis_gui`; do not fork QGIS; do not reimplement PROJ, GDAL, QGIS rendering, or CRS transformation.
+- Domain layer logic keys are `survey_area`, `feature_poly`, `feature_line`, `section_line`, `control_points`, and existing `artifact_point` where already supported.
+- Store logical domain identity in `ka_hgis/layer_key`; Korean titles are UI labels only.
+- Keep legend groups separated as **조사 데이터** and **참조 지도**. Basemaps, WMS, XYZ, soil, geology, masks, and aligned rasters are reference maps, not survey data.
+- Work CRS may be EPSG:5186 or EPSG:5187. Upload/export output is EPSG:5179 SHP + PDF + MANIFEST.
+- `loadSurveyLayers` must not call `removeAllMapLayers()`. Drop domain layers only and keep basemaps/reference layers when the workflow requires it.
+- `loadSurveyLayers` must not auto-add empty domain layers. GPKG schema can exist on disk; legend entries appear only after an explicit user draw/import/open action.
+- `LayerOps::ensureDomainLayer` is the only path that adds domain layers to the project/legend.
+- No hardcoded VWorld production API key. Use `VworldSettings`, local settings, environment, or gitignored `config/secrets.ini` only.
+- DXF is not a submit path. Submission/export remains SHP/PDF package through `ExportService`.
+- Keep GPLv2+ compliance and About notices intact.
+
+## QGIS Behavior Rules
+
+Use the local QGIS manual/cookbook as the design reference for QGIS lifecycle behavior:
+
+- Project starts without user layers until they are added or created.
+- A layer is a datasource; a feature is digitized geometry.
+- Basemap/reference data is separate from survey edit data.
+- GUI edit flow is `startEditing` -> modify/add features -> `commitChanges` or `rollBack`.
+- Feature creation should use `QgsFeature(layer.fields())`, `setGeometry`, and `addFeature`; do not add attribute dialogs during draw unless the user asks for that workflow.
+- Do not add a layer to the project only because a GPKG table exists.
+- Demo geometry belongs only behind explicit QA/demo flags.
+
+## Module Map
+
+| Area | Path | Notes |
+| --- | --- | --- |
+| UI shell | `src/app/MainWindow.*` | digitize, menus, project open/save |
+| App boot | `src/app/KaApplication.*` | `QgsApplication`, prefix, PATH |
+| Map tools/icons | `src/app/KaCaptureMapTool.*`, `src/app/KaAttributeMapTool.*`, `src/app/KaVertexEditTool.*`, `src/app/KaIcons.*` | capture, select, edit |
+| Layers/basemap | `src/core/LayerOps.*` | groups, `layer_key`, reference maps |
+| Survey GPKG | `src/core/SurveyProjectFactory.*`, `src/core/SurveyStorage.*` | survey creation/save/open |
+| Checklist | `src/core/ChecklistEngine.*`, `data/rules/drawing_checklist.v1.json` | submit blockers |
+| State | `src/core/ProjectStateBuilder.*` | live state for rules |
+| Export | `src/core/ExportService.*` | SHP 5179 + MANIFEST |
+| Layout/PDF | `src/core/LayoutService.*`, `src/app/KaDrawingStudio.*` | drawing studio, composed sheets |
+| Section studio | `src/app/KaSectionDrawingStudio.*`, `src/core/SectionLayoutService.*` | GeoTIFF section drawings |
+| Location/search | `src/core/LocationSearch.*`, `src/app/KaRegionLocator.*` | region and field map flows |
+| VWorld | `src/core/VworldSettings.*` | local key handling |
+| Tests | `tests/*` | `ka_hgis_tests`, workflow/save/open/theme tests |
+| Scripts | `scripts/*.ps1` | build, run, smoke, publish |
+
+Hotspots: `src/app/MainWindow.cpp` and `src/core/LayerOps.cpp`. Keep changes narrow; prefer small services over growing these files further when new behavior spans multiple concepts.
+
+## Development Flow
+
+- For explanations, investigations, and reviews, inspect and report without edits unless the user asks to change something.
+- For explicit verbs such as 적용, 설정, 구현, 수정, fix, add, change, create, or wire, make the smallest correct change and verify it.
+- Before non-trivial implementation, write a short working plan in the response or notes: symptom/goal, likely code or GIS cause, files to touch, and user-visible done check.
+- Preserve unrelated dirty work. Never revert changes you did not make.
+- Prefer existing project patterns and existing helper APIs.
+- No drive-by refactors.
+- No new dependencies unless the user explicitly asks or the existing codebase already requires them for the requested change.
+
+## C++/Build Defaults
+
+- C++20, Qt6, CMake, MSVC on Windows.
+- Prefer target-scoped CMake options over global flag pollution.
+- MSVC compile expectations: `/std:c++20`, `/Zc:__cplusplus`, `/permissive-`, `/EHsc`, and appropriate warnings where the existing target supports them.
+- Keep `.clangd`, `.clang-format`, `.clang-tidy`, and `CMakePresets.json` aligned with the actual build when editing them.
+- Do not use `-march=native` or CPU-specific release flags for portable field builds unless the user asks for machine-local performance binaries.
+- Treat `/fp:fast`, fast-math, sanitizer changes, PGO, and LTO as explicit build-policy changes that require evidence and compatibility checks with Qt/QGIS/OSGeo4W.
+
+## Verification
+
+Use PowerShell on this machine:
+
+```powershell
+$env:PATH = "C:\Program Files\CMake\bin;" + $env:PATH
+. .\scripts\dev-env.ps1
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 "-DOSGEO4W_ROOT=$env:OSGEO4W_ROOT" -DKA_HGIS_BUILD_TESTS=ON
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
+```
+
+For startup, UI, menu, map, or project-open changes, also run:
+
+```powershell
+.\scripts\run-ka-hgis.ps1 --smoke-quit
+```
+
+The user's normal entry point is the desktop **고고학 전용 HGIS** shortcut: `scripts/start-ka-hgis.vbs` -> `launch.ps1` -> `build/Release/ka-hgis.exe`. Keep that icon connected to the current Release build. Do not silently fall back to an older executable. Verify this launch chain for UI/map changes; do not close, restart, or operate the user's running app without a request.
+
+Portable creation, `scripts/publish-desktop.ps1`, and copying to `dist/ka-hgis-portable` or L: are separate delivery actions. Run them **only when the user explicitly requests portable output**, never automatically as a verification step. This is the user's latest workflow requirement and supersedes historical portable-check instructions.
+
+Docs/settings/hooks/rules-only changes do not require CMake, ctest, smoke, or publish unless they modify C++ build behavior. Validate those changes with file reads, diff review, and targeted text checks.
+
+## GIS Verify Gate
+
+For map, CRS, WMS/WMTS, digitize, georeference, layout, export, or layer-order bugs, gather concrete evidence before editing:
+
+- project CRS, layer CRS, on-the-fly transform state, canvas layer order, scale, and provider URI where relevant;
+- local QGIS manual/cookbook behavior for unfamiliar `Qgs*` APIs;
+- VWorld request shape and key source when VWorld layers are involved.
+
+Do not ask the user to diagnose EPSG, WMS, QGIS provider, or CRS behavior.
+
+## Git
+
+- Do not commit unless explicitly requested.
+- Do not force-push.
+- Do not commit secrets.
+- `docs/COMMIT_STATUS.md` is hook/script-maintained; do not hand-edit it casually.
+
+## Anti-Patterns
+
+- Treating basemap/reference data as survey domain data.
+- Calling `removeAllMapLayers()` during survey load.
+- Assuming work CRS is always 5179.
+- Reintroducing automatic startup restore.
+- Hardcoding VWorld keys.
+- Adding DXF as primary submit output.
+- Reintroducing Grok/Antigravity/Cursor-only requirements as Codex prerequisites.
+- Forcing large agent graphs for local one-file fixes.
