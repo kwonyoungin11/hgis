@@ -496,7 +496,7 @@ void KaHeritageBrowser::start() {
   m_downloadNavigation = false;
   const auto account = HeritageIntranetSettings::credentials();
   if (account.username.trimmed().isEmpty() || account.password.isEmpty()) {
-    fail(QStringLiteral("국가유산 인트라넷 계정이 없습니다. 더보기의 계정 설정에서 넣어 주세요."));
+    fail(QStringLiteral("국가유산 인트라넷 계정이 없습니다. 더보기 → 국가유산 인트라넷 아이디·비밀번호에서 넣어 주세요."));
     return;
   }
   if (m_sido.isEmpty() || m_city.isEmpty()) {

@@ -614,7 +614,7 @@ static QPixmap makeFieldSplashPixmap() {
   p.setPen(QColor(232, 220, 186));
   p.setFont(QFont(QStringLiteral("Malgun Gothic"), 10));
   p.drawText(QRect(48, 32, pm.width() - 96, 22), Qt::AlignLeft | Qt::AlignVCenter,
-             QStringLiteral("동국문화재연구원"));
+             QStringLiteral("동국문화재연구원  ·  만든이: youngin kwon"));
 
   p.setPen(Qt::white);
   p.setFont(QFont(QStringLiteral("Malgun Gothic"), 28, QFont::Bold));

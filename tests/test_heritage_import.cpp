@@ -16,6 +16,9 @@
 #include <qgsproject.h>
 #include <qgssymbol.h>
 #include <qgsvectorlayer.h>
+#include <qgsvectorfilewriter.h>
+#include <qgsfeature.h>
+#include <qgsgeometry.h>
 
 #include "core/HeritageImport.h"
 #include "core/HeritageSiteLegend.h"
@@ -55,6 +58,38 @@ class HeritageImportTest : public QObject {
   }
 
 private slots:
+  void cp949NamesSurviveAutomaticImport() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    QgsVectorLayer source(QStringLiteral("Polygon?crs=EPSG:5187&field=NAME:string(100)"),
+                          QStringLiteral("fixture"), QStringLiteral("memory"));
+    QVERIFY(source.startEditing());
+    QgsFeature feature(source.fields());
+    const QString name = QStringLiteral("안동 하회리 유적");
+    feature.setAttribute(0, name);
+    feature.setGeometry(QgsGeometry::fromWkt(QStringLiteral(
+        "POLYGON((100000 400000,100010 400000,100010 400010,100000 400010,100000 400000))")));
+    QVERIFY(source.addFeature(feature));
+    QVERIFY(source.commitChanges());
+    QgsVectorFileWriter::SaveVectorOptions options;
+    options.driverName = QStringLiteral("ESRI Shapefile");
+    options.fileEncoding = QStringLiteral("CP949");
+    const QString shp = temp.filePath(QStringLiteral("문화유적.shp"));
+    QCOMPARE(QgsVectorFileWriter::writeAsVectorFormatV3(&source, shp, QgsCoordinateTransformContext(), options),
+             QgsVectorFileWriter::NoError);
+    QgsProject project;
+    const auto imported = HeritageImport::loadDataset(&project, HeritageDataset::DesignatedHeritage,
+                                                      {shp}, temp.filePath(QStringLiteral("cache")));
+    QVERIFY2(imported.ok(), qPrintable(imported.error));
+    QCOMPARE(imported.layers.size(), 1);
+    QgsFeature read;
+    QVERIFY(imported.layers.first()->getFeatures().nextFeature(read));
+    QCOMPARE(read.attribute(QStringLiteral("NAME")).toString(), name);
+    const auto* renderer = dynamic_cast<const QgsCategorizedSymbolRenderer*>(imported.layers.first()->renderer());
+    QVERIFY(renderer);
+    QCOMPARE(renderer->categories().first().label(), name);
+  }
+
   void receivedIncompleteZipRequestsRetry() {
     const QString path = qEnvironmentVariable("KA_HERITAGE_INCOMPLETE_ZIP");
     if (path.isEmpty()) QSKIP("Local received ZIP inspection is opt-in.");

@@ -1,3 +1,52 @@
+## 2026-09-15 문화재인트라넷 SHP 한글 깨짐 조사 중
+
+- 사용자가 자동으로 받은 SHP에서 한글이 다른 문자로 깨진다고 명확히 확인했다. UI 글꼴 크기/두께 문제는 아니다.
+- 현재 로컬 캐시 24개 SHP의 DBF 문자 필드와 CP949 .cpg를 읽기 전용 검사했다. 설치 SDK의 QGIS에서 CP949로 읽은 속성·uniqueValues·필드 이름은 정상, 대체 문자 0. UTF-8로 강제 읽으면 대체 문자 51,959개로 오독을 재현한다. 이 강제 설정이 실제 사용자 화면의 원인이라는 증거는 아직 없다.
+- C++ HeritageImport 경로에 CP949 합성 SHP 회귀 검사 cp949NamesSurviveAutomaticImport를 추가하여 원본→자동 적재→범례 이름 정상 확인. 테스트 빌드/단독 검사 통과. 제품 코드/원본 데이터/폰트는 아직 변경하지 않았다.
+- 현재 GUI PID28828은 대구 조사에 미저장 표시(*)와 응답 없음 상태다. 읽기 전용 화면에는 유산 레이어 제목이 정상이며 지도 라벨은 표시되지 않아 깨진 글자 자체를 확인하지 못했다. 사용자 앱을 종료하거나 미저장 작업을 폐기하지 않았다.
+- 깨진 유적명 한 개와 가능한 원래 표기를 사용자에게 비동기로 요청했다. 증상이 재현되지 않은 상태에서 추정 인코딩/글꼴 변경을 하지 않는다. 근거/현재 계획: build/qa/heritage-text-20260915/.
+
+## 2026-09-15 자동 지역 판정·지적도 복구, 글꼴 추가 조사 중
+
+- 현재 PC의 이전 VWorld 키는 공식 주소 API와 WMS 양쪽에서 INVALID_KEY였다. 사용자가 새 키를 앱에 입력했으며 새 개인 키로 두 API가 정상이다. 키 값은 출력하거나 저장소에 넣지 않았다.
+- LayerOps는 저장된 GDAL XML 경로에서 키를 갱신하지 못했다. VWorld 지적 XML만 읽어 새 키와 0.5m 정방형 픽셀의 inline XML로 provider를 다시 연결한다. 원본 XML/조사 파일을 덮어쓰지 않는다. 신규 GDAL 지적도도 같은 해상도를 사용한다. 기존 79.3457m/pixel에서는 유효 키로도 빈 영상이었고 0.5m에서는 필지·지번이 나왔다.
+- HeritageRegionResolver의 기존 조사구역 내부 대표점 → 원본 레이어 CRS → 4326 → 시도/시군 경로를 유지한다. INVALID_KEY/INCORRECT_KEY를 일반 판정 실패로 숨기지 않고 정확한 키 설정 메뉴를 안내한다.
+- 안동시_복사본_복사본.gpkg를 읽기 전용으로 확인: survey_area EPSG:5187, 2개 도형, 마지막 도형 주소 응답 경상북도 안동시. 보정한 GDAL 설정을 같은 SDK/QGIS로 5187에 재투영한 지적도 렌더 오류 0, 지번/경계 이미지 확인. 실행 중 미저장 도형 상태를 검사했다는 뜻은 아니다.
+- Release 빌드·heritage_region/heritage_setup_dialogs·키갱신/원본보존/표시상태/해상도/QGS 저장재개 회귀·시작 smoke 통과. 기존 실행본은 종료하지 않고 build/Release/ka-hgis.before-region-cadastral.exe로 이름을 보존해 빌드했고, 기존 앱이 사라진 뒤 정상 바로가기 경로로 새 Release 홈 화면을 확인했다. 현재 EXE SHA256 E338A9DDAEF0C82D1A787F084552A40BDABB6F6ED9C8813C8F9AC3A5CAF469E9.
+- 근거: build/qa/region-cadastral-20260915/. Graft 사용처, clangd 정의/진단, 독립 소스 검토와 수정 전 Archify 진단 9/9/브라우저 확인. 실사이트 주변유적 로그인·여섯 자료 다운로드 성공은 아직 별도 미검증이다.
+- 사용자가 이어서 '폰트가 이상하게 나온다. 수정해야한다' 요청. 새 앱 홈 화면 캡처 확인, UI 글꼴/지도 글자 중 어디인지 질문 대기. 현재 기본 UI는 Malgun Gothic 13px이며 아직 글꼴 관련 코드는 변경하지 않았다.
+
+## 2026-09-15 주변유적 받기 시작 단계 복구
+
+- 사용자 증상은 로그인·시군 찾기에서 멈춤. 이 PC에 국가유산 인트라넷 계정 파일이 없고, 기존 안내가 가리키는 계정 메뉴도 없었다. 실행 로그에 VWorld INVALID_KEY가 있으며 자동 지역 판정 실패 슬롯은 안내만 보여 수동 선택으로 진행할 수 없었다.
+- MainWindow에서 판정 실패 시 남은 요청을 취소하고 KaHeritageRegionDialog의 시도/시군 선택으로 이어진다. 기존 KoreaRegionCatalog 목록을 사용하고 전국·미선택은 허용하지 않는다. 정상 판정도 같은 창에서 확인·수정한다.
+- KaHeritageAccountDialog와 더보기 메뉴를 추가했다. 계정이 없으면 지역 선택 후 입력받고, 기존 HeritageIntranetSettings::saveCredentials가 성공하여 완전한 계정이 있을 때만 기존 Browser 시작으로 이어진다. 취소·저장 실패·빈 계정은 시작하지 않는다. 사용자 조사 원본과 실제 계정 값은 수정하지 않았다.
+- Graft 실제 MCP로 사용처/테스트/최신성을 확인했고, clangd에서 새 UI 진단 오류 0과 기존 계정 저장 함수 연결을 확인했다. 컴파일 DB 246항목으로 갱신. Archify 검토자료와 로그는 build/qa/heritage-startup-20260915/에 보존한다.
+- Release 앱 빌드, 관련 CTest 6개(새 dialog/region/form/retry/import/style), 최신 Browser 재컴파일 후 retry 재검사, 시작 smoke 통과. 새 앱 PID30360에서 홈 시작과 실제 계정 메뉴/입력창을 확인하고 사용자 입력을 위해 열어 두었다. 실사이트 로그인·여섯 자료 다운로드 성공은 계정 부재로 미검증이며 기존 전체-suite 실패 해결로 간주하지 않는다.
+
+## 2026-09-14 제작자 표시
+
+- 사용자의 요청으로 시작 스플래시와 더보기 → 정보에 `만든이: youngin kwon`을 추가했다. 기관명과 라이선스 고지는 유지했다. 변경은 `KaApplication.cpp`, `MainWindow.cpp`의 표시 문자열뿐이다.
+- 현재 Release 앱 빌드와 `--smoke-quit` 통과. 로그는 `build/qa/author-credit/`. 일반 실행도 창 표시까지 확인했으나 정보 창 UI 검증 중 앱 창/프로세스가 사라져 이름의 실제 화면 캡처는 완료하지 못했다. 종료 원인은 확인하지 않았으며 재실행·데이터 조작하지 않았다.
+
+## 2026-09-14 검증된 개발 도구 연결
+
+- 사용자의 추가 설정 요청에 따라 프로젝트 로컬 도구를 실제 설치·연결했다. 현재 사용법과 고정 버전은 `docs/developer-tools.md`, 역할 분담은 `AGENTS.md`의 Verified developer tools를 따른다.
+- `.codex/config.toml`의 `hgis_graft` 서버는 `scripts/graft-mcp.mjs`로 검색·파일 구조·최신성 네 가지 도구만 제공한다. Codex app-server의 실제 config/read에서 프로젝트 설정 병합을 확인했고, 같은 실행 명령의 stdio 초기화·목록·네 가지 실제 조회·제외된 호출 추적 거부를 확인했다. 다음 턴에서 도구가 보이지 않으면 앱을 다시 열어 설정을 로드한다.
+- Graft는 `build/tooling/graft-source`의 고정 f9e65396e638e517aecae0d731017f53084d70ed 소스를 사용한다. `src/`, `tests/`의 구조 인덱스는 `build/tooling/graft-index`에 쓰며 내용 해시로 최신성을 검사한다. 같은 크기·수정 시간을 보존한 변경도 회귀 검사에 포함했다. Windows LSP 탐지 보정 실험은 표본 6/10 호출만 찾아 호출 추적은 제공하지 않는다.
+- 직접 clangd 정의 조회 표본은 10/10 정확했다. `scripts/clangd-definition.py`로 현재 코드 위치의 선언/정의를 조회한다. helper의 실제 조회 3건 및 실패·시간제한 7건을 확인했다. 전체 영향 범위 조회라는 의미는 아니다.
+- Archify 고정 a07fa1d5b2a10cbea110c5a2be2817397a301cdc를 `.agents/skills/archify`에 로컬 설치했다. `scripts/archify.ps1`에서 doctor, 구조도 validate/deliver 9/9, Chrome visual-check를 확인했다. 고정 영어 Viewer UI 및 Windows preview 종료 한계는 `docs/archify-setup.md`에 남겼다.
+- 이번 설정의 상세 검증은 `build/qa/dev-tools-setup-20260914/REPORT.md`. 제품 C++와 테스트는 변경하지 않았다. 아래 전체 CTest의 기존 실패는 해결된 것으로 간주하지 않는다.
+
+## 2026-09-14 현재 PC 개발 경로 정렬 및 도구 검증
+
+- 현재 작업 저장소는 `A:/qgis`, GIS SDK는 `A:/OSGeo4W`다. 아래 과거 `D:/hgis` 복구·전달 경로는 이 PC의 개발 경로가 아니다.
+- 앱 빌드는 VS2022 x64 `build/Release/ka-hgis.exe`, 분석용 Ninja 구성은 `build-clangd`다. `scripts/dev-env.ps1`과 CMake preset은 현재 SDK를 사용한다. `scripts/gen-compile-commands.ps1`이 VS/Windows SDK include를 포함한 실제 컴파일 DB를 생성하며 `.clangd`는 `build/compile_commands.json`을 읽는다.
+- Release 전체 빌드, 일반 PowerShell의 ExportService clangd 구문 분석, 시작 스모크가 통과했다. 바탕화면 `고고학 전용 GIS` 바로가기는 현재 저장소 `scripts/start-ka-hgis.vbs` → `launch.ps1` → Release로 연결했고 이전 바로가기는 QA 폴더에 백업했다. 자동 포터블 생성은 제거했다.
+- 전체 CTest는 43개 실행 중 39개 통과/4개 실패, 별도 1개 비활성이다. 실패 4개 중 `heritage_download_retry`는 단독 7/7 통과했고 `save_open_window`는 순차 재검사 239.87초에 통과했다(제한 240초에 근접). 반복 재현 실패는 `heritage_flow`의 JS 기대값 8개와 `e2e_opaque_suite`의 WMTS 예시 키 교체 검사다. 상세 결과는 `build/qa/tooling-validation-20260914/path-alignment.md`를 따른다. 전체 테스트 통과로 표현하지 않는다.
+- 최초 검증 당시 Graft 0.18.0은 표본 직접 호출 10개 중 1개만 찾았고 Windows clangd 탐색도 실패했다. Archify는 표본 구조도 검증/브라우저 표시를 통과했으나 Windows preview 종료 테스트 실패가 남았다. 이후 사용자의 추가 설정 요청으로 위의 제한된 프로젝트 로컬 연결을 적용했다.
+- 상세 검증/재현 로그/구조도: `build/qa/tooling-validation-20260914/REPORT.md`. 제품 C++/테스트 소스, 사용자 조사 원본은 변경하지 않았고 커밋·포터블 배포하지 않았다.
+
 ## 2026-09-13 주변유적 파일 응답·재시도 복구
 
 - 이번 변경은 KaHeritageBrowser.cpp/h와 로컬 회귀 테스트 소스에 한정한다. 지형도·공용 압축·번호·범례 코드는 이번 작업에서 수정하지 않았다. 이전 작업의 미커밋 변경은 보존했다.

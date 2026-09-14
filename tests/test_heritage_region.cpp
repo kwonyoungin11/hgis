@@ -72,6 +72,25 @@ private slots:
     QVERIFY(!HeritageRegionResolver::parseAddress(QByteArray("<html>error</html>")).ok());
   }
 
+  void rejectedKeyExplainsBothAutomaticRegionAndCadastral() {
+    for (const QByteArray code : {QByteArray("INVALID_KEY"), QByteArray("INCORRECT_KEY")}) {
+      const QByteArray body = "{\"response\":{\"status\":\"ERROR\",\"error\":{\"code\":\"" + code
+          + "\",\"text\":\"private-key-must-not-appear\"}}}";
+      QString error;
+      QVERIFY(!HeritageRegionResolver::parseAddress(body, &error).ok());
+      QVERIFY(error.contains(QStringLiteral("VWorld API 키")));
+      QVERIFY(error.contains(QStringLiteral("자동 시·도")));
+      QVERIFY(error.contains(QStringLiteral("지적도")));
+      QVERIFY(error.contains(QString::fromLatin1(code)));
+      QVERIFY(!error.contains(QStringLiteral("private-key")));
+    }
+    QString error = QStringLiteral("old failure");
+    const QByteArray ok = QStringLiteral(R"({"response":{"status":"OK","result":[
+      {"structure":{"level1":"경상북도","level2":"안동시"}}]}})").toUtf8();
+    QVERIFY(HeritageRegionResolver::parseAddress(ok, &error).ok());
+    QVERIFY(error.isEmpty());
+  }
+
   void addressUrlCarriesPointAndKey() {
     const QUrl url = HeritageRegionResolver::buildAddressUrl(QStringLiteral("KEY123"), 128.5, 36.5);
     const QUrlQuery q(url);

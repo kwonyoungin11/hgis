@@ -49,6 +49,7 @@
 #include "core/Terrain3dLayoutService.h"
 #include "core/LayerOps.h"
 #include "KaHeritageBrowser.h"
+#include "KaHeritageSetupDialogs.h"
 #include "core/HeritageImport.h"
 #include "core/HeritageIntranetSettings.h"
 #include "core/HeritageRegionResolver.h"
@@ -1053,6 +1054,7 @@ void MainWindow::buildMenus() {
   });
   moreMenu->addAction(QStringLiteral("VWorld API 키"), this, &MainWindow::configureVworldKey);
   moreMenu->addAction(QStringLiteral("수치지형도 아이디·비밀번호"), this, &MainWindow::configureTopographicAccount);
+  moreMenu->addAction(QStringLiteral("국가유산 인트라넷 아이디·비밀번호"), this, &MainWindow::configureHeritageAccount);
   moreMenu->addAction(QStringLiteral("정보"), this, &MainWindow::showAbout);
   more->setMenu(moreMenu);
   more->setPopupMode(QToolButton::InstantPopup);
@@ -8463,6 +8465,7 @@ void MainWindow::showAbout() {
       QStringLiteral(
           "필드고고학GIS  버전 1\n"
           "동국문화재연구원\n"
+          "만든이: youngin kwon\n"
           "향후 업데이트 진행\n"
           "\n"
           "QGIS를 포크하지 않고 qgis_core / qgis_gui를 링크합니다.\n"
@@ -8476,6 +8479,11 @@ void MainWindow::showAbout() {
           "GEOS  © GEOS contributors  ·  LGPLv2.1\n"
           "\n"
           "본 소프트웨어는 GNU GPL v2 이상으로 배포됩니다."));
+}
+
+bool MainWindow::configureHeritageAccount() {
+  KaHeritageAccountDialog dialog(this);
+  return dialog.exec() == QDialog::Accepted && HeritageIntranetSettings::hasCredentials();
 }
 
 // 조사구역이 속한 시/군의 국가유산 자료를 받아 온다.
@@ -8515,8 +8523,11 @@ void MainWindow::fetchNearbyHeritage() {
   if (!m_heritageResolver) {
     m_heritageResolver = new HeritageRegionResolver(this);
     connect(m_heritageResolver, &HeritageRegionResolver::failed, this, [this](const QString& why) {
+      // A previous lookup can still be pending (e.g. a repeated click). Its late
+      // result must not restart the operation after the user selects a region.
+      m_heritageResolver->cancel();
       if (m_heritageBrowser) m_heritageBrowser->showWaiting(why);
-      QMessageBox::warning(this, QStringLiteral("주변유적 받기"), why);
+      openHeritageBrowserFor({}, why);
     });
     connect(m_heritageResolver, &HeritageRegionResolver::resolved, this,
             [this](const HeritageRegion& region) { openHeritageBrowserFor(region); });
@@ -8554,28 +8565,20 @@ void MainWindow::ensureHeritageBrowser() {
 }
 
 // 판정 결과를 확인받고 받기를 시작한다. 시·군 경계에 걸친 조사가 흔해서 이 한 번은 묻는다.
-void MainWindow::openHeritageBrowserFor(const HeritageRegion& region) {
+void MainWindow::openHeritageBrowserFor(const HeritageRegion& region, const QString& reason) {
   ensureHeritageBrowser();
-  const QString guess = region.display();
-  bool accepted = false;
-  const QString answer = QInputDialog::getText(
-      m_heritageBrowser, QStringLiteral("주변유적 받기"),
-      QStringLiteral("조사구역이 속한 시·군입니다. 맞으면 그대로 두고, 아니면 고치세요.\n"
-                     "(자료는 시·군 단위로만 받습니다)"),
-      QLineEdit::Normal, guess, &accepted);
-  if (!accepted) {
+  KaHeritageRegionDialog choice(region.sido, region.city, reason, m_heritageBrowser);
+  if (choice.exec() != QDialog::Accepted) {
     m_heritageBrowser->showWaiting(QStringLiteral("취소했습니다."));
     return;
   }
-
-  const QStringList parts = answer.trimmed().split(QLatin1Char(' '), Qt::SkipEmptyParts);
-  if (parts.size() < 2) {
-    QMessageBox::warning(this, QStringLiteral("주변유적 받기"),
-                         QStringLiteral("「경상북도 안동시」처럼 시·도와 시·군을 함께 적어 주세요."));
+  const QString sido = choice.sido();
+  const QString city = choice.city();
+  if (!HeritageIntranetSettings::hasCredentials() && !configureHeritageAccount()) {
+    m_heritageBrowser->showWaiting(QStringLiteral(
+        "받기를 시작하지 않았습니다. 국가유산 인트라넷 아이디·비밀번호를 저장한 뒤 다시 눌러 주세요."));
     return;
   }
-  const QString sido = parts.first();
-  const QString city = parts.mid(1).join(QLatin1Char(' '));
 
   // **OneDrive 를 거치지 않는다.** 바탕 화면이 동기화 폴더라 내려받는 중에 가로채여
   // 0바이트로 보이는 일이 있었다(2026-09-12). 받는 자리는 로컬로 고정한다.

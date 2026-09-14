@@ -269,6 +269,7 @@ private slots:
   void invalidWorkspaceLayer_isReplacedFromGpkgTable();
   void renamedSurvey_repointsImportedLayersInsteadOfDuplicating();
   void savedVworldUrl_swapsExpiredKeyForCurrentOne();
+  void savedVworldGdalXml_refreshesKeyWithoutChangingOriginal();
   void savedGpkgWorkspace_restoresLegendMembership_data();
   void savedGpkgWorkspace_restoresLegendMembership();
   void savedGpkgWorkspace_sameKeyKeepsDistinctTables_data();
@@ -6076,6 +6077,65 @@ void TestWorkflow::savedVworldUrl_swapsExpiredKeyForCurrentOne() {
   QVERIFY(!sat->source().contains(expired));
   // 두 번 불러도 더 바꿀 것이 없다.
   QCOMPARE(LayerOps::refreshVworldApiKeyInLayers(&project, fresh), 0);
+}
+
+void TestWorkflow::savedVworldGdalXml_refreshesKeyWithoutChangingOriginal() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  const QString expired = QStringLiteral("00000000-1111-2222-3333-444455556666");
+  const QString fresh = QStringLiteral("11112222-3333-4444-5555-666677778888");
+  const QByteArray xml = QStringLiteral(
+      "<GDAL_WMS><Service name=\"WMS\"><Version>1.3.0</Version>"
+      "<ServerUrl>https://api.vworld.kr/req/wms?key=%1&amp;</ServerUrl>"
+      "<Layers>lp_pa_cbnd_bonbun,lp_pa_cbnd_bubun</Layers>"
+      "<CRS>EPSG:3857</CRS><ImageFormat>image/png</ImageFormat>"
+      "<Transparent>TRUE</Transparent></Service>"
+      "<DataWindow><UpperLeftX>13500000</UpperLeftX><UpperLeftY>4800000</UpperLeftY>"
+      "<LowerRightX>14800000</LowerRightX><LowerRightY>3800000</LowerRightY>"
+      "<SizeX>16384</SizeX><SizeY>16384</SizeY></DataWindow>"
+      "<Projection>EPSG:3857</Projection><BandsCount>4</BandsCount>"
+      "<Referer>https://localhost</Referer><OfflineMode>true</OfflineMode>"
+      "</GDAL_WMS>").arg(expired).toUtf8();
+  const QString path = dir.filePath(QStringLiteral("old-cadastral.xml"));
+  QFile file(path);
+  QVERIFY(file.open(QIODevice::WriteOnly));
+  QCOMPARE(file.write(xml), xml.size());
+  file.close();
+  QgsProject project;
+  auto* cad = new QgsRasterLayer(path, QStringLiteral("지적"), QStringLiteral("gdal"));
+  QVERIFY(cad->isValid());
+  cad->setOpacity(0.65);
+  LayerOps::markReferenceLayer(cad);
+  project.addMapLayer(cad);
+  const QString id = cad->id();
+  project.layerTreeRoot()->findLayer(id)->setItemVisibilityChecked(false);
+  QStringList changed;
+  QCOMPARE(LayerOps::refreshVworldApiKeyInLayers(&project, fresh, &changed), 1);
+  QCOMPARE(changed, QStringList{QStringLiteral("지적")});
+  QVERIFY(cad->isValid());
+  QCOMPARE(cad->id(), id);
+  QCOMPARE(cad->opacity(), 0.65);
+  QVERIFY(!project.layerTreeRoot()->findLayer(id)->isVisible());
+  QVERIFY(cad->source().contains(fresh));
+  QVERIFY(!cad->source().contains(expired));
+  QCOMPARE(cad->crs().authid(), QStringLiteral("EPSG:3857"));
+  QVERIFY(cad->rasterUnitsPerPixelX() <= 0.5);
+  QVERIFY(cad->rasterUnitsPerPixelY() <= 0.5);
+  QCOMPARE(LayerOps::refreshVworldApiKeyInLayers(&project, fresh), 0);
+  // A later key change must also reach the inline GDAL source.
+  QCOMPARE(LayerOps::refreshVworldApiKeyInLayers(&project, expired), 1);
+  QVERIFY(cad->source().contains(expired));
+  QVERIFY(file.open(QIODevice::ReadOnly));
+  QCOMPARE(file.readAll(), xml);
+  const QString workspace = dir.filePath(QStringLiteral("refreshed.qgs"));
+  QVERIFY(project.write(workspace));
+  QgsProject reopened;
+  QVERIFY(reopened.read(workspace));
+  auto* restored = qobject_cast<QgsRasterLayer*>(reopened.mapLayer(id));
+  QVERIFY(restored && restored->isValid());
+  QVERIFY(restored->source().contains(expired));
+  QVERIFY(restored->rasterUnitsPerPixelX() <= 0.5);
+  QVERIFY(restored->rasterUnitsPerPixelY() <= 0.5);
 }
 
 void TestWorkflow::savedGpkgWorkspace_restoresLegendMembership_data() {

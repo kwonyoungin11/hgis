@@ -26,6 +26,8 @@
 #include <QColor>
 #include <QFont>
 #include <QDir>
+#include <QDomDocument>
+#include <QUrlQuery>
 #include <QSet>
 #include <QTemporaryFile>
 #include <QPointer>
@@ -2779,6 +2781,78 @@ QString LayerOps::withVworldApiKey(const QString& source, const QString& current
   return out;
 }
 
+// GDAL sources can be a saved XML filename, not a URL. Reconnect with inline XML
+// so a saved survey's original file is never overwritten just by opening it.
+static QString refreshedVworldGdalSource(const QString& source, const QString& currentKey) {
+  QString xml = source;
+  if (!xml.trimmed().startsWith(QLatin1String("<GDAL_WMS"))) {
+    const QFileInfo info(source);
+    if (!info.isFile() || info.size() > 256 * 1024) return source;
+    QFile file(source);
+    if (!file.open(QIODevice::ReadOnly)) return source;
+    xml = QString::fromUtf8(file.readAll());
+  }
+  QDomDocument doc;
+  if (!doc.setContent(xml)) return source;
+  QDomElement root = doc.documentElement();
+  if (root.tagName() != QLatin1String("GDAL_WMS")) return source;
+  QDomElement service = root.firstChildElement(QStringLiteral("Service"));
+  QDomElement server = service.firstChildElement(QStringLiteral("ServerUrl"));
+  QUrl url(server.text());
+  if (service.attribute(QStringLiteral("name")) != QLatin1String("WMS") ||
+      url.host().compare(QLatin1String("api.vworld.kr"), Qt::CaseInsensitive) != 0 ||
+      url.path() != QLatin1String("/req/wms")) return source;
+  const QStringList layers = service.firstChildElement(QStringLiteral("Layers")).text().split(',');
+  if (layers.isEmpty() || !std::all_of(layers.cbegin(), layers.cend(), [](const QString& layer) {
+        return layer.trimmed() == QLatin1String("lp_pa_cbnd_bonbun") ||
+               layer.trimmed() == QLatin1String("lp_pa_cbnd_bubun");
+      })) return source;
+
+  bool changed = false;
+  QUrlQuery query(url);
+  const auto items = query.queryItems();
+  for (const auto& item : items) {
+    if (item.first.compare(QLatin1String("key"), Qt::CaseInsensitive) == 0 &&
+        item.second != currentKey.trimmed()) {
+      query.removeAllQueryItems(item.first);
+      query.addQueryItem(item.first, currentKey.trimmed());
+      changed = true;
+    }
+  }
+  if (changed) {
+    url.setQuery(query);
+    while (!server.firstChild().isNull()) server.removeChild(server.firstChild());
+    server.appendChild(doc.createTextNode(url.toString(QUrl::FullyEncoded)));
+  }
+  // The old 16,384-pixel Korea-wide image requested ~79 m/pixel: even a close
+  // canvas zoom only magnified a blank, small-scale WMS tile. Use square 0.5 m
+  // pixels for this app's known Korea window; unrelated GDAL windows stay intact.
+  QDomElement window = root.firstChildElement(QStringLiteral("DataWindow"));
+  if (root.firstChildElement(QStringLiteral("Projection")).text() == QLatin1String("EPSG:3857") &&
+      window.firstChildElement(QStringLiteral("UpperLeftX")).text().toDouble() == 13500000.0 &&
+      window.firstChildElement(QStringLiteral("UpperLeftY")).text().toDouble() == 4800000.0 &&
+      window.firstChildElement(QStringLiteral("LowerRightX")).text().toDouble() == 14800000.0 &&
+      window.firstChildElement(QStringLiteral("LowerRightY")).text().toDouble() == 3800000.0) {
+    for (const auto& size : {qMakePair(QStringLiteral("SizeX"), QStringLiteral("2600000")),
+                             qMakePair(QStringLiteral("SizeY"), QStringLiteral("2000000"))}) {
+      QDomElement element = window.firstChildElement(size.first);
+      if (element.text() == size.second) continue;
+      if (element.isNull()) {
+        element = doc.createElement(size.first);
+        window.appendChild(element);
+      }
+      while (!element.firstChild().isNull()) element.removeChild(element.firstChild());
+      element.appendChild(doc.createTextNode(size.second));
+      changed = true;
+    }
+  }
+  if (!changed) return source;
+  QString result;
+  QTextStream stream(&result);
+  root.save(stream, 0);
+  return result;
+}
+
 int LayerOps::refreshVworldApiKeyInLayers(QgsProject* project, const QString& currentKey,
                                           QStringList* changed) {
   if (!project || currentKey.trimmed().isEmpty()) return 0;
@@ -2786,7 +2860,9 @@ int LayerOps::refreshVworldApiKeyInLayers(QgsProject* project, const QString& cu
   for (QgsMapLayer* l : project->mapLayers()) {
     if (!l) continue;
     const QString src = l->source();
-    const QString fixed = withVworldApiKey(src, currentKey);
+    const QString fixed = l->providerType() == QLatin1String("gdal")
+                              ? refreshedVworldGdalSource(src, currentKey)
+                              : withVworldApiKey(src, currentKey);
     if (fixed == src) continue;
     l->setDataSource(fixed, l->name(), l->providerType());
     l->triggerRepaint();
@@ -3604,8 +3680,8 @@ static bool addGdalVworldCadastral(QgsProject* project, QgsMapCanvas* canvas, co
                           "<UpperLeftY>4800000</UpperLeftY>"
                           "<LowerRightX>14800000</LowerRightX>"
                           "<LowerRightY>3800000</LowerRightY>"
-                          "<SizeX>16384</SizeX>"
-                          "<SizeY>16384</SizeY>"
+                          "<SizeX>2600000</SizeX>"
+                          "<SizeY>2000000</SizeY>"
                           "</DataWindow>"
                           "<Projection>EPSG:3857</Projection>"
                           "<BandsCount>4</BandsCount>"

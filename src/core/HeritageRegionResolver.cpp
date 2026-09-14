@@ -161,12 +161,27 @@ HeritageRegion HeritageRegionResolver::fromAddressText(const QString& text) {
   return out;
 }
 
-HeritageRegion HeritageRegionResolver::parseAddress(const QByteArray& body) {
+HeritageRegion HeritageRegionResolver::parseAddress(const QByteArray& body, QString* errorOut) {
   HeritageRegion out;
+  if (errorOut) errorOut->clear();
   const QJsonObject root = QJsonDocument::fromJson(body).object();
   const QJsonObject response = root.value(QStringLiteral("response")).toObject();
   const QString status = response.value(QStringLiteral("status")).toString();
-  if (status.compare(QLatin1String("OK"), Qt::CaseInsensitive) != 0) return out;
+  if (status.compare(QLatin1String("OK"), Qt::CaseInsensitive) != 0) {
+    if (errorOut) {
+      const QString code = response.value(QStringLiteral("error")).toObject()
+                               .value(QStringLiteral("code")).toString();
+      if (code == QLatin1String("INVALID_KEY") || code == QLatin1String("INCORRECT_KEY")) {
+        // Do not echo server text or a request URL: either can contain the key.
+        *errorOut = QStringLiteral("VWorld API 키가 서버에서 거절되었습니다 (%1).\n"
+                                  "더보기 → VWorld API 키에 유효한 키를 저장한 뒤 다시 누르세요.\n"
+                                  "이 키는 조사구역의 자동 시·도 판정과 지적도에 함께 사용됩니다.").arg(code);
+      } else {
+        *errorOut = QStringLiteral("VWorld에서 조사구역의 주소를 받지 못했습니다. 잠시 뒤 다시 시도하세요.");
+      }
+    }
+    return out;
+  }
 
   const QJsonArray results = response.value(QStringLiteral("result")).toArray();
   for (const QJsonValue& v : results) {
@@ -308,10 +323,16 @@ void HeritageRegionResolver::resolve(const QgsGeometry& surveyArea,
     reply->deleteLater();
 
     HeritageRegion region;
-    if (reply->error() == QNetworkReply::NoError) region = parseAddress(reply->readAll());
+    QString failure;
+    if (reply->error() == QNetworkReply::NoError)
+      region = parseAddress(reply->readAll(), &failure);
+    else
+      failure = QStringLiteral("행정구역 서버에 연결하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 누르세요.");
     if (!region.ok()) region = fromBoundaryLayers(m_fallbackProject.data(), wgs);
     if (!region.ok()) {
-      emit failed(QStringLiteral("좌표로 시·군을 찾지 못했습니다. 시·군을 직접 고르세요."));
+      emit failed(failure.isEmpty()
+                      ? QStringLiteral("좌표로 시·군을 찾지 못했습니다. 시·군을 직접 고르세요.")
+                      : failure);
       return;
     }
     region.insideSidoBounds = insideSido(region.sido, wgs);

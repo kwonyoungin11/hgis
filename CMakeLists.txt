@@ -207,6 +207,8 @@ add_executable(ka-hgis
   src/app/KaTopographicBrowser.h
   src/app/KaHeritageBrowser.cpp
   src/app/KaHeritageBrowser.h
+  src/app/KaHeritageSetupDialogs.cpp
+  src/app/KaHeritageSetupDialogs.h
   src/app/KaTopographicAccountDialog.cpp
   src/app/KaTopographicAccountDialog.h
   src/app/KaTopographicImportDialog.cpp
@@ -481,6 +483,11 @@ if(KA_HGIS_BUILD_TESTS)
   target_link_libraries(ka_topographic_account_dialog_tests PRIVATE ka_core Qt6::Test)
   set_target_properties(ka_topographic_account_dialog_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   add_test(NAME topographic_account_dialog COMMAND ka_topographic_account_dialog_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  add_executable(ka_heritage_setup_dialogs_tests tests/test_heritage_setup_dialogs.cpp
+    src/app/KaHeritageSetupDialogs.cpp src/app/KaHeritageSetupDialogs.h)
+  target_link_libraries(ka_heritage_setup_dialogs_tests PRIVATE ka_core Qt6::Test)
+  set_target_properties(ka_heritage_setup_dialogs_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+  add_test(NAME heritage_setup_dialogs COMMAND ka_heritage_setup_dialogs_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   target_link_libraries(ka_topographic_source_crs_tests PRIVATE ka_core Qt6::Test)
   set_target_properties(ka_topographic_source_crs_tests PROPERTIES WIN32_EXECUTABLE FALSE)
   add_test(NAME topographic_source_crs COMMAND ka_topographic_source_crs_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
@@ -611,7 +618,7 @@ if(KA_HGIS_BUILD_TESTS)
     set_tests_properties(topographic_archive PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 90)
     set_tests_properties(topographic_sheets PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     set_tests_properties(topographic_source_crs PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
-    set_tests_properties(topographic_shapefile topographic_settings topographic_account_dialog PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 90)
+    set_tests_properties(topographic_shapefile topographic_settings topographic_account_dialog heritage_setup_dialogs PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 90)
     set_tests_properties(topographic_scope PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen;QTWEBENGINEPROCESS_PATH=${OSGEO4W_ROOT}/apps/Qt6/bin/QtWebEngineProcess.exe;QTWEBENGINE_RESOURCES_PATH=${OSGEO4W_ROOT}/apps/Qt6/resources;QTWEBENGINE_LOCALES_PATH=${OSGEO4W_ROOT}/apps/Qt6/translations/qtwebengine_locales" TIMEOUT 90)
     set_tests_properties(topographic_import PROPERTIES ENVIRONMENT "GDAL_DATA=${OSGEO4W_ROOT}/apps/gdal-dev/share/gdal;PATH=${_ka_path_esc};QGIS_PREFIX_PATH=${QGIS_PREFIX_PATH};QT_QPA_PLATFORM=offscreen" TIMEOUT 90)
     set_tests_properties(heritage_flow PROPERTIES ENVIRONMENT "PATH=${_ka_path_esc};QT_QPA_PLATFORM=offscreen" TIMEOUT 60)

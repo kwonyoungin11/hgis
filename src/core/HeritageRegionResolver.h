@@ -45,7 +45,7 @@ public:
   // --- 네트워크 없이 검사할 수 있는 부분 ---
 
   static QUrl buildAddressUrl(const QString& apiKey, double lonDeg, double latDeg);
-  static HeritageRegion parseAddress(const QByteArray& body);
+  static HeritageRegion parseAddress(const QByteArray& body, QString* errorOut = nullptr);
   // "경상북도 안동시 풍천면 ..." → {경상북도, 안동시}
   static HeritageRegion fromAddressText(const QString& text);
   // 조사구역 안쪽의 대표점. 오목한 구역에서도 도형 밖으로 나가지 않는다.

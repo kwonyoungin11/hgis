@@ -210,6 +210,7 @@ private slots:
 
   void configureVworldKey();
   void configureTopographicAccount();
+  bool configureHeritageAccount();
   void updateTopographicDirectory(const QString& surveyPath);
   void rebuildLayouts();
   void onFileBrowserActivated(QListWidgetItem* item);
@@ -232,7 +233,7 @@ private slots:
   // 묻는 것은 시/군 판정 확인 하나뿐이다.
   void fetchNearbyHeritage();
   void ensureHeritageBrowser();
-  void openHeritageBrowserFor(const struct HeritageRegion& region);
+  void openHeritageBrowserFor(const struct HeritageRegion& region, const QString& reason = {});
   HeritageImport::Result importHeritageDataset(HeritageDataset dataset, const QStringList& files);
   void saveHeritageAgreementReceipt(const QDateTime& when, const QString& terms);
   void showSubToolsBasemap();
