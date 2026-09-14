@@ -23,28 +23,28 @@ cd hgis
 - **개발:** 클론 + OSGeo4W(`qgis-dev`) + VS2022 + CMake → `bootstrap-dev-pc.ps1` 또는 `build-all.ps1`
 - **실행만:** 개발 PC에서 `.\scripts\make-portable.ps1` 후 `dist\ka-hgis-portable\` 폴더 전체를 복사 → `start.bat` (OSGeo4W 설치 불필요)
 - 조사 GPKG/SHP는 git에 없음 → 별도 복사
-- 규칙: `AGENTS.md` (Grok Build + QGIS 매뉴얼 연동) · `HANDOFF.md`
+- 규칙: `AGENTS.md` (Codex + QGIS 매뉴얼 연동) · `.codex/NOW.md` · `HANDOFF.md`
 
 ## 환경 (검증된 구성)
-- CMake 4.4+ (`C:\CMake\bin` 권장)
+- CMake (`C:\Program Files\CMake\bin` 또는 PATH, `dev-env.ps1`에서 검색)
 - VS 2022 BuildTools MSVC 19.4x
-- OSGeo4W SSOT: **`C:\OSGeo4W`** (env `OSGEO4W_ROOT` → `C:\OSGeo4W` → `D:\OSGeo4W` 순)
+- 현재 PC: 저장소 **`A:\qgis`**, SDK **`A:\OSGeo4W`** (`OSGEO4W_ROOT` 우선, C:/D:/A: 설치 경로 검색)
   - 패키지: `qgis-dev`, `qt6-devel`, `gdal-dev-devel`, `sqlite3-devel`, `pdal-dev`
 - 산출물: `build\Release\ka-hgis.exe`, `ka_hgis_tests.exe`, `ka_workflow_tests.exe`
 
-## 원클릭 빌드·검증·배포
+## 원클릭 빌드·검증
 ```powershell
-cd <repo>\hgis
-$env:PATH = "C:\CMake\bin;" + $env:PATH
+cd A:\qgis
 .\scripts\build-all.ps1
 ```
-포함: cmake build → ctest → smoke-quit → e2e → `dist\ka-hgis-portable`
+포함: cmake build → ctest → smoke-quit → e2e. 포터블 생성은 별도 요청 시에만 실행한다.
+clangd용 실제 컴파일 DB는 `.\scripts\gen-compile-commands.ps1`로 생성한다.
+Codex의 clangd 탐색·Graft 검색·Archify 구조도 설정과 사용 범위는 [`docs/developer-tools.md`](docs/developer-tools.md)를 따른다.
 
 ## 수동 빌드
 ```powershell
-$env:PATH = "C:\CMake\bin;" + $env:PATH
-.\scripts\dev-env.ps1
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DOSGEO4W_ROOT=C:/OSGeo4W -DKA_HGIS_BUILD_TESTS=ON
+. .\scripts\dev-env.ps1
+cmake --preset vs
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 .\scripts\run-ka-hgis.ps1 --smoke-quit

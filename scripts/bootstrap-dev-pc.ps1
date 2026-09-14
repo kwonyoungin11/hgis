@@ -2,7 +2,7 @@
 # Usage (PowerShell, repo root):
 #   .\scripts\bootstrap-dev-pc.ps1
 #   .\scripts\bootstrap-dev-pc.ps1 -SkipInstall
-#   .\scripts\bootstrap-dev-pc.ps1 -OsgeoRoot D:\OSGeo4W
+#   .\scripts\bootstrap-dev-pc.ps1 -OsgeoRoot A:\OSGeo4W
 param(
   [switch]$SkipInstall,
   [string]$OsgeoRoot = ""
@@ -30,8 +30,8 @@ Write-Ok ("git " + (git --version))
 
 Write-Step "Check CMake"
 $cmakeCandidates = @(
-  "C:\CMake\bin",
   "${env:ProgramFiles}\CMake\bin",
+  "C:\CMake\bin",
   "${env:ProgramFiles(x86)}\CMake\bin"
 )
 foreach ($c in $cmakeCandidates) {
@@ -50,7 +50,7 @@ if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) {
   }
 }
 if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) {
-  Write-Fail "cmake.exe not found. Install CMake (prefer C:\CMake\bin)."
+  Write-Fail "cmake.exe not found. Install CMake or add it to PATH."
   exit 3
 }
 Write-Ok ("cmake " + (cmake --version | Select-Object -First 1))
@@ -108,7 +108,7 @@ Write-Host @"
 
 Next:
   .\scripts\run-ka-hgis.ps1
-  # agent rules: AGENTS.md , HANDOFF.md  (Grok Build)
+  # agent rules: AGENTS.md , .codex/NOW.md , HANDOFF.md
   # daily sync:
   git pull origin main
   .\scripts\build-all.ps1

@@ -3,7 +3,6 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
-$env:PATH = "C:\CMake\bin;" + $env:PATH
 . "$PSScriptRoot\dev-env.ps1"
 
 $exe = Join-Path $Root "build\Release\ka-hgis.exe"
@@ -11,7 +10,7 @@ $tests = Join-Path $Root "build\Release\ka_workflow_tests.exe"
 if (-not (Test-Path $exe) -or -not (Test-Path $tests)) {
   Write-Host "Release binaries missing — configuring/building..."
   if (-not (Test-Path "build\CMakeCache.txt")) {
-    & cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DOSGEO4W_ROOT=C:/OSGeo4W -DKA_HGIS_BUILD_TESTS=ON
+    & cmake --preset vs
     if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
   }
   & cmake --build build --config Release

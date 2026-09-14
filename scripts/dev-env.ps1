@@ -13,6 +13,15 @@ if ($env:OSGEO4W_ROOT -and (Test-Path -LiteralPath $env:OSGEO4W_ROOT)) {
   throw "OSGEO4W_ROOT not found. Set OSGEO4W_ROOT or install OSGeo4W at C:\OSGeo4W (preferred), D:\OSGeo4W, or A:\OSGeo4W."
 }
 $env:OSGEO4W_ROOT = $OSGEO
+# Use installed CMake without requiring a machine-specific shell profile.
+if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) {
+  foreach ($cmakeDir in @("${env:ProgramFiles}\CMake\bin", "C:\CMake\bin")) {
+    if (Test-Path -LiteralPath (Join-Path $cmakeDir "cmake.exe")) {
+      $env:PATH = "$cmakeDir;$env:PATH"
+      break
+    }
+  }
+}
 $qgis = Join-Path $OSGEO "apps\qgis-dev"
 if (-not (Test-Path $qgis)) { throw "qgis-dev missing under $OSGEO" }
 $env:QGIS_PREFIX_PATH = $qgis

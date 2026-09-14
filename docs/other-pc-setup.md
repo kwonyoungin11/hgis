@@ -27,10 +27,10 @@ cd hgis
 |------|------|
 | OS | Windows 10/11 x64 |
 | Git | 설치 |
-| CMake | 4.x (`C:\CMake\bin` 또는 PATH) |
+| CMake | 4.x (`C:\Program Files\CMake\bin`, `C:\CMake\bin` 또는 PATH) |
 | 컴파일러 | **VS 2022** (MSVC C++ 워크로드 / Build Tools) |
-| GIS SDK | **OSGeo4W** `C:\OSGeo4W` (또는 `D:\OSGeo4W` / `$env:OSGEO4W_ROOT`) |
-| Grok LSP (선택) | clangd — `%USERPROFILE%\.grok\tools\clangd\clangd.exe` + 레포 `.clangd` |
+| GIS SDK | **OSGeo4W** `A:\OSGeo4W`, `C:\OSGeo4W`, `D:\OSGeo4W` 또는 `$env:OSGEO4W_ROOT` |
+| C++ 분석 | 설치된 clangd + `.clangd` + 실제 CMake 컴파일 DB |
 
 OSGeo4W 패키지:
 
@@ -75,16 +75,27 @@ OSGeo가 다른 경로면:
 ### 수동 (bootstrap 없이)
 
 ```powershell
-$env:PATH = "C:\CMake\bin;" + $env:PATH
-.\scripts\dev-env.ps1
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DOSGEO4W_ROOT=C:/OSGeo4W -DKA_HGIS_BUILD_TESTS=ON
+. .\scripts\dev-env.ps1
+cmake --preset vs
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 .\scripts\run-ka-hgis.ps1 --smoke-quit
 .\scripts\run-ka-hgis.ps1
 ```
 
-또는 `.\scripts\build-all.ps1` (build + test + smoke + e2e + portable).
+또는 `.\scripts\build-all.ps1` (build + test + smoke + e2e). 포터블 생성은 별도 요청 시에만 실행한다.
+
+### 현재 PC 경로와 clangd
+
+현재 체크아웃은 `A:\qgis`, GIS SDK는 `A:\OSGeo4W`다. 스크립트는 저장소 위치를 기준으로 실행하고 `dev-env.ps1`이 환경 변수 또는 설치 경로에서 SDK와 CMake를 찾는다.
+
+```powershell
+cd A:\qgis
+.\scripts\build-now.ps1
+.\scripts\gen-compile-commands.ps1
+```
+
+일반 앱 빌드는 VS 2022 x64의 `build\Release`를 사용한다. 별도 `build-clangd` Ninja 구성은 컴파일 DB 생성용이다. 생성 스크립트는 VS 개발 환경을 자동으로 읽고 실제 MSVC/Windows SDK include 경로를 `build\compile_commands.json`에 기록하므로 일반 편집기에서도 표준 헤더를 찾을 수 있다. SDK나 소스 구성이 바뀌면 다시 실행한다. 절대 경로가 들어가는 생성 DB는 Git에서 제외한다. `compile_flags.txt`는 최소 C++ fallback이며 전체 GIS 분석에는 생성 DB가 필요하다.
 
 ---
 
@@ -109,7 +120,7 @@ git push origin main
 | 파일 | 내용 |
 |------|------|
 | `AGENTS.md` | 에이전트 라우팅 + **QGIS 매뉴얼 연동 규칙** + 불변식 |
-| `HANDOFF.md` | 제품 SSOT 요약 (Grok Build) |
+| `HANDOFF.md` | 제품 SSOT 요약 (`.codex/NOW.md`와 현재 코드 우선) |
 | `docs/vendor/qgis-manual-3.44/` | PyQGIS Cookbook PDF (git) + User Guide 다운로드 스크립트 |
 | `docs/domain/data-model.md` | 도메인 레이어/필드 |
 | `docs/COMMIT_STATUS.md` | 최근 커밋 장부 |

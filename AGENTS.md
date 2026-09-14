@@ -13,6 +13,15 @@ Reply in the user's language, usually Korean. Code, paths, and identifiers may r
 - Work directly for small and local changes. Use Codex native subagents only for bounded independent research, review, or verification when that improves correctness or throughput.
 - Commit only when the user explicitly asks.
 
+### Verified developer tools
+
+- Setup and evidence: [developer-tools.md](docs/developer-tools.md). Keep the existing source, compiler and tests authoritative.
+- For C++ changes, use the real `build/compile_commands.json`; regenerate with `scripts/gen-compile-commands.ps1` after CMake/SDK changes. Use [clangd navigation](docs/clangd-navigation.md) for a concrete call location's declaration/definition and clangd checks for compiler diagnostics.
+- For unfamiliar code, use project MCP `hgis_graft` when available to narrow candidate files or definitions. Its four tools cover `src/` and `tests/` and refresh the local structural index before retrieval. Confirm parser spans/signatures in source; use `rg` for full text coverage and Qt signal/slot wiring. Small known-file edits do not need a graph query.
+- Do not enable Graft call tracing or claim complete impact coverage: HGIS C++ cross-file edges remain incomplete even with Windows LSP discovery repaired. Do not run upstream `graft init`, install its hooks, or use graph-first instructions over these rules. The pinned adapter omits updater, model-backed indexing and promotional output.
+- For architecture explanations or multi-module refactor reviews, use the installed project [Archify skill](.agents/skills/archify/SKILL.md) via `scripts/archify.ps1`; see [setup](docs/archify-setup.md). Cite current source for every relationship, distinguish planned components, and run validate/deliver/visual-check before handing over a map. A diagram's validation does not validate C++ semantics.
+- Missing tools must not block ordinary source-based work. Use the documented setup if needed; never invent tool results or automatically change the pinned revisions.
+
 ## SSOT
 
 ### Project-local GIS specialization

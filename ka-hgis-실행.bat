@@ -19,8 +19,9 @@ set "OSGEO="
 if defined OSGEO4W_ROOT if exist "%OSGEO4W_ROOT%\apps\qgis-dev\bin\qgis_core.dll" set "OSGEO=%OSGEO4W_ROOT%"
 if not defined OSGEO if exist "C:\OSGeo4W\apps\qgis-dev\bin\qgis_core.dll" set "OSGEO=C:\OSGeo4W"
 if not defined OSGEO if exist "D:\OSGeo4W\apps\qgis-dev\bin\qgis_core.dll" set "OSGEO=D:\OSGeo4W"
+if not defined OSGEO if exist "A:\OSGeo4W\apps\qgis-dev\bin\qgis_core.dll" set "OSGEO=A:\OSGeo4W"
 if not defined OSGEO (
-  echo [유적 HGIS] OSGeo4W qgis-dev 가 없습니다. C:\OSGeo4W 또는 D:\OSGeo4W 가 필요합니다.
+  echo [유적 HGIS] OSGeo4W qgis-dev 가 없습니다. OSGEO4W_ROOT 또는 C:\OSGeo4W, D:\OSGeo4W, A:\OSGeo4W 를 확인하세요.
   pause
   exit /b 2
 )

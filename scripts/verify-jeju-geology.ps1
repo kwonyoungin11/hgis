@@ -1,7 +1,6 @@
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location -LiteralPath $root
-$env:PATH = "C:\CMake\bin;" + $env:PATH
 . (Join-Path $root "scripts\dev-env.ps1")
 $exe = Join-Path $root "build\Release\ka_workflow_tests.exe"
 if (-not (Test-Path -LiteralPath $exe)) { throw "ka_workflow_tests.exe missing" }
